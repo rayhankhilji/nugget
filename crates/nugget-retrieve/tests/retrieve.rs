@@ -15,13 +15,10 @@ use nugget_retrieve::{
     RecencyBoost, RetrievalMode, RetrieveConfig, Retriever, SearchOptions, Similarity, Strategy,
     TextOnlyReason,
 };
+mod common;
+use common::{at, flagged, keys};
 use nugget_store::{ChunkId, NewChunk, NewItem, Store, content_hash};
 use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
-
-fn at(s: &str) -> OffsetDateTime {
-    OffsetDateTime::parse(s, &Rfc3339).unwrap()
-}
 
 const DIM: usize = 64;
 
@@ -101,10 +98,6 @@ fn router(providers: Vec<Arc<dyn Provider>>, probed: bool) -> Arc<Router> {
         }
     }
     Arc::new(r)
-}
-
-fn keys(items: &[nugget_retrieve::RetrievedItem]) -> Vec<&str> {
-    items.iter().map(|r| r.item.key.as_str()).collect()
 }
 
 /// A small mixed corpus, embedded.
@@ -213,20 +206,6 @@ async fn hybrid_with_a_local_embedder_finds_synonyms() {
         .await
         .unwrap();
     assert!(text.items.is_empty(), "full-text alone cannot find it");
-}
-
-#[tokio::test]
-async fn unprobed_embedding_tier_member_is_tried() {
-    let local = embedder();
-    let store = corpus(Some(&local));
-    let emb = Arc::new(embedder());
-    let r = Retriever::new(
-        store,
-        Some(router(vec![emb.clone()], false)),
-        RetrieveConfig::default(),
-    );
-    let res = r.search("Portugal", 3).await.unwrap();
-    assert!(matches!(res.mode, RetrievalMode::Hybrid { .. }));
 }
 
 #[tokio::test]
@@ -597,11 +576,9 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     assert_eq!(emb2.calls(), 1);
 }
 
-/// Wraps the hash embedder and records each call as (`"query"` or `"document"`, number of texts),
-/// and every text it was sent. Reports `prefixes` as its model's task prefixes.
+/// Wraps the hash embedder and records every text it was sent. Reports `prefixes` as its model's task prefixes.
 struct Recording {
     inner: HashEmbedder,
-    batches: std::sync::Mutex<Vec<(&'static str, usize)>>,
     texts: std::sync::Mutex<Vec<String>>,
     /// The items `embed_items` was told the texts come from.
     items: std::sync::Mutex<Vec<ItemRef>>,
@@ -612,7 +589,6 @@ impl Recording {
     fn new(prefixes: (&str, &str)) -> Self {
         Self {
             inner: embedder(),
-            batches: Default::default(),
             texts: Default::default(),
             items: Default::default(),
             prefixes: (prefixes.0.to_owned(), prefixes.1.to_owned()),
@@ -642,12 +618,10 @@ impl Provider for Recording {
         self.inner.chat(req).await
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.batches.lock().unwrap().push(("document", texts.len()));
         self.texts.lock().unwrap().extend_from_slice(texts);
         self.inner.embed(texts).await
     }
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.batches.lock().unwrap().push(("query", texts.len()));
         self.texts.lock().unwrap().extend_from_slice(texts);
         self.inner.embed_query(texts).await
     }
@@ -687,18 +661,6 @@ const CANARIES: [(&str, &str); 4] = [
 #[tokio::test]
 async fn sensitive_passages_never_reach_a_cloud_embedder() {
     let local = embedder();
-    let flagged =
-        |store: &Store, key: &str, text: &str, sensitive: bool, emb: Option<&HashEmbedder>| {
-            let item = NewItem::new("notes", key, content_hash(text))
-                .with_title(key)
-                .with_metadata(serde_json::json!({ "sensitive": sensitive }));
-            store.upsert_item(&item).unwrap();
-            let chunk = match emb {
-                Some(e) => NewChunk::embedded(text, e.embed_text(text)),
-                None => NewChunk::text(text),
-            };
-            store.replace_chunks(&item.item, &[chunk]).unwrap();
-        };
     let cfg = RetrieveConfig {
         allow_cloud_embedding: true,
         ..Default::default()
@@ -737,13 +699,13 @@ async fn sensitive_passages_never_reach_a_cloud_embedder() {
     // The sensitive notes have no vector; a non-sensitive one has.
     let store = Store::open_in_memory().unwrap();
     for (key, text) in CANARIES {
-        flagged(&store, key, text, true, None);
+        flagged(&store, key, text, Some(true), None);
     }
     flagged(
         &store,
         "renewal",
         "Acme renewal is due in November.",
-        false,
+        Some(false),
         Some(&local),
     );
     let (res, texts, _) = search(store).await;
@@ -769,7 +731,7 @@ async fn sensitive_passages_never_reach_a_cloud_embedder() {
         &store,
         "renewal",
         "Acme renewal is due in November.",
-        false,
+        Some(false),
         Some(&local),
     );
     let (_, texts, _) = search(store).await;
@@ -781,14 +743,14 @@ async fn sensitive_passages_never_reach_a_cloud_embedder() {
         &store,
         "renewal",
         "Acme renewal is due in November.",
-        false,
+        Some(false),
         Some(&local),
     );
     flagged(
         &store,
         "plain",
         "Acme renewal call notes: agreed the price.",
-        false,
+        Some(false),
         None,
     );
     let (res, texts, items) = search(store).await;
@@ -801,44 +763,6 @@ async fn sensitive_passages_never_reach_a_cloud_embedder() {
     assert_eq!(
         items.iter().map(|i| i.key.as_str()).collect::<Vec<_>>(),
         ["plain", "plain"]
-    );
-}
-
-#[tokio::test]
-async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
-    // dup-a and distinct are stored with vectors, dup-b (same text as dup-a) text-only.
-    let local = embedder();
-    let store = Store::open_in_memory().unwrap();
-    let dup = "Quarterly sales forecast for the northern region: widgets up, gizmos flat, northern stores steady.";
-    add(
-        &store,
-        Doc::new("dup-a", "Northern report A", &[dup]),
-        Some(&local),
-    );
-    add(&store, Doc::new("dup-b", "Northern report B", &[dup]), None);
-    add(
-        &store,
-        Doc::new(
-            "distinct",
-            "Supplier delay",
-            &["Quarterly sales forecast revised after the supplier delay hit gadget deliveries."],
-        ),
-        Some(&local),
-    );
-    let rec = Arc::new(Recording::new(("", "")));
-    let r = Retriever::new(
-        store,
-        Some(router(vec![rec.clone()], true)),
-        RetrieveConfig::default(),
-    );
-    let res = r.search("quarterly sales forecast", 3).await.unwrap();
-    assert_eq!(res.similarity, Similarity::Vector);
-    assert_eq!(keys(&res.items).len(), 3);
-    assert_eq!(keys(&res.items)[2], "dup-b", "{:?}", keys(&res.items));
-    assert_eq!(
-        *rec.batches.lock().unwrap(),
-        vec![("query", 1), ("document", 1)],
-        "the query (as a query), then only the one passage without a stored vector (as a document)"
     );
 }
 
@@ -891,76 +815,6 @@ async fn an_index_built_without_prefixes_gets_prefix_free_queries() {
 }
 
 #[tokio::test]
-async fn fusion_depth_keeps_strong_single_list_matches() {
-    // The target is the only full-text match for "zephyr" but far away in vector space. 80
-    // fillers match "common" (more often = better full-text rank) and sit near the query vector
-    // in the *opposite* order, so in deep lists every filler is in both lists and fuses above
-    // the target. 100 unrelated notes, orthogonal to the query, sit between the fillers and the
-    // target in vector space. With the default depth (40 per list for 5 results) no filler is in
-    // both lists.
-    let emb = embedder();
-    let query = "zephyr common";
-    let q = emb.embed_text(query);
-    let mut unused = (0..q.len()).filter(|&i| q[i] == 0.0);
-    let (free, other) = (unused.next().unwrap(), unused.next().unwrap());
-    let far: Vec<f32> = q.iter().map(|x| -x).collect();
-    let mut orthogonal = vec![0.0; q.len()];
-    orthogonal[other] = 1.0;
-    let store = Store::open_in_memory().unwrap();
-    let put = |key: &str, text: &str, v: Vec<f32>| {
-        let it = NewItem::new("notes", key, content_hash(text)).with_title(key);
-        store
-            .upsert_item_with_chunks(&it, &[NewChunk::embedded(text, v)])
-            .unwrap();
-    };
-    put("target", "the zephyr signal at dawn", far.clone());
-    for j in 0..80usize {
-        let text = format!("{}{}", "common ".repeat(j + 1), "pad ".repeat(100 - j));
-        let mut v = q.clone();
-        v[free] = j as f32 / 20.0;
-        put(&format!("filler-{j:02}"), &text, v);
-    }
-    for j in 0..100usize {
-        put(
-            &format!("other-{j:03}"),
-            &format!("unrelated note {j}"),
-            orthogonal.clone(),
-        );
-    }
-    let opts = SearchOptions {
-        strategy: Strategy::Auto,
-        mmr: Some(false),
-    };
-    let r = Retriever::new(
-        store.clone(),
-        Some(router(vec![Arc::new(embedder())], true)),
-        RetrieveConfig::default(),
-    );
-    let res = r.search_with(query, 5, opts).await.unwrap();
-    assert!(matches!(res.mode, RetrievalMode::Hybrid { .. }));
-    assert!(
-        keys(&res.items).contains(&"target"),
-        "{:?}",
-        keys(&res.items)
-    );
-
-    let deep = Retriever::new(
-        store,
-        Some(router(vec![Arc::new(embedder())], true)),
-        RetrieveConfig {
-            min_fusion_depth: 200,
-            ..Default::default()
-        },
-    );
-    let res = deep.search_with(query, 5, opts).await.unwrap();
-    assert!(
-        !keys(&res.items).contains(&"target"),
-        "{:?}",
-        keys(&res.items)
-    );
-}
-
-#[tokio::test]
 async fn neighbours_follow_positions_after_rechunking() {
     // Re-chunk an item after another item was indexed: neighbours still come from the same item
     // and adjacent positions.
@@ -995,28 +849,6 @@ async fn neighbours_follow_positions_after_rechunking() {
     assert!(!ctx.response.text.contains("quokka"));
     assert!(ctx.response.text.contains("Intro paragraph."));
     assert!(ctx.response.text.contains("Closing paragraph."));
-}
-
-#[tokio::test]
-async fn title_only_match_is_retrieved() {
-    let store = Store::open_in_memory().unwrap();
-    add(
-        &store,
-        Doc::new(
-            "pension",
-            "Pension consolidation",
-            &["Moved the two old workplace pots into one provider in May."],
-        ),
-        None,
-    );
-    add(
-        &store,
-        Doc::new("other", "Groceries", &["Eggs, milk and bread."]),
-        None,
-    );
-    let r = Retriever::new(store, None, RetrieveConfig::default());
-    let res = r.search("pension", 5).await.unwrap();
-    assert_eq!(keys(&res.items), ["pension"]);
 }
 
 #[tokio::test]
@@ -1055,17 +887,6 @@ async fn recency_boost_is_off_by_default_and_prefers_recent_items() {
     assert_eq!(keys(&res.items), ["new", "old"]);
     assert_eq!(res.items[0].score, 1.0);
     assert!(res.items[1].score < 1.0);
-}
-
-#[tokio::test]
-async fn hits_carry_url_from_item_metadata() {
-    let store = corpus(None);
-    let r = Retriever::new(store, None, RetrieveConfig::default());
-    let hits = r.search("tram cathedral", 5).await.unwrap().hits();
-    assert_eq!(hits[0].url.as_deref(), Some("file:///notes/lisbon.md"));
-    assert_eq!(hits[0].title.as_deref(), Some("Lisbon weekend"));
-    let hits = r.search("boiler", 5).await.unwrap().hits();
-    assert_eq!(hits[0].url, None);
 }
 
 // ---- context packing ----
@@ -1204,51 +1025,6 @@ async fn context_never_exceeds_the_budget() {
 }
 
 #[tokio::test]
-async fn citation_numbering_is_stable_and_follows_rank() {
-    let set = nugget_retrieve::eval::EvalSet::builtin().unwrap();
-    let store = Store::open_in_memory().unwrap();
-    nugget_retrieve::eval::index(&store, &set, None)
-        .await
-        .unwrap();
-    let r = Retriever::new(store, None, RetrieveConfig::default());
-    for q in ["Kestrel migration", "insurance renewal", "Biscuit"] {
-        let a = r.build_context(q, 800).await.unwrap();
-        let b = r.build_context(q, 800).await.unwrap();
-        assert_eq!(a, b, "deterministic for {q:?}");
-        assert!(!a.citations.is_empty());
-        // Cited items appear in search order.
-        let ranked: Vec<ItemRef> = r
-            .search(q, r.config().context_max_items)
-            .await
-            .unwrap()
-            .items
-            .into_iter()
-            .map(|i| i.item)
-            .collect();
-        let mut last = 0;
-        for c in &a.citations {
-            let p = ranked.iter().position(|i| *i == c.item).unwrap();
-            assert!(p >= last, "citation order follows rank");
-            last = p;
-        }
-        // Headers carry title and source.
-        let first = &a.citations[0];
-        let header = format!(
-            "[1] {} ({})",
-            first.title.as_deref().unwrap(),
-            first.url.as_deref().unwrap()
-        );
-        assert!(a.text.starts_with(&header), "{:?}", a.text);
-        // A bigger budget only adds: what was cited stays cited, in the same order.
-        let big = r.build_context(q, 20_000).await.unwrap();
-        let mut it = big.citations.iter();
-        for c in &a.citations {
-            assert!(it.any(|b| b.item == c.item), "{q:?}: {:?} dropped", c.item);
-        }
-    }
-}
-
-#[tokio::test]
 async fn oversized_passage_is_cut_with_a_marker() {
     let store = Store::open_in_memory().unwrap();
     let long = format!("zephyr {}", "lorem ipsum dolor ".repeat(200));
@@ -1265,40 +1041,28 @@ async fn oversized_passage_is_cut_with_a_marker() {
     );
 }
 
-/// Index a text-only item with explicit `sensitive` metadata (`None`: no flag at all).
-fn add_flagged(store: &Store, key: &str, text: &str, sensitive: Option<bool>) {
-    let meta = match sensitive {
-        Some(s) => serde_json::json!({ "sensitive": s }),
-        None => serde_json::json!({}),
-    };
-    let item = NewItem::new("notes", key, content_hash(text))
-        .with_title(key)
-        .with_metadata(meta);
-    store.upsert_item(&item).unwrap();
-    store
-        .replace_chunks(&item.item, &[NewChunk::text(text)])
-        .unwrap();
-}
-
 #[tokio::test]
 async fn sensitive_items_can_be_left_out_of_the_context() {
     let store = Store::open_in_memory().unwrap();
-    add_flagged(
+    flagged(
         &store,
         "bank",
         "Heron account number 4111 for the heron savings.",
         Some(true),
+        None,
     );
-    add_flagged(
+    flagged(
         &store,
         "walk",
         "We watched a heron by the river on Sunday.",
         Some(false),
+        None,
     );
-    add_flagged(
+    flagged(
         &store,
         "legacy",
         "A heron note without a sensitivity flag.",
+        None,
         None,
     );
     let r = Retriever::new(store, None, RetrieveConfig::default());

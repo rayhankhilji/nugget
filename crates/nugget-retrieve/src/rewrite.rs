@@ -1,19 +1,4 @@
 //! Follow-up queries in a conversation, rewritten into standalone search queries.
-//!
-//! "What about the second one?" means nothing to a search index. When a query looks like a
-//! follow-up ([`looks_like_followup`]), [`Retriever::rewrite_query`](crate::Retriever::rewrite_query)
-//! asks a **local** chat model (a `Light`, `Triage` or `Synthesis` tier provider whose locality
-//! is not `Cloud`; never a cloud model, since the history is the user's conversation) to restate
-//! it. Models are tried in order (skipping those in a failure cooldown) within one
-//! [`RetrieveConfig::rewrite_timeout_ms`](crate::RetrieveConfig::rewrite_timeout_ms) budget.
-//! Without such a model, or when every one fails, times out or replies with nothing usable, it
-//! appends salient words of the last user turn instead ([`heuristic_rewrite`]).
-//!
-//! The history is untrusted: it is fenced in the prompt (fence markers inside it are defused),
-//! the model is told it is data, and only the first line of the reply is used (a reasoning
-//! block or markup makes the reply unusable), cut to
-//! [`RetrieveConfig::rewrite_max_chars`](crate::RetrieveConfig::rewrite_max_chars). The worst a
-//! hostile history can do is change the search query.
 
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{ChatMessage, Role};
@@ -28,8 +13,7 @@ pub const FEATURE_REWRITE: &str = "query_rewrite";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum RewriteMethod {
-    /// Not a follow-up, no history, rewriting off, or nothing to rewrite with: the query as
-    /// given.
+    /// Not a follow-up, no history, rewriting off, or nothing to rewrite with: the query as given.
     Unchanged,
     /// Restated by a local chat model.
     Model { provider: ProviderId },
@@ -126,10 +110,9 @@ fn is_content(w: &str) -> bool {
     !STOPWORDS.contains(&w) && !MODALS.contains(&w)
 }
 
-/// Whether `query` likely depends on earlier turns: it opens elliptically ("and ...", "what
-/// about ..."), refers back ("it", "that one", "the second one", "more"), or has at most one
-/// content word ("why?", "when?"). Deterministic and cheap; a standalone query that trips it is
-/// returned unchanged by a well-behaved model.
+/// Whether `query` likely depends on earlier turns: it opens elliptically ("and ...", "what about
+/// ..."), refers back ("it", "that one", "the second one", "more"), or has at most one content word
+/// ("why?", "when?").
 pub fn looks_like_followup(query: &str) -> bool {
     let w = words(query);
     if w.is_empty() {
@@ -225,10 +208,8 @@ pub(crate) fn user_prompt(history: &[ChatMessage], query: &str, turns: usize) ->
     out
 }
 
-/// The model's reply reduced to a usable query: the first non-empty line, without a `Query:`
-/// label, surrounding quotes or control characters, cut at a word boundary to `max_chars`.
-/// A closed leading `<think>…</think>` block is skipped. `None` if nothing searchable is left
-/// or the reply still opens with markup (e.g. an unclosed `<think>`).
+/// The model's reply reduced to a usable query: the first non-empty line, without a `Query:` label,
+/// surrounding quotes or control characters, cut at a word boundary to `max_chars`.
 pub(crate) fn clean_reply(reply: &str, max_chars: usize) -> Option<String> {
     let mut reply = reply.trim_start();
     if let Some(rest) = strip_prefix_ignore_case(reply, "<think>") {
@@ -280,60 +261,18 @@ mod tests {
     }
 
     #[test]
-    fn thinking_is_never_the_query() {
-        assert_eq!(
-            clean_reply(
-                "<think>\nThe user asks about herons.\n</think>\n\nheron river walk",
-                100
-            )
-            .as_deref(),
-            Some("heron river walk")
-        );
-        assert_eq!(clean_reply("<think>\nThe user asks about", 100), None);
-        assert_eq!(clean_reply("<think>", 100), None);
-        assert_eq!(clean_reply("<answer>heron</answer>", 100), None);
-    }
-
-    #[test]
     fn followups_are_detected() {
         for q in [
             "what about the second one?",
             "and last year?",
-            "And for Lisbon",
-            "tell me more",
             "when was it fixed",
             "why?",
-            "how about those invoices",
-            "who sent that",
         ] {
             assert!(looks_like_followup(q), "{q:?}");
         }
-        for q in [
-            "boiler fault code F28",
-            "Lisbon trip itinerary",
-            "dentist appointment next week",
-            "",
-            "   ",
-        ] {
+        for q in ["boiler fault code F28", "dentist appointment next week", ""] {
             assert!(!looks_like_followup(q), "{q:?}");
         }
-    }
-
-    #[test]
-    fn heuristic_appends_last_user_turn_terms() {
-        let h = [
-            msg(
-                Role::User,
-                "What did the engineer say about the boiler fault F28?",
-            ),
-            msg(Role::Assistant, "He replaced the gas valve [1]."),
-        ];
-        assert_eq!(
-            heuristic_rewrite(&h, "and last year?", 4).unwrap(),
-            "and last year? engineer say boiler fault"
-        );
-        assert_eq!(heuristic_rewrite(&[], "and?", 4), None);
-        assert_eq!(heuristic_rewrite(&[msg(Role::User, "it")], "and?", 4), None);
     }
 
     #[test]

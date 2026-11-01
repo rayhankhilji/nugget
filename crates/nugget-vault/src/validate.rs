@@ -1,14 +1,4 @@
 //! Vault validators (also used by `bench knowledge`).
-//!
-//! - every fact line in a facts block cites at least one footnote that is defined on the page,
-//!   unless it is a user-asserted fact marked `(you)`;
-//! - so does every history line (`<!-- h:ID -->`, a superseded claim): history is never `(you)`;
-//! - claim and history markers in the facts block parse (`<!-- c:ID -->`, `<!-- h:ID -->` on a
-//!   bullet);
-//! - footnotes referenced in the merge section (`merged` block) are defined;
-//! - every link in a generated block resolves to a page in the vault;
-//! - entity pages have valid frontmatter (`nugget_id`, `kind`, `aliases`, `identifiers`,
-//!   `updated`; stubs carry `merged_into` or `status`).
 
 use std::collections::HashSet;
 
@@ -93,8 +83,7 @@ impl ValidationReport {
 
 type StatusFn<'a> = &'a dyn Fn(ClaimId) -> Option<ClaimStatus>;
 
-/// Validate one page's text. `link_exists` gets a link target without anchor (e.g.
-/// `Person/Sam (ent_1)`) and says whether that page exists.
+/// Validate one page's text.
 pub fn validate_page(
     rel: &str,
     text: &str,

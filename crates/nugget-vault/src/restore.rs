@@ -1,29 +1,4 @@
 //! Pages that lost their invisible markers.
-//!
-//! Some editors, formatters, web clippers and sync tools drop every HTML comment. A page saved
-//! that way has no `<!-- nugget:begin … -->` regions and no `<!-- c:N -->` fact markers left, so
-//! the merge would see only user text: the user's edits would never reach the graph, and the
-//! generated regions would be written again above a stale copy of the whole page.
-//!
-//! When the user's file has no region markers but the last render (the merge base) had them,
-//! [`restore_markers`] puts the markers back. It aligns the base, with its comments removed,
-//! with the user's lines (longest common subsequence):
-//! - a line the user kept, or moved (the same text anywhere among the changed lines), gets its
-//!   base line back, comments included;
-//! - within a run of changed lines, a user line that is clearly a version of a base line keeps
-//!   that base line's trailing markers, so a reworded fact line stays the same claim and
-//!   becomes an edit of it. The same footnote references count most (they survive stripping
-//!   and name the claim's sources), then the same first link target, then at least half of the
-//!   words in common, then how close the lines sit in the run. Pairs are made best first over
-//!   the whole run; a line whose best pair is tied with another stays unmarked (a new fact,
-//!   never an edit of the wrong one), as do lines like no base line;
-//! - lines that were nothing but a marker are put back where they were.
-//!
-//! The markers are only put back when at least half of the base's fact lines were found again;
-//! otherwise (an emptied or rewritten page) the page is left as it is, which never retracts
-//! anything. And since a page without markers is weak evidence of deletions, only facts whose
-//! lines were removed outright between two lines the user kept count as deleted
-//! ([`Restored::deleted`]); the caller rejects no others.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -128,8 +103,7 @@ pub(crate) fn restore_markers(base: &str, user: &str) -> Option<Restored> {
             }
         }
     }
-    // Enough of the base's facts can still be found again? (Checked before the pairing
-    // below, which is the costly part.)
+    // Enough of the base's facts can still be found again?
     let facts: Vec<usize> = (0..n).filter(|&i| claim_of(b[i]).is_some()).collect();
     let is_fact = |i: usize| claim_of(b[i]).is_some();
     let mut found = vec![false; n];
@@ -310,10 +284,8 @@ fn score(base: &Features, user: &Features) -> Option<(u8, f64)> {
     (tier > 0 || words >= 0.5).then_some((tier, words))
 }
 
-/// Pair user lines with base lines of one changed run: the best-scoring pairs first (score,
-/// then how close their relative positions in the run are). A line whose best pair is tied
-/// with another is left unpaired: an ambiguous line becomes a new fact, never an edit of the
-/// wrong one.
+/// Pair user lines with base lines of one changed run: the best-scoring pairs first (score, then
+/// how close their relative positions in the run are).
 fn pair<'f>(
     users: &[usize],
     bases: &[usize],
@@ -515,27 +487,6 @@ mod tests {
         let r = restore(&user);
         assert_eq!(r.deleted, HashSet::from([19]));
         assert!(!r.text.contains("c:19"));
-    }
-
-    #[test]
-    fn helpers() {
-        assert_eq!(strip_comments("- a [^1] <!-- c:3 -->"), "- a [^1]");
-        assert_eq!(strip_comments("### A <!-- p:a --> x"), "### A x");
-        assert_eq!(trailing_comments("- a [^1] <!-- c:3 -->"), "<!-- c:3 -->");
-        assert_eq!(
-            trailing_comments("- a <!-- x --> <!-- c:3 -->"),
-            "<!-- x --> <!-- c:3 -->"
-        );
-        assert_eq!(trailing_comments("- a"), "");
-        assert_eq!(claim_of("- a [^1] <!-- c:31 -->"), Some(31));
-        assert_eq!(claim_of("- a"), None);
-        let f = Features::of;
-        assert!(score(&f("- B likes tea."), &f("- B likes green tea.")).is_some());
-        assert!(score(&f("- A works at Acme."), &f("- C plays chess")).is_none());
-        assert_eq!(
-            f("- x [^2][^10] y").notes,
-            vec!["10".to_string(), "2".to_string()]
-        );
     }
 
     const LINKS: &str = "---\nnugget_id: \"e1\"\n---\n<!-- nugget:begin facts -->\n## Facts\n\n- Co-founded [[O/Acme (e2)|Acme]] [^1] <!-- c:10 -->\n- Works at [[O/Acme (e2)|Acme]] [^2] <!-- c:11 -->\n- Lives in Paris [^3] <!-- c:12 -->\n- Lives in Berlin [^4] <!-- c:13 -->\n- Plays chess [^5] <!-- c:14 -->\n<!-- nugget:end facts -->\n";

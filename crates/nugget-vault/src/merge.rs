@@ -1,22 +1,4 @@
 //! Three-way merge of the last render (base), the user's file and the new render.
-//!
-//! The merge is structural, by block:
-//! - **User text** (everything outside generated regions, including `## Notes`) is always taken
-//!   from the user's file, in the user's order. Links to renamed pages are rewritten in it.
-//! - **Frontmatter** merges per key. `nugget_id`, `kind`, `updated` and stub keys always come from
-//!   the new render; other generated keys (`aliases`, `identifiers`) take the side that changed,
-//!   and keys the user added are kept.
-//! - **Generated regions** take the new render if the user left them alone, the user's version if
-//!   only the user changed them, and otherwise keep the user's version and report a conflict (the
-//!   caller writes the new render to a sidecar).
-//! - **The facts region** never conflicts: user edits to fact lines were already applied to the
-//!   graph (so the new render contains them), and any other text the user wrote inside it is
-//!   re-anchored after the fact line, history line (or group) it followed. History lines
-//!   (`<!-- h:N -->`, superseded claims) are machine-owned: they always come from the new render,
-//!   so an edited or deleted history line is restored (the graph is not changed; see
-//!   [`edits`](crate::edits)).
-//! - Regions the new render lacks are dropped unless the user changed them, in which case their
-//!   text is kept as user text. Regions the user's file lacks are re-inserted in template order.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -298,9 +280,8 @@ pub(crate) fn history_ids(lines: &[String]) -> HashSet<ClaimId> {
     lines.iter().filter_map(|l| parse_history(l)).collect()
 }
 
-/// [`classify_facts`] for the user's version of a region: a line is history only if its id is
-/// one the last render (`known`) showed as history. Any other `<!-- h:N -->` line is the user's
-/// own text (`Other`), never silently replaced.
+/// [`classify_facts`] for the user's version of a region: a line is history only if its id is one
+/// the last render (`known`) showed as history.
 pub(crate) fn classify_facts_with(
     lines: &[String],
     known: Option<&HashSet<ClaimId>>,
@@ -621,8 +602,7 @@ mod tests {
     }
 
     /// GG5-20: the user adds an alias with YAML spacing; the new render writes the same list
-    /// without the space. Not a conflict, also when the previous pass reported one, and aliases
-    /// learned later still reach the page.
+    /// without the space.
     #[test]
     fn frontmatter_compares_values_not_spelling() {
         let b = v("nugget_id: \"e\"\naliases: [\"Robert Chen\"]");

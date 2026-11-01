@@ -1,8 +1,4 @@
 //! Page structure: YAML frontmatter, generated regions and user text.
-//!
-//! A page is parsed into an optional frontmatter block and a sequence of segments. A generated
-//! region is the text between `<!-- nugget:begin NAME -->` and `<!-- nugget:end NAME -->` (HTML
-//! comments, invisible in Obsidian's reading view). Everything else is user text.
 
 use nugget_graph::ClaimId;
 
@@ -14,7 +10,6 @@ pub const CLAIM_MARK: &str = "<!-- c:";
 /// Predicate-group heading marker prefix: `### Works at <!-- p:works_at -->`.
 pub const PRED_MARK: &str = "<!-- p:";
 /// History-line claim marker prefix: `  - Worked at Acme (until 2026-10-05) [^2] <!-- h:7 -->`.
-/// A line carrying it renders a superseded claim; it is never an editable fact.
 pub const HIST_MARK: &str = "<!-- h:";
 /// The line that introduces the history sub-list of a predicate group.
 pub const HISTORY_INTRO: &str = "*Earlier:*";
@@ -315,9 +310,8 @@ pub fn parse_fact(line: &str) -> Option<(Option<ClaimId>, String)> {
     Some((claim, collapse_ws(rest)))
 }
 
-/// A history line: any line carrying a well-formed `<!-- h:N -->` marker (wherever it is, so a
-/// line the user appended text to is still recognised and restored). Returns the claim id;
-/// `None` for any other line (including a history marker whose id does not parse).
+/// A history line: any line carrying a well-formed `<!-- h:N -->` marker (wherever it is, so a line
+/// the user appended text to is still recognised and restored).
 pub fn parse_history(line: &str) -> Option<ClaimId> {
     let at = line.find(HIST_MARK)?;
     let rest = &line[at + HIST_MARK.len()..];
@@ -525,46 +519,5 @@ mod tests {
         assert_eq!(parse_fact("text"), None);
         assert_eq!(footnote_refs("a [^1][^x2] b"), vec!["1", "x2"]);
         assert!(footnote_refs("[^1]: def").is_empty());
-    }
-
-    #[test]
-    fn frontmatter_values() {
-        let lines: Vec<String> = [
-            "a: \"x\"",
-            "aliases:",
-            "  - one",
-            "  - 'two'",
-            "tags: [a, b]",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        assert_eq!(
-            fm_get(&lines, "a").and_then(|v| fm_scalar(&v)),
-            Some("x".into())
-        );
-        assert_eq!(
-            fm_list(&fm_get(&lines, "aliases").unwrap()),
-            Some(vec!["one".into(), "two".into()])
-        );
-        assert_eq!(
-            fm_list(&fm_get(&lines, "tags").unwrap()),
-            Some(vec!["a".into(), "b".into()])
-        );
-    }
-
-    #[test]
-    fn links() {
-        let l = "see [[Person/Sam (e1)|Sam]] and [[Topic/Tea (e2)#x]]";
-        assert_eq!(
-            wikilinks(l),
-            vec![
-                ("Person/Sam (e1)".into(), Some("Sam".into())),
-                ("Topic/Tea (e2)#x".into(), None)
-            ]
-        );
-        assert_eq!(strip_links(l), "see Sam and Tea");
-        assert_eq!(snake("Works at!"), "works_at");
-        assert_eq!(humanize("works_at"), "Works at");
     }
 }

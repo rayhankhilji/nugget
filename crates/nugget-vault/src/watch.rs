@@ -48,15 +48,13 @@ fn plan(batch: Vec<DebounceEventResult>) -> Option<Work> {
 
 impl Vault {
     /// Watch the vault for user edits until `cancel` fires, applying each edited page to the graph
-    /// (and re-rendering it) after the debounce interval. Our own writes are recognised by their
-    /// fingerprint and ignored. Pages edited while nobody was watching are applied at start.
+    /// (and re-rendering it) after the debounce interval.
     pub async fn watch(self: &Arc<Self>, cancel: CancellationToken) -> Result<()> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DebounceEventResult>();
         let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
             self.config.debounce,
-            // The debouncer thread wakes every tick even when nothing changes; the default tick
-            // (a quarter of the timeout) costs several wakeups a second in an idle daemon. One
-            // tick per timeout delivers an event at most one timeout later than the default.
+            // The debouncer thread wakes every tick even when nothing changes; the default tick (a
+            // quarter of the timeout) costs several wakeups a second in an idle daemon.
             Some(self.config.debounce),
             move |r: DebounceEventResult| {
                 let _ = tx.send(r);

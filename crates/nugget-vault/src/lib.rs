@@ -1,112 +1,13 @@
-//! The Markdown vault: the knowledge graph rendered as one page per entity, with user edits
-//! merged back.
+//! The Markdown vault: the knowledge graph rendered as one page per entity, with user edits merged
+//! back.
 //!
-//! # Layout
-//! ```text
-//! <root>/README.md                          index of pages by kind
-//! <root>/<Kind>/<Name> (<short id>).md      one page per active entity
-//! <root>/.nugget/state.json                 page manifest: path, write fingerprint, conflicts
-//! <root>/.nugget/base/entities/<id>.md      last rendered version of each page (merge base)
-//! <root>/.nugget/base/README.md             last rendered index
-//! <root>/.nugget/conflicts/<page path>      generated version of a page whose edit conflicted
-//! ```
-//!
-//! `.nugget/` holds plain files, like the vault itself. The merge base is the previous *render*
-//! and the manifest holds paths, hashes and ids, so `.nugget/` never contains anything the vault
-//! pages do not already show; it needs no more protection than the vault (which the user owns and
-//! may sync or back up as they like). The encrypted store remains the source of truth.
-//!
-//! # Page format
-//! ```markdown
-//! ---
-//! nugget_id: "ent_000001"
-//! kind: "person"
-//! aliases: ["Sam"]
-//! updated: "2026-10-28T09:00:00Z"
-//! ---
-//! <!-- nugget:begin header -->
-//! # Samantha Lee
-//! <!-- nugget:end header -->
-//!
-//! <!-- nugget:begin facts -->
-//! ## Facts
-//!
-//! ### Works at <!-- p:works_at -->
-//! - Samantha works at [[Organization/Acme (ent_000002)|Acme]]. [^1] <!-- c:7 -->
-//!
-//! *Earlier:*
-//!   - Samantha works at [[Organization/Initech (ent_000003)|Initech]]. (until 2026-09-30) [^2] <!-- h:1 -->
-//! <!-- nugget:end facts -->
-//!
-//! <!-- nugget:begin related -->
-//! ## Related
-//!
-//! - [[Organization/Acme (ent_000002)|Acme]]: works at
-//! <!-- nugget:end related -->
-//!
-//! <!-- nugget:begin merged -->
-//! ## Merged
-//!
-//! Nugget recognised these as the same person and combined them into this page:
-//!
-//! - Sam L: Same email address as Samantha Lee. (because: shared email) [^1]
-//!
-//! If any of these is a different person, you can split it off again in Nugget; … This section is generated: …
-//! <!-- nugget:end merged -->
-//!
-//! <!-- nugget:begin sources -->
-//! [^1]: [Lunch on Friday](https://mail.example/1): "Sam from Acme"
-//! [^2]: [Intro](https://mail.example/0): "Sam (Initech)"
-//! <!-- nugget:end sources -->
-//!
-//! ## Notes
-//! ```
-//! Within each predicate group the current facts (active and user-asserted claims, `<!-- c:ID -->`)
-//! come first, newest validity start first; superseded claims follow under `*Earlier:*` as
-//! indented history lines (`<!-- h:ID -->`) with their validity interval in UTC dates
-//! (`2026-09-01 – 2026-10-05`, `until …`, `from …`, or none when unknown), newest first, each
-//! with its own citations. History lines are read-only (see [`edits`](crate::edits)). Retracted
-//! and rejected claims are not shown, nor is a superseded claim without evidence (a replaced
-//! user assertion) or one the user corrected by editing its fact line: the manifest records
-//! those, and a superseded claim without an end date in a group with a later user assertion is
-//! treated the same (a corrected fact was never true, so it is not history).
-//! The `merged` block appears only when the entity has a merge log
-//! ([`nugget_graph::merge_log`]): the newest 50 merged names with the reason and a footnote for
-//! the item that corroborated it (while the store still has that item). Like every generated
-//! block it is read-only: an edit to it is kept but reported as a conflict, never applied; the
-//! page says so. Splitting is done in the app.
-//! Links name the target page by its path stem, which ends in the entity's stable short id; they
-//! are regenerated on every render, and links in user text are rewritten when a page moves.
-//!
-//! # Sensitive items
-//! The vault is plain text the user may sync, so it never carries what Nugget keeps from
-//! default-scope MCP clients. With sensitivity from [`ItemLookup`] (for the store:
-//! `nugget_retrieve::is_sensitive`, and a missing item counts as sensitive):
-//! - a fact whose evidence all comes from sensitive items is not rendered (no line, no footnote);
-//!   a fact the user wrote (no evidence) always is;
-//! - a footnote never cites or quotes a sensitive item, even for a fact that also has other
-//!   evidence (only that other evidence is cited);
-//! - an entity with at least one active fact or mention, all of them from sensitive items, gets
-//!   no page and no index entry, and other pages name it without a link. The user's edits on
-//!   a page rendered before are applied first; then the page is deleted (with its merge base)
-//!   when the user wrote nothing on it, frontmatter included; otherwise it becomes a "no longer
-//!   in your knowledge graph" stub with a neutral heading that keeps the user's own text and
-//!   frontmatter keys in place, never generated text (its file name still names the entity:
-//!   the user's file is not moved). See `Vault::hide_page`;
-//! - the frontmatter leaves out aliases and identifiers whose recorded sources
-//!   (`GraphStore::entity_provenance`) are all sensitive items; one without recorded sources
-//!   (added by the user in the vault, or by a merge) is shown. The page name and heading are
-//!   the entity's name whatever supplied it.
-//!
-//! Sensitivity is not in the graph's change feed. Pages rendered under older rules are
-//! rendered again in full once (see [`Vault::needs_full_render`]); after that, an item turning
-//! sensitive (or not) changes the pages it supports at their entity's next change, or at the
-//! next [`Vault::render_all`].
-//!
-//! # Merging
-//! See [`merge`](crate::merge) for the three-way merge and [`edits`](crate::edits) for how edits
-//! to fact lines become graph changes. A page is never written from stale input: the user's file
-//! is re-read just before the atomic rename, and the render is retried if it changed.
+//! Layout: `<Kind>/<Name> (<short id>).md` pages, `README.md` index, and `.nugget/` (manifest,
+//! merge bases, conflict sidecars), which holds nothing the pages do not show.
+//! Generated blocks sit between `<!-- nugget:begin/end NAME -->` markers; fact lines end in
+//! `<!-- c:ID -->`, history lines in `<!-- h:ID -->`; text outside the blocks is the user's.
+//! Sensitive items never reach the vault: facts and footnotes from them are dropped, entities
+//! known only from them get no page (a page with user text becomes a neutral stub), and their
+//! aliases and identifiers stay out of the frontmatter.
 
 mod config;
 mod doc;
@@ -148,20 +49,9 @@ const STATE_FILE: &str = ".nugget/state.json";
 const INDEX_PAGE: &str = "README.md";
 const INDEX_BASE: &str = ".nugget/base/README.md";
 /// Page layout and manifest version, kept in the manifest. 1: facts, related, sources. 2: adds
-/// history lines (superseded claims) under each predicate group and the `merged` section. A
-/// vault whose manifest has an older version gets one full re-render on the next
-/// [`Vault::render_changed`]; old pages three-way merge into the new layout like any re-render.
+/// history lines (superseded claims) under each predicate group and the `merged` section.
 const STATE_VERSION: u32 = 2;
-/// Version of the rules deciding what a page shows. A vault last fully rendered under older
-/// rules is re-rendered in full once, at its next [`Vault::render_changed`] (or
-/// [`Vault::render_all`]), so pages, index entries and footnotes written under the old rules do
-/// not wait for their entity to change. History:
-/// - 1: sensitive items (GG5-3): sensitive-only facts and entities left out, frontmatter
-///   aliases and identifiers filtered, pages of sensitive-only entities removed or hidden.
-/// - 2: fact sentences name objects by their current names (GG5-10), addresses and phone
-///   numbers redacted from footnote quotes (GG5-17).
-/// - 3: footnote titles redacted too, and contacts in fullwidth forms or other scripts' digits
-///   (security review 3, ER-6).
+/// Version of the rules deciding what a page shows.
 const RENDER_RULES: u32 = 3;
 /// How often a page is re-rendered when the user keeps changing it under us.
 const WRITE_ATTEMPTS: usize = 3;
@@ -171,8 +61,7 @@ const WRITE_ATTEMPTS: usize = 3;
 pub struct EditReport {
     /// New (or confirmed) user-asserted claims.
     pub asserted: Vec<ClaimId>,
-    /// Claims whose line the user deleted. They are now `rejected` (not `retracted`), so
-    /// re-extracting their sources never brings them back.
+    /// Claims whose line the user deleted.
     pub retracted: Vec<ClaimId>,
     /// Claims superseded because their line was edited.
     pub superseded: Vec<ClaimId>,
@@ -288,8 +177,7 @@ struct Pass {
     edits_applied: BTreeSet<EntityId>,
 }
 
-/// The Markdown vault. All operations are synchronous and serialised on an internal lock; async
-/// callers should use `spawn_blocking` (as [`Vault::watch`] does).
+/// The Markdown vault.
 pub struct Vault {
     fs: SafeFs,
     graph: Arc<dyn GraphStore>,
@@ -330,8 +218,7 @@ fn basename(stem: &str) -> &str {
 }
 
 impl Vault {
-    /// Open (or create) a vault at `root`. The root is created if missing and canonicalised; all
-    /// later file access stays inside it.
+    /// Open (or create) a vault at `root`.
     pub fn new(
         root: impl AsRef<Path>,
         graph: Arc<dyn GraphStore>,
@@ -378,10 +265,8 @@ impl Vault {
         self.fs.root()
     }
 
-    /// Whether the vault holds pages from an older page layout ([`STATE_VERSION`]) that a full
-    /// pass has not re-rendered yet.
-    /// A manifest that was lost or unreadable (so starts at version 0 with no pages) while merge
-    /// bases from an earlier render are on disk counts as old too.
+    /// Whether the vault holds pages from an older page layout ([`STATE_VERSION`]) that a full pass
+    /// has not re-rendered yet.
     fn needs_upgrade(&self, st: &State) -> bool {
         st.version < STATE_VERSION
             && (!st.pages.is_empty() || self.fs.entry_exists(".nugget/base/entities"))
@@ -397,11 +282,7 @@ impl Vault {
         self.run(&mut st, None)
     }
 
-    /// Render the entities changed after `since_seq` in the graph's change feed. The report's
-    /// `high_water` is the mark to pass next time.
-    ///
-    /// When the vault was last fully rendered under older rules (see
-    /// [`Vault::needs_full_render`]), this renders everything instead, once.
+    /// Render the entities changed after `since_seq` in the graph's change feed.
     pub fn render_changed(&self, since_seq: u64) -> Result<RenderReport> {
         let mut st = self.lock();
         let full = st.last_render.is_some() && st.rules < RENDER_RULES;
@@ -428,15 +309,8 @@ impl Vault {
         Ok(report)
     }
 
-    /// Whether this vault has pages rendered under older rules (an upgrade changed what pages
-    /// may show), so the next [`Vault::render_changed`] renders every page. Callers that skip
-    /// `render_changed` when the change feed is empty must call it anyway then. A vault never
-    /// rendered says `false` (there is nothing to fix, and an empty vault directory stays
-    /// empty); its first `render_changed` with changes renders everything anyway.
-    ///
-    /// Sensitivity is not in the change feed: after this one full render, an entity whose
-    /// items turn sensitive (or stop being sensitive) without a graph change is re-rendered
-    /// with the new answer at its next change (or the next full render).
+    /// Whether this vault has pages rendered under older rules (an upgrade changed what pages may
+    /// show), so the next [`Vault::render_changed`] renders every page.
     pub fn needs_full_render(&self) -> bool {
         let st = self.lock();
         (st.last_render.is_some() && st.rules < RENDER_RULES) || self.needs_upgrade(&st)
@@ -513,8 +387,7 @@ impl Vault {
         Ok(self.run(&mut st, Some(ids))?.edits)
     }
 
-    /// Absolute path of the page for `id` (following merges), if it has been rendered. A live
-    /// entity whose page is a stub (it is sensitive-only, see the crate docs) has none.
+    /// Absolute path of the page for `id` (following merges), if it has been rendered.
     pub fn page_path(&self, id: &EntityId) -> Result<Option<PathBuf>> {
         let st = self.lock();
         let live = self.graph.get_entity(id)?.map(|e| e.id);
@@ -531,10 +404,7 @@ impl Vault {
     }
 
     /// Write a free-standing note (not an entity page), e.g. meeting prep, as
-    /// `<folder>/<title>.md`. `folder` and `title` are sanitised like page names; a note never
-    /// replaces an existing file (the name gets ` 2`, ` 3`, ... instead). The write is atomic and
-    /// never follows a symlink. The vault does not track, merge or re-render notes: they are the
-    /// user's from then on. Returns the note's absolute path.
+    /// `<folder>/<title>.md`.
     pub fn write_note(&self, folder: &str, title: &str, text: &str) -> Result<PathBuf> {
         let _st = self.lock();
         let dir = sanitize_name(folder, 80);
@@ -733,9 +603,8 @@ impl Vault {
             }
         }
         // Sensitive-only entities get no page: one rendered before is deleted, or, if the user
-        // wrote notes on it, becomes a hidden stub (the notes under a neutral heading, none of
-        // the generated text). A page merged into one is treated the same way instead of
-        // pointing at it.
+        // wrote notes on it, becomes a hidden stub (the notes under a neutral heading, none of the
+        // generated text).
         let mut shown = Vec::with_capacity(live.len());
         for e in live {
             if !ctx.entity_sensitive(&e.id)? {
@@ -823,11 +692,7 @@ impl Vault {
     }
 
     /// Write page `rel`, whose merge base at `base` becomes `generated` (written afterwards with
-    /// [`Vault::write_base`]). The base is first recorded as pending, with the fingerprint of
-    /// the page text, so a crash (or failed write) between the page and its base never leaves
-    /// the new page next to the old base: that pair would make every generated change since
-    /// the last render look like a user edit, and turn into `user_asserted` or `rejected`
-    /// claims on the next pass.
+    /// [`Vault::write_base`]).
     fn write_page(&self, rel: &str, text: &str, base: &str, generated: &str) -> Result<()> {
         self.fs.write(
             &pending_rel(base),
@@ -1001,8 +866,7 @@ impl Vault {
             let base_text = self.read_base(&id);
             let base = base_text.as_deref().map(Doc::parse);
             // A page saved by an editor that drops HTML comments gets its markers back, so the
-            // user's edits are read as edits (and the page is not duplicated). Only lines
-            // clearly deleted from such a page reject their facts.
+            // user's edits are read as edits (and the page is not duplicated).
             let lost = matches!(
                 (base_text.as_deref(), user_text.as_deref()),
                 (Some(b), Some(u)) if !u.contains(doc::BEGIN) && b.contains(doc::BEGIN)
@@ -1259,18 +1123,7 @@ impl Vault {
     }
 
     /// The page of `id` is to become hidden: its entity (or the one it was merged into) is now
-    /// known only from sensitive items. `user_text` is the page as the user has it.
-    ///
-    /// 1. Markers an editor stripped are restored first (as for a live page). A page whose
-    ///    markers cannot be restored is left exactly as it is (neither rewritten nor deleted):
-    ///    its generated text cannot be told from the user's.
-    /// 2. The user's edits to a live entity's page (fact lines, aliases) are applied to the
-    ///    graph first, as [`Vault::render_page`] does; if the entity is no longer sensitive-only
-    ///    afterwards (an edited fact is the user's own), the page is rendered normally.
-    /// 3. Otherwise the page keeps only what the user wrote outside generated blocks, and their
-    ///    own frontmatter keys, under a neutral heading. It is deleted (with its merge base and
-    ///    conflict copy) only when the user wrote nothing, frontmatter included, there is a
-    ///    merge base to tell, and no source lookup failed in this pass.
+    /// known only from sensitive items.
     fn hide_page(
         &self,
         st: &mut State,
@@ -1335,8 +1188,7 @@ impl Vault {
             }
         }
 
-        // 3. What is the user's: text outside generated blocks, and frontmatter keys the
-        // renderer does not own.
+        // 3.
         let notes = user.as_ref().map(outside_notes).unwrap_or_default();
         let user_fm = user.as_ref().and_then(|u| u.fm.clone()).unwrap_or_default();
         let base_fm = base.as_ref().and_then(|b| b.fm.clone()).unwrap_or_default();

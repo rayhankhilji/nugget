@@ -11,29 +11,21 @@ pub struct SourceInfo {
     pub title: Option<String>,
     /// The item's own url (`metadata.url`), if it has one.
     pub url: Option<String>,
-    /// The item is sensitive (`nugget_retrieve::is_sensitive` for store items). The vault never
-    /// quotes or cites a sensitive item, and leaves out facts and entities supported only by
-    /// sensitive items (see the crate docs).
+    /// The item is sensitive (`nugget_retrieve::is_sensitive` for store items).
     pub sensitive: bool,
 }
 
-/// Resolves evidence items to titles, urls and sensitivity. Implemented for
-/// `nugget_store::Store` (feature `store`, on by default); tests and tools can use [`NoItems`]
-/// or their own map.
+/// Resolves evidence items to titles, urls and sensitivity.
 pub trait ItemLookup: Send + Sync {
     fn source_info(&self, item: &ItemRef) -> Result<Option<SourceInfo>>;
 
     /// Whether an item this lookup does not know (`source_info` is `None`) counts as sensitive.
-    /// `false` by default (a lookup that knows no items); the store says `true`, since an item
-    /// missing from the store cannot be shown to be safe.
     fn missing_is_sensitive(&self) -> bool {
         false
     }
 
-    /// [`ItemLookup::source_info`] for many items at once; items the lookup does not know are
-    /// left out. The default asks one item at a time; the store reads only titles and metadata
-    /// (never item text), a batch per query. The vault calls this once per entity it checks
-    /// and caches the answers for the render pass.
+    /// [`ItemLookup::source_info`] for many items at once; items the lookup does not know are left
+    /// out.
     fn source_infos(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, SourceInfo>> {
         let mut out = HashMap::with_capacity(items.len());
         for item in items {

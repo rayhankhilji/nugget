@@ -1,11 +1,4 @@
 //! Rendering entities, redirect stubs and the index into page documents.
-//!
-//! Output is a pure function of the graph (and the item lookup): claims are grouped by predicate
-//! in byte order; within a group the current facts (active, user-asserted) come first, by
-//! validity start descending (unknown last) then id, followed by the superseded claims under
-//! `*Earlier:*`, by validity end (else start) descending then id. Footnotes are numbered in order
-//! of first use in page order (the merge section's after all facts), and neighbours are
-//! sorted by kind, name and id. Every piece of graph or source text goes through [`inline`].
 
 use std::cell::RefCell;
 use std::cmp::Reverse;
@@ -132,9 +125,8 @@ fn safe_url(url: &str) -> Option<String> {
     Some(out)
 }
 
-/// Zero code points of the Unicode decimal digit blocks other than ASCII that
-/// [`redact_contacts`] reads as digits (Arabic-Indic, the Indic scripts, Thai, Myanmar, Khmer,
-/// fullwidth and others).
+/// Zero code points of the Unicode decimal digit blocks other than ASCII that [`redact_contacts`]
+/// reads as digits (Arabic-Indic, the Indic scripts, Thai, Myanmar, Khmer, fullwidth and others).
 const DIGIT_ZEROS: &[u32] = &[
     0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66,
     0x0DE6, 0x0E50, 0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90,
@@ -159,10 +151,8 @@ fn contact_char(c: char) -> char {
     if c.is_whitespace() { ' ' } else { c }
 }
 
-/// `text` with email addresses replaced by "(address)" and phone numbers (9 or more digits,
-/// with spaces, dots, dashes, parentheses or a leading "+") by "(phone)". Dates, times and
-/// amounts have fewer digits or other separators and are kept. Fullwidth forms and other
-/// scripts' digits count as their ASCII forms (security review 3, ER-6).
+/// `text` with email addresses replaced by "(address)" and phone numbers (9 or more digits, with
+/// spaces, dots, dashes, parentheses or a leading "+") by "(phone)".
 pub(crate) fn redact_contacts(text: &str) -> String {
     // (shown, as classified) pairs.
     let mut chars: Vec<(char, char)> = Vec::new();
@@ -252,14 +242,7 @@ fn find_word(hay: &str, word: &str) -> Option<usize> {
     None
 }
 
-/// Whether a superseded claim is shown under `*Earlier:*`. Not when:
-/// - it has no evidence (a replaced user assertion: nothing to cite);
-/// - the user corrected it: the vault records claims superseded by an edit of their fact line
-///   (`corrected`), and, should that record be lost, a superseded claim without an end date
-///   whose group holds a user assertion made at or after the claim last changed is taken to be
-///   such a correction (extraction's own supersessions set `valid_to` when it is known).
-///
-/// A corrected fact was wrong, not true once, so it is not history.
+/// Whether a superseded claim is shown under `*Earlier:*`.
 fn shown_as_history(c: &Claim, current: &[&Claim], corrected: &BTreeSet<ClaimId>) -> bool {
     if c.evidence.is_empty() || corrected.contains(&c.id) {
         return false;
@@ -404,8 +387,7 @@ impl<'a> Ctx<'a> {
         self.lookup_failed.get()
     }
 
-    /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
-    /// the lookup says so ([`ItemLookup::missing_is_sensitive`]); a failed lookup always does.
+    /// Whether the item is sensitive.
     pub fn item_sensitive(&self, item: &ItemRef) -> bool {
         self.source(item).sensitive
     }
@@ -416,9 +398,8 @@ impl<'a> Ctx<'a> {
         !c.evidence.is_empty() && c.evidence.iter().all(|ev| self.item_sensitive(&ev.item))
     }
 
-    /// An entity is sensitive-only when it has at least one active claim or mention, every
-    /// active claim (as subject or object) is sensitive-only and every mention is from a
-    /// sensitive item. Such an entity gets no page.
+    /// An entity is sensitive-only when it has at least one active claim or mention, every active
+    /// claim (as subject or object) is sensitive-only and every mention is from a sensitive item.
     pub fn entity_sensitive(&self, id: &EntityId) -> Result<bool> {
         if let Some(s) = self.sensitive.borrow().get(id) {
             return Ok(*s);
@@ -443,9 +424,7 @@ impl<'a> Ctx<'a> {
     }
 
     /// The aliases and identifiers the page may show: all but those whose recorded provenance
-    /// ([`GraphStore::entity_provenance`]) is only sensitive items. A detail without recorded
-    /// provenance (one the user added in the vault, or from a merge) is shown: the page is the
-    /// user's own file.
+    /// ([`GraphStore::entity_provenance`]) is only sensitive items.
     fn shown_details(&self, e: &Entity) -> Result<(Vec<String>, Vec<Identifier>)> {
         let Some(p) = self.graph.entity_provenance(&e.id)? else {
             return Ok((e.aliases.clone(), e.identifiers.clone()));
@@ -485,8 +464,7 @@ impl<'a> Ctx<'a> {
         Ok((aliases, identifiers))
     }
 
-    /// What the item store says about `item` (fetched once per pass). An item it does not know
-    /// counts as sensitive when the lookup says so; a failed lookup always does.
+    /// What the item store says about `item` (fetched once per pass).
     fn source(&self, item: &ItemRef) -> SourceInfo {
         if let Some(s) = self.sources.borrow().get(item) {
             return s.clone();
@@ -522,8 +500,7 @@ impl<'a> Ctx<'a> {
         Ok(fm)
     }
 
-    /// Render an entity page. `corrected` holds claims the user replaced by editing their fact
-    /// line in the vault; they are never shown as history.
+    /// Render an entity page.
     pub fn render_entity(
         &self,
         e: &Entity,
@@ -537,10 +514,8 @@ impl<'a> Ctx<'a> {
                 .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
         );
 
-        // ---- facts ----
-        // Per predicate: live facts (active, user-asserted) and history (superseded claims).
-        // Facts supported only by sensitive items are left out, current or history (and so
-        // are their footnotes).
+        // ---- facts ---- Per predicate: live facts (active, user-asserted) and history (superseded
+        // claims).
         let claims: Vec<&Claim> = claims
             .iter()
             .filter(|c| {
@@ -734,10 +709,9 @@ impl<'a> Ctx<'a> {
             ClaimObject::Entity(o) if *o != e.id => self.entity(o)?,
             _ => None,
         };
-        // A sentence written at extraction goes stale when its object is merged, split or
-        // renamed (GG5-10: "works at Tessellate" after Tessellate was merged into Lumenfold,
-        // "corresponded with Sam Patel" linking another Sam). Unless the user wrote it, it is
-        // re-generated from the triple when it no longer names the object by its current name.
+        // A sentence written at extraction goes stale when its object is merged, split or renamed
+        // (GG5-10: "works at Tessellate" after Tessellate was merged into Lumenfold, "corresponded
+        // with Sam Patel" linking another Sam).
         if !body.is_empty()
             && c.status != ClaimStatus::UserAsserted
             && object
@@ -912,9 +886,7 @@ impl<'a> Ctx<'a> {
         line
     }
 
-    /// Stub for a page whose entity was merged away (`target`) or no longer exists. With
-    /// `hide_name` (the entity is now known only from sensitive items) the stub does not name
-    /// it: the heading is neutral.
+    /// Stub for a page whose entity was merged away (`target`) or no longer exists.
     pub fn render_stub(
         &self,
         id: &EntityId,
