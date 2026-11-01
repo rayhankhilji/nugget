@@ -1,17 +1,13 @@
 # config.toml
 
-`nuggetd` reads `config.toml` from the config directory (see [Data directory](data-dir.md)) once, at
-startup. Restart the daemon after editing it. If the file does not exist, the daemon writes a commented,
-local-first default there (readable only by you) and says so.
+`nuggetd` reads `config.toml` from the config directory ([Data directory](data-dir.md)) once, at
+startup; restart after editing. If it is missing, a commented local-first default is written.
 
-**Never put secrets in this file.** API keys and credential-bearing headers must be references:
-`env:VAR` (an environment variable of the daemon) or `keychain:NAME` (an OS keychain entry, service
-`dev.nugget.Nugget`, account `provider:NAME`). A plaintext key is rejected.
-
-**Validation.** Unknown sections and unknown keys in `[models]`, `[models.selected]`, `[runtime]`,
-`[mcp]` and `[[providers]]` are errors, as are out-of-range values, duplicate provider ids and
-malformed model ids. Unknown keys inside `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are
-currently **ignored**, not rejected, so check their spelling against this page.
+- **No secrets here.** API keys and credential headers must be `env:VAR` or `keychain:NAME` (service
+  `dev.nugget.Nugget`, account `provider:NAME`); a plaintext key is rejected.
+- **Validation.** Unknown keys in `[models]`, `[models.selected]`, `[runtime]`, `[mcp]` and
+  `[[providers]]` are errors, as are out-of-range values and duplicate provider ids. Unknown keys in
+  `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are **ignored**, so check spelling.
 
 <!-- check-refs: config.sections -->
 | Section | What it configures |
@@ -31,7 +27,7 @@ currently **ignored**, not rejected, so check their spelling against this page.
 | `proactive` | Proactive cards and the morning brief. Feature section |
 | `plugins` | WebAssembly plugins. Feature section |
 
-Every key below is optional; an empty file is valid and gives the defaults (with no providers).
+Every key is optional; an empty file gives the defaults (no providers).
 
 ## `[models]`
 
@@ -57,9 +53,8 @@ The local model chosen for each tier, by manifest id (as listed on the Models pa
 
 ## `[runtime]`
 
-The on-device runtime: `nuggetd` runs installed models with a pinned, verified `llama-server` on
-`127.0.0.1`, as the providers `local-chat` (triage, light, synthesis) and `local-embedding`
-(embedding), plus `local-rerank` (rerank) when `rerank_model` is set.
+Installed models run in a pinned `llama-server` on `127.0.0.1` as providers `local-chat`,
+`local-embedding` and (with `rerank_model`) `local-rerank`.
 
 <!-- check-refs: config.runtime -->
 | Key | Type | Default | Description |
@@ -71,8 +66,6 @@ The on-device runtime: `nuggetd` runs installed models with a pinned, verified `
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
-
-Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations are in milliseconds.
 
 <!-- check-refs: config.ingest -->
 | Key | Type | Default | Description |
@@ -111,8 +104,6 @@ Tunables for the indexing pipeline (`nugget_ingest::IngestConfig`). Durations ar
 | `freshness_window` | integer | `1024` | Samples kept for the freshness p50 and p95 |
 
 ## `[retrieve]`
-
-Search and context packing (`nugget_retrieve::RetrieveConfig`).
 
 <!-- check-refs: config.retrieve -->
 | Key | Type | Default | Description |
@@ -153,9 +144,8 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 
 ### `[retrieve.recency]`
 
-Off unless present. Multiplies an item's relevance by `1 + weight × 0.5^(age_days / half_life_days)`,
-where the age comes from the item's modification time. When the table is present, both keys are
-required.
+Off unless present; then both keys are required. Relevance is multiplied by
+`1 + weight × 0.5^(age_days / half_life_days)`.
 
 <!-- check-refs: config.retrieve.recency -->
 | Key | Type | Default when used | Description |
@@ -165,10 +155,8 @@ required.
 
 ### `[retrieve.reranker]`
 
-Off unless present. Search sends its top candidates to a reranking server you run, for example
-`llama-server --reranking -m <reranker>.gguf --port 8013`, at `<base_url>/v1/rerank`. Only servers
-on this device or your network are accepted unless `allow_cloud = true` (https only); requests
-that leave the device are recorded in the egress ledger.
+Off unless present: a reranking server you run (e.g. `llama-server --reranking`), called at
+`<base_url>/v1/rerank`. Only local or LAN servers unless `allow_cloud = true` (https only).
 
 ```toml
 [retrieve.reranker]
@@ -177,16 +165,12 @@ base_url = "http://127.0.0.1:8013"   # required
 # timeout_ms = 2000
 ```
 
-Without it, search uses the local runtime's reranker when `[runtime] rerank_model` is set, and
-otherwise does not rerank. A reranker that is not running is skipped at once.
+Without it, search uses `[runtime] rerank_model` if set, else no reranker.
 
 ## `[knowledge]`
 
-The knowledge graph: people, organisations, projects and facts extracted from your indexed items,
-every fact cited. Extraction runs after indexing settles, periodically and at start. Deterministic
-extractors (mail headers, calendar attendees, contacts) always run; the LLM extractor uses a
-synthesis-tier model on this device or your network, unless you list sources in `llm.cloud_sources`.
-Sensitive items never go to a cloud model.
+Deterministic extractors always run; the LLM extractor uses a local or LAN synthesis-tier model
+unless sources are listed in `llm.cloud_sources`. Sensitive items never go to a cloud model.
 
 <!-- check-refs: config.knowledge -->
 | Key | Type | Default | Description |
@@ -233,10 +217,9 @@ Sensitive items never go to a cloud model.
 | `max_claims_per_request` | integer | `48` | Claims a provider may return per request (the schema's `maxItems`) |
 | `local` | table | see below | Tighter per-request limits when the item's first-choice provider is local |
 
-`[knowledge.llm.local]` (each applies as the smaller of it and the general limit): `max_input_chars`
+`[knowledge.llm.local]` (the smaller of it and the general limit applies): `max_input_chars`
 (`4000`), `max_chunks_per_request` (`2`), `max_requests_per_item` (`4`), `max_output_tokens`
-(`1024`), `max_entities_per_request` (`12`), `max_claims_per_request` (`10`). A small model on a
-CPU writes a few tokens per second, so local requests stay short and finish inside the timeout.
+(`1024`), `max_entities_per_request` (`12`), `max_claims_per_request` (`10`).
 
 ### `[knowledge.resolution]`
 
@@ -254,8 +237,7 @@ Both steps are off by default and only ever use local models.
 
 ## `[vault]`
 
-One Markdown page per entity, with footnote citations, under `<Kind>/<Name> (<id>).md`. Your edits
-are merged back: changed or added fact lines become facts you asserted. See
+One Markdown page per entity; your edits merge back as facts you asserted. See
 [Data directory](data-dir.md#the-vault).
 
 <!-- check-refs: config.vault -->
@@ -269,8 +251,7 @@ are merged back: changed or added fact lines become facts you asserted. See
 
 ## `[mcp]`
 
-The MCP server that lets AI apps read your knowledge with a per-app token. See
-[Connecting AI apps over MCP](../guide/mcp.md).
+See [Connecting AI apps over MCP](../guide/mcp.md).
 
 <!-- check-refs: config.mcp -->
 | Key | Type | Default | Description |
@@ -285,9 +266,8 @@ The MCP server that lets AI apps read your knowledge with a per-app token. See
 
 ## `[[providers]]`
 
-One table per model provider. Tiers are tried in this order: on-device and local-network providers in
-file order, then the managed runtime, then cloud providers in file order. See
-[Local or bring-your-own-key models](../guide/models.md).
+One table per provider. Order tried: on-device and LAN providers (file order), the managed
+runtime, then cloud providers (file order). See [Models](../guide/models.md).
 
 <!-- check-refs: config.providers -->
 | Key | Type | Default | Description |
@@ -327,7 +307,7 @@ file order, then the managed runtime, then cloud providers in file order. See
 | Private ranges (`10/8`, `172.16/12`, `192.168/16`, link-local, ...) | `local_network` | Recorded |
 | Anything else | `cloud` | Recorded |
 
-Host names are resolved once, when the provider is built, and the result is pinned.
+Host names are resolved once, when the provider is built, and pinned.
 
 ## Feature sections
 

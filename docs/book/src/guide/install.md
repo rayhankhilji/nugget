@@ -22,20 +22,12 @@ Linux packages need glibc 2.35+, WebKitGTK 4.1, GTK 3 and libayatana-appindicato
 `.rpm` pull these in). On Wayland the [Double Tap](double-tap.md) global shortcut does not fire yet;
 start it from the tray or the app.
 
-A release also carries update payloads and their `.sig` signatures, the update feed `latest.json`,
-`SHA256SUMS`, CycloneDX SBOMs, and a GitHub build provenance attestation for every file.
-
 ## Verify a download
 
-```sh
-sha256sum -c --ignore-missing SHA256SUMS                          # Linux
-grep ' Nugget_<v>_aarch64.dmg$' SHA256SUMS | shasum -a 256 -c     # macOS
-```
-
-On Windows, compare `(Get-FileHash .\Nugget_<v>_x64-setup.exe).Hash.ToLower()` with the file's line.
-
-Checksums only catch a damaged download. To check the file was built by this repository's release
-workflow, verify its provenance with the [GitHub CLI](https://cli.github.com/) (needs `gh auth login`):
+A release also carries `SHA256SUMS`, SBOMs, update payloads and a GitHub build provenance
+attestation for every file. `sha256sum -c --ignore-missing SHA256SUMS` (or `shasum -a 256` on macOS)
+catches a damaged download. To check a file was built by this repository's release workflow, use the
+[GitHub CLI](https://cli.github.com/) (after `gh auth login`):
 
 ```sh
 gh attestation verify Nugget_<v>_aarch64.dmg -R rayhankhilji/nugget \
@@ -50,48 +42,29 @@ gh attestation verify Nugget_<v>_aarch64.dmg -R rayhankhilji/nugget \
   first time.
 - **Windows:** run the `setup.exe`, or the `.msi` for a machine-wide install. WebView2 is downloaded
   if missing.
-- **Linux:**
-
-  ```sh
-  chmod +x Nugget_<v>_amd64.AppImage && ./Nugget_<v>_amd64.AppImage   # AppImage
-  sudo apt install ./Nugget_<v>_amd64.deb                              # Debian, Ubuntu
-  sudo dnf install ./Nugget-<v>-1.x86_64.rpm                           # Fedora (or zypper)
-  ```
-
-  There is no package repository and the packages aren't GPG-signed; updates come through the
-  [in-app updater](#updates). Double Tap and the agent need AT-SPI accessibility enabled.
+- **Linux:** `chmod +x` and run the AppImage, or `sudo apt install ./Nugget_<v>_amd64.deb` (or
+  `dnf`/`zypper install` the `.rpm`). There is no package repository and packages aren't GPG-signed;
+  updates come through the [in-app updater](#updates). Double Tap and the agent need AT-SPI enabled.
 
 The first launch opens a short setup; see [First run](first-run.md).
 
 ## Unsigned builds
 
-Until the project has signing certificates, installers are unsigned (macOS: ad-hoc signed, not
-notarised), so the OS warns:
+Installers are unsigned until the project has signing certificates, so the OS warns:
 
-- **macOS:** Control-click the app → **Open** → **Open**. On macOS 15 and later, try to open it once,
-  then click **Open Anyway** in **System Settings → Privacy & Security**. If macOS says the app *is
-  damaged*, use **Open Anyway** or clear the download flag:
-
-  ```sh
-  xattr -dr com.apple.quarantine /Applications/Nugget.app
-  ```
-
+- **macOS:** Control-click the app → **Open** → **Open**. On macOS 15+, try to open it once, then
+  click **Open Anyway** in **System Settings → Privacy & Security**. If macOS says the app *is
+  damaged*, use **Open Anyway** or run `xattr -dr com.apple.quarantine /Applications/Nugget.app`.
   macOS may ask for Accessibility again after you install a different build.
-- **Windows:** SmartScreen: **More info → Run anyway**. Even signed, SmartScreen may warn for a new
-  publisher.
-- **Linux:** no warning.
+- **Windows:** SmartScreen: **More info → Run anyway**. Linux shows no warning.
 
 ### Dry-run installers
 
-Open [Actions → Release](https://github.com/rayhankhilji/nugget/actions/workflows/release.yml), pick a
-recent successful run, and download `bundle-<target>` (for example `bundle-aarch64-apple-darwin`)
-from **Artifacts** while signed in to GitHub. Artifacts are kept 14 days. Or:
-
-```sh
-gh run download <run-id> -R rayhankhilji/nugget -n bundle-x86_64-unknown-linux-gnu
-```
-
-Dry-run builds have no checksums, attestations or updater; install a newer one over the old one.
+From a recent successful run of
+[Actions → Release](https://github.com/rayhankhilji/nugget/actions/workflows/release.yml), download
+`bundle-<target>` (for example `bundle-aarch64-apple-darwin`) from **Artifacts** while signed in to
+GitHub (kept 14 days), or run `gh run download <run-id> -R rayhankhilji/nugget -n bundle-<target>`.
+They have no checksums, attestations or updater; install a newer one over the old one.
 
 ## Start at login
 
@@ -113,12 +86,10 @@ The **Updates** card on the Status page (also **Updates…** in the tray menu):
 | Channel | Not chosen (nothing is checked) | **Stable**: releases. **Beta**: also prereleases. **Off**: never check. |
 | Download updates automatically and install them when I quit Nugget | Off | Off: notify only; nothing downloads until you click **Install … and restart**. |
 
-Setup asks which channel you want. Once chosen, the app checks a minute after launch, then daily,
-or on **Check now**. A check fetches only the signed feed from GitHub and sends no identifiers; checks
-and downloads appear in the [egress ledger](privacy.md#the-egress-ledger) (`update_check`,
-`update_download`). Feed and update signatures are verified against a key built into the app, and
-older versions are never offered. A build without the project's updater key (a dry run or your own
-build) can't update itself.
+Setup asks for a channel. Then the app checks a minute after launch, daily, and on **Check now**,
+fetching only the signed feed from GitHub with no identifiers (logged in the
+[egress ledger](privacy.md#the-egress-ledger) as `update_check` and `update_download`). Signatures are
+verified against a key built into the app. Dry runs and your own builds can't update themselves.
 
 ## Uninstall
 
@@ -152,36 +123,24 @@ Windows `setup.exe` uninstaller offers to remove it; elsewhere, see [Uninstall](
 ### Build and run
 
 ```sh
-git clone https://github.com/rayhankhilji/nugget
-cd nugget
+git clone https://github.com/rayhankhilji/nugget && cd nugget
+export NUGGET_TRUST_DEV_MANIFEST_KEY=1   # optional, see below
 cargo build --release -p nuggetd
 # Desktop app (optional)
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
 cargo build --release -p nugget-desktop
 ```
 
-Both binaries land in `target/release/`. The app looks for `nuggetd` next to itself, then on `PATH`.
-Run `./target/release/nugget-desktop` (it starts the daemon), or run `./target/release/nuggetd` in the
+Both binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
+`./target/release/nugget-desktop` (it starts the daemon), or `./target/release/nuggetd` in the
 foreground and check it with `./target/release/nuggetd status`.
 
-**Model downloads.** Managed local models come only from a manifest signed with the release key,
-which your build doesn't trust, so it offers no model downloads (Ollama, LM Studio and cloud keys
-still work). To trust the repository's development key (debug builds always do):
+Managed model downloads need a manifest signed with a key the build trusts. Release builds trust only
+the release key, so without `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (which trusts the repository's
+development key; debug builds always do) your build offers no model downloads. Ollama, LM Studio and
+cloud keys work either way.
 
-```sh
-NUGGET_TRUST_DEV_MANIFEST_KEY=1 cargo build --release -p nuggetd
-```
-
-### Building the installers yourself
-
-From the repository root (on Linux, also install `rpm` for `.rpm` output):
-
-```sh
-packaging/scripts/stage-sidecar.sh
-cd apps/desktop
-pnpm install --frozen-lockfile
-pnpm tauri build --config src-tauri/tauri.bundle.conf.json
-```
-
-Export `NUGGET_TRUST_DEV_MANIFEST_KEY=1` first for model downloads. Installers land in
-`target/release/bundle/`, unsigned and without an updater key.
+To build the installers (unsigned, no updater key; on Linux also install `rpm`), run
+`packaging/scripts/stage-sidecar.sh`, then in `apps/desktop`:
+`pnpm install --frozen-lockfile && pnpm tauri build --config src-tauri/tauri.bundle.conf.json`.
+Output goes to `target/release/bundle/`.

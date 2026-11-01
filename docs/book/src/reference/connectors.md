@@ -1,11 +1,8 @@
 # Connector settings
 
-The `settings` object of each source kind, as sent in `sources.add` and `sources.update` and returned in
-`SourceInfo`. Unknown keys are rejected. Settings never contain secrets: passwords, API tokens and
-OAuth client secrets go through `sources.secret.set` and live in the OS keychain.
-
-Each connector also publishes its settings as a JSON Schema (draft 2020-12), which the desktop app
-uses to build its forms.
+The `settings` object of each source kind (`sources.add`, `sources.update`, `SourceInfo`). Unknown
+keys are rejected. Secrets never go in settings: use `sources.secret.set` (OS keychain, service
+`dev.nugget.Nugget`; deleted with the source).
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |
@@ -17,9 +14,6 @@ uses to build its forms.
 | `gdrive` | Google Drive | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
 | `imap` | IMAP mail | password | `password:<source id>` |
 | `caldav` | CalDAV calendar | password | `password:<source id>` |
-
-All accounts are under the keychain service `dev.nugget.Nugget`, and are deleted when the source is
-removed.
 
 ## `files`
 
@@ -35,9 +29,8 @@ removed.
 | `debounce_ms` | integer, 20 to 10000 | `300` | Watcher debounce: bursts of events on one path within this window are coalesced |
 | `rescan_interval_secs` | integer | `3600` (`900` on Windows) | While watching, run a full reconcile this often as a safety net; `0` never |
 
-Item keys are `<root index>:<relative path>` with `/` separators on every OS, for example
-`0:Projects/plan.md`. Item versions are the modification time and size, and item URLs are `file://`
-URLs. `.gitignore` and `.nuggetignore` files are honoured.
+Item keys are `<root index>:<relative path>` (e.g. `0:Projects/plan.md`); `.gitignore` and
+`.nuggetignore` are honoured.
 
 ## `obsidian`
 
@@ -53,13 +46,11 @@ URLs. `.gitignore` and `.nuggetignore` files are honoured.
 | `debounce_ms` | integer, 20 to 10000 | `300` | As for `files` |
 | `rescan_interval_secs` | integer | `3600` (`900` on Windows) | As for `files` |
 
-Item URLs are `obsidian://open?vault=…&file=…` links; the `file://` URL is in the item's
-`metadata.file_url`.
+Item URLs are `obsidian://open?vault=…&file=…` links.
 
 ## `gmail`
 
-Scope `gmail.readonly`. See [Gmail, Google Calendar and Google Drive](../guide/sources-google.md) for creating the
-OAuth client.
+Scope `gmail.readonly`. OAuth client setup: [Google sources](../guide/sources-google.md).
 
 <!-- check-refs: connector.gmail -->
 | Key | Type | Default | Description |
@@ -71,8 +62,7 @@ OAuth client.
 | `include_spam_trash` | bool | `false` | Also index Spam and Trash |
 | `allow_modify` | bool | `false` | Let approved proactive actions archive threads (remove the `INBOX` label). Asks for the `gmail.modify` scope, so reconnect the account after turning it on |
 
-Sync: newest-first backfill, then `history.list` deltas every 60 s. An expired history id triggers a
-bounded resync.
+Sync: newest-first backfill, then `history.list` deltas every 60 s.
 
 ## `gcal`
 
@@ -88,13 +78,11 @@ Scope `calendar.readonly`.
 | `past_days` | integer, 0 to 3650 | `365` | Days of past events |
 | `future_days` | integer, 0 to 3650 | `365` | Days of future events |
 
-Sync: `events.list` with recurring events expanded, then `syncToken` deltas every 5 minutes. A
-`410 Gone` triggers a full resync. Cancelled events become deletes.
+Sync: `events.list` (recurrences expanded), then `syncToken` deltas every 5 minutes.
 
 ## `gdrive`
 
-Scope `drive.readonly` (the narrowest scope that can read and export file content). See
-[Google Drive](../guide/sources-google.md#google-drive) for what is indexed.
+Scope `drive.readonly`. See [Google Drive](../guide/sources-google.md#google-drive).
 
 <!-- check-refs: connector.gdrive -->
 | Key | Type | Default | Description |
@@ -106,15 +94,9 @@ Scope `drive.readonly` (the narrowest scope that can read and export file conten
 | `include_shared_drives` | bool | `false` | Also index files in shared drives you are a member of |
 | `max_file_mb` | integer, 1 to 200 | `25` | Largest file downloaded or exported. Bigger files are indexed as a stub with their name and a "Not indexed" reason |
 
-Sync: `changes.getStartPageToken`, then a paged `files.list` of everything in scope (checkpointed, so
-a restart resumes it), then `changes.list` deltas every 5 minutes. A token Google no longer accepts
-(`404`, `410`) triggers a reconciling full listing. Trashed, deleted and no-longer-shared files become
-deletes; renames and moves are updates. Google Docs are exported as Markdown (plain text fallback),
-Sheets as CSV per sheet through the Sheets API (first sheet only through Drive's export when that API
-is off), Slides as text per slide with speaker notes through the Slides API (plain export fallback).
-PDF, `docx`, `xlsx`, `pptx` and text formats go through the normal extraction; anything else, and files
-over `max_file_mb`, become stubs with `metadata.skipped` set to the reason. Item keys are Drive file
-ids, item URLs are the file's `webViewLink`, and every request is metered as `sync:gdrive`.
+Sync: a checkpointed `files.list`, then `changes.list` deltas every 5 minutes. Docs export as
+Markdown, Sheets as CSV, Slides as text with notes; other unsupported files become stubs with
+`metadata.skipped`.
 
 ## `imap`
 
@@ -129,9 +111,8 @@ ids, item URLs are the file's `webViewLink`, and every request is metered as `sy
 | `window_days` | integer, 0 to 36500 | `365` | Index mail from the last N days; `0` for all |
 | `max_message_mb` | integer, 1 to 512 | `25` | Larger messages are indexed by their headers only |
 
-Sync: per mailbox, `UIDVALIDITY` and UIDs, with CONDSTORE and QRESYNC when the server supports them.
-Mailboxes are opened read-only (`EXAMINE`, `BODY.PEEK`). A changed `UIDVALIDITY` re-indexes that
-mailbox. Item keys are `<mailbox>/<uidvalidity>/<uid>`.
+Sync: UIDs per mailbox with CONDSTORE/QRESYNC when available; mailboxes are opened read-only. Item
+keys are `<mailbox>/<uidvalidity>/<uid>`.
 
 ## `caldav`
 
@@ -142,16 +123,9 @@ mailbox. Item keys are `<mailbox>/<uidvalidity>/<uid>`.
 | `username` | string | required | Login name |
 | `calendars` | array of strings | every calendar holding events or tasks | Calendars to sync, by display name, href, or the last path segment |
 
-Sync: discovery through `current-user-principal` and `calendar-home-set`, then RFC 6578
-`sync-collection` per calendar, or a `getctag` check plus an ETag listing when the server has no sync
-support. Polled every 5 minutes. Item keys are the event's absolute href path.
+Sync: discovery, then RFC 6578 `sync-collection` (or ctag/ETag listing), every 5 minutes.
 
 ## Microsoft 365, SaaS and plugin kinds
-
-> The Microsoft 365 (`outlook`, `outlook-calendar`, `onedrive`) and SaaS (`slack`, `notion`,
-> `github`, `linear`) kinds are registered in `nuggetd` and offered by the Sources wizard. Plugin
-> kinds (`plugin:<id>`) are still being wired in (wave W). This table is compared with the connector
-> crates.
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |
@@ -164,18 +138,13 @@ support. Polled every 5 minutes. Item keys are the event's absolute href path.
 | `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
 | `linear` | Linear | password (pasted API key), or OAuth with `client_id` | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
 
-Plugin connectors register as `plugin:<plugin id>`, with the display name from the plugin's manifest,
-no sign-in or a password, and their own secrets under `plugin:<plugin id>:<name>` (see
-[below](#pluginplugin-id)).
-
-For the SaaS kinds the token is looked up in this order: the `token_env` environment variable if that
-setting is present, then `oauth:<source id>`, then `password:<source id>`. Nothing found is
-`needs_auth`.
+Plugin connectors register as `plugin:<plugin id>` ([below](#pluginplugin-id)). SaaS tokens are looked
+up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none is `needs_auth`.
 
 ## `outlook`
 
-Scopes `offline_access`, `User.Read`, `Mail.Read`. See [Microsoft 365](../guide/sources-microsoft.md)
-for registering the app.
+Scopes `offline_access`, `User.Read`, `Mail.Read`. App registration:
+[Microsoft 365](../guide/sources-microsoft.md).
 
 <!-- check-refs: connector.outlook -->
 | Key | Type | Default | Description |
@@ -187,9 +156,8 @@ for registering the app.
 | `folders` | array of strings, at most 100 | `["inbox", "sentitems"]` | Well-known folder names (`inbox`, `sentitems`, `archive`, ...) or folder ids |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
 
-Sync: per-folder `messages/delta` over the window, then delta links every 60 s. Each message is fetched
-as MIME; messages over 35 MiB and drafts are skipped. An expired delta token (`410`,
-`syncStateNotFound`) triggers a resync. Item keys are `<folder>/<immutable message id>`.
+Sync: per-folder `messages/delta`, then delta links every 60 s; drafts and messages over 35 MiB are
+skipped.
 
 ## `outlook-calendar`
 
@@ -205,9 +173,7 @@ Scopes `offline_access`, `User.Read`, `Calendars.Read`.
 | `past_days` | integer, 0 to 3650 | `365` | Days of past events |
 | `future_days` | integer, 0 to 3650 | `365` | Days of future events. `past_days` and `future_days` cannot both be `0` |
 
-Sync: `calendarView/delta` over the window (recurring series expanded), then delta links every
-5 minutes. When the window has slid by more than 7 days, the next pass lists the current window. Item
-keys are event ids.
+Sync: `calendarView/delta`, then delta links every 5 minutes.
 
 ## `onedrive`
 
@@ -224,10 +190,8 @@ Scopes `offline_access`, `User.Read`, `Files.Read`.
 | `exclude_folders` | array of paths, at most 200 | `[]` | Folder paths never indexed; wins over `include_folders` |
 | `max_file_mb` | integer, 1 to 500 | `25` | Larger files are skipped |
 
-Sync: `drive/root/delta`, polled every 5 minutes. Supported types: `md`, `markdown`, `txt`, `text`,
-`log`, `rst`, `org`, `html`, `htm`, `csv`, `tsv`, `json`, `eml`, `ics`, `pdf`, `docx`, `xlsx`, `pptx`.
-Downloads use the pre-authenticated link without the bearer token, over HTTPS, from Microsoft download
-hosts only. Item keys are drive item ids.
+Sync: `drive/root/delta` every 5 minutes; text, Markdown, HTML, CSV, JSON, mail, iCalendar, PDF and
+Office files.
 
 ## `slack`
 
@@ -242,10 +206,8 @@ hosts only. Item keys are drive item ids.
 | `window_days` | integer, 1 to 3650 | `90` | How far back to index messages on first sync |
 | `recheck_days` | integer, 0 to 30 | `3` | Days re-read every 6 hours to pick up edits, deletions and thread replies |
 
-Token: a user token (`xoxp-…`) with `channels:history`, `groups:history`, `im:history`,
-`mpim:history`, `channels:read`, `groups:read`, `im:read`, `mpim:read` and `users:read`. Sync: one
-`conversations.history` probe per conversation and pass, every 5 minutes. Item keys are
-`<channel>/day/<YYYY-MM-DD>` (top-level messages of one UTC day) and `<channel>/thread/<ts>`.
+Token: a user token (`xoxp-…`) with the `*:history` and `*:read` scopes for channels, groups, IMs
+and MPIMs, plus `users:read`. Polled every 5 minutes; one item per channel-day and per thread.
 
 ## `notion`
 
@@ -257,9 +219,8 @@ Token: a user token (`xoxp-…`) with `channels:history`, `groups:history`, `im:
 | `max_pages` | integer, 1 to 100000 | `5000` | The most recently edited pages kept in the index |
 | `max_depth` | integer, 1 to 12 | `6` | How deeply nested blocks are rendered |
 
-Token: an internal integration secret with the **Read content** capability. API version `2022-06-28`.
-Sync: `search` by `last_edited_time` every 5 minutes, and a full listing every 6 hours. Item keys are
-`page/<id>` and `database/<id>`.
+Token: an internal integration secret with **Read content**. Polled every 5 minutes, full listing
+every 6 hours.
 
 ## `github`
 
@@ -274,10 +235,8 @@ Sync: `search` by `last_edited_time` every 5 minutes, and a full listing every 6
 | `include_discussions` | bool | `true` | Also index discussions |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
 
-Token: a fine-grained token with read-only Issues, Pull requests, Discussions and Metadata. The device
-flow requests `repo` and `read:discussion`. Sync: GraphQL `search` with `updated:>=` every 10 minutes,
-and an ids-only listing daily. Item keys are `issue/<owner>/<repo>/<number>` (issues and pull requests)
-and `discussion/<owner>/<repo>/<number>`.
+Token: fine-grained, read-only Issues, Pull requests, Discussions and Metadata (device flow: `repo`,
+`read:discussion`). Polled every 10 minutes.
 
 ## `linear`
 
@@ -291,13 +250,11 @@ and `discussion/<owner>/<repo>/<number>`.
 | `teams` | array of team keys, at most 200 | every team | For example `["ENG"]` |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
 
-Sync: GraphQL `issues` with `updatedAt` filters every 5 minutes (archived issues included, so they
-become deletes), and an ids-only listing every 6 hours. Item keys are `issue/<uuid>`.
+Polled every 5 minutes, ids-only listing every 6 hours.
 
 ## Messaging kinds
 
-Local chat history; none signs in or makes network requests. See
-[iMessage, WhatsApp and Telegram](../guide/sources-messaging.md).
+Local chat history, no network. See [Messaging sources](../guide/sources-messaging.md).
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |
@@ -314,9 +271,7 @@ Every messaging kind also takes these settings:
 | `since_days` | integer, at least 1 | none (everything) | Only messages newer than this many days |
 | `include_groups` | bool | `true` | Also index group chats |
 
-Paths may start with `~`. Each conversation becomes one item per calendar month (split into parts when
-a month is very large), keyed `<conversation id>/<YYYY-MM>` (`<conversation id>/<YYYY-MM>.<part>` from
-the second part), with `im:<chat guid>`, `wa:<chat name slug>` and `tg:<chat id>` conversation ids.
+Each conversation becomes one item per month, keyed `<conversation id>/<YYYY-MM>`.
 
 ## `imessage`
 
@@ -330,8 +285,7 @@ the second part), with `im:<chat guid>`, `wa:<chat name slug>` and `tg:<chat id>
 | `contacts` | bool | `true` | Show names from the macOS address book instead of phone numbers and addresses |
 | `contacts_dir` | path | `~/Library/Application Support/AddressBook` | Advanced: folder searched for `AddressBook-v22.abcddb` files (also in its `Sources/*/`). Setting it enables contacts off macOS too |
 
-Needs Full Disk Access on macOS. The database is copied to a private temp folder for each pass and
-the copy removed afterwards; the live file is never opened. Polled every 2 minutes.
+Needs Full Disk Access on macOS. A private copy of the database is read each pass (every 2 minutes).
 
 ## `whatsapp`
 
@@ -356,12 +310,9 @@ Watched, plus a check every 5 minutes.
 | `include_groups` | bool | `true` | As above |
 | `path` | path | required | A Telegram Desktop JSON export: its `result.json`, its folder, or a parent folder holding `ChatExport_*` / `DataExport_*` folders. Inside a folder, symlinks leading out of it are skipped |
 
-Watched, plus a check every 5 minutes. A message found in several exports is imported once, in its
-newest version.
+Watched, plus a check every 5 minutes; duplicates across exports are imported once.
 
 ## `plugin:<plugin id>`
 
-A plugin connector's settings are whatever JSON object its manifest's `settings_schema` describes
-(any object when it declares none); the plugin validates them. It is polled every
-`poll_interval_secs` from the manifest (default 1800, at least 60). See
-[Plugins](../guide/plugins.md).
+Settings follow the manifest's `settings_schema`; polled every `poll_interval_secs` (default 1800,
+at least 60). Secrets live under `plugin:<plugin id>:<name>`. See [Plugins](../guide/plugins.md).

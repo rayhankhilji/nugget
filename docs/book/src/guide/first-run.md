@@ -2,8 +2,8 @@
 
 The first time `nuggetd` starts, it does the following, all locally:
 
-1. **Finds its directories**: your OS's per-user data, config and cache directories, or one folder
-   given by `NUGGET_HOME` or `--home DIR` (see [Data directory](../reference/data-dir.md)).
+1. **Finds its directories**: the OS per-user defaults, or `NUGGET_HOME` / `--home DIR` (see
+   [Data directory](../reference/data-dir.md)).
 2. **Writes a default `config.toml`** if there is none. The only provider is an Ollama server on
    `127.0.0.1`; no cloud provider is enabled. See [`config.toml`](../reference/config.md).
 3. **Creates the store's encryption key** and keeps it in your OS keychain. Without a usable keychain
@@ -39,13 +39,12 @@ Double Tap. Every step can be skipped; **Run setup again** in the sidebar brings
 
 Then:
 
-1. **Status** shows the daemon; if it is not running, the app offers to start it.
-2. **Models**: pick models ([Local or bring-your-own-key](models.md)). A badge marks the best fit for
-   your machine's memory.
-3. **Sources**: add a folder, an Obsidian vault or an account ([Adding sources](sources.md)). Items
+1. **Status**: if the daemon isn't running, the app offers to start it. **Models**: pick models
+   ([Local or bring-your-own-key](models.md)); a badge marks the best fit for your machine.
+2. **Sources**: add a folder, an Obsidian vault or an account ([Adding sources](sources.md)). Items
    are searchable as soon as they are indexed; you don't wait for the whole backfill.
-4. **Search** and **Ask a question** ([Search and Ask](search-ask.md)).
-5. **Knowledge** shows the people, organisations and facts found so far; **Connected AI apps** lets
+3. **Search** and **Ask a question** ([Search and Ask](search-ask.md)).
+4. **Knowledge** shows the people, organisations and facts found so far; **Connected AI apps** lets
    Claude Desktop, Claude Code or Cursor read them over [MCP](mcp.md).
 
 <picture>
@@ -56,5 +55,5 @@ Then:
 The sidebar also has [Today](today.md), [Double Tap](double-tap.md), [Agent](agent.md),
 [Safety](safety.md) and [Plugins](plugins.md).
 
-The target is a useful search result within two minutes of first launch, with backfill continuing in
-the background. See [Benchmarks](../architecture/benchmarks.md) for indexing speed.
+The goal is a useful search result within two minutes of first launch; see
+[Benchmarks](../architecture/benchmarks.md).

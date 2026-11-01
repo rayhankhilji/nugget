@@ -1,8 +1,7 @@
 # nugget-plugin-sdk
 
-Write Nugget connectors and read-only agent tools as WebAssembly components.
-
-This folder is its own cargo workspace (not part of the root one). It builds for `wasm32-wasip2`:
+Write Nugget connectors and read-only agent tools as WebAssembly components. This folder is its
+own cargo workspace, built for `wasm32-wasip2`:
 
 ```sh
 rustup target add wasm32-wasip2
@@ -11,30 +10,12 @@ cargo build --release            # target comes from .cargo/config.toml
 cargo test-native                # tests on the host triple, against testing::TestHost
 ```
 
-To start a plugin of your own, copy `plugins/template` (repository root) and follow its README.
+- `src/`: implement `Connector` and/or `Tools`, then `export_plugin!`. Host access through `http`,
+  `kv`, `secrets`, `log`, `now_ms`, `fs` and `sink`; natively these go to `testing::TestHost`. WASI
+  is not linked: `std::fs`, `std::env`, `SystemTime`, stdout and `HashMap::new` trap.
+- `examples/feed-reader/`: small RSS/Atom connector + `feed_headlines` tool (full version: `plugins/rss`).
+- `examples/text-tools/`: two tools with no capabilities.
+- `test-guests/hostile/`: a misbehaving plugin for the host's security tests.
 
-- `src/`: the SDK. Implement `Connector` and/or `Tools`, then call `export_plugin!`. Host access
-  goes through `http`, `kv`, `secrets`, `log`, `now_ms`, `fs` and `sink`. On native targets those
-  calls go to `testing::TestHost`, an in-process fake host for unit tests (`cargo test-native`). WASI is not linked, so `std::fs`,
-  `std::env`, `SystemTime` and stdout trap. Use `BTreeMap` rather than `HashMap::new`, because
-  its random seed needs WASI.
-- `examples/feed-reader/`: a small RSS/Atom connector plus a `feed_headlines` tool, with its
-  `nugget-plugin.toml` (the full version is `plugins/rss` at the repository root).
-- `examples/text-tools/`: two read-only tools (`text_stats`, `top_words`) that compute everything
-  locally and declare no capabilities at all.
-- `test-guests/hostile/`: a misbehaving plugin used by the host's security tests.
-
-## Packaging
-
-1. Put `nugget-plugin.toml` and the built `.wasm` (renamed to `plugin.wasm`) in one directory.
-2. Sign the directory and bundle it into one file:
-   `NUGGET_PLUGIN_SIGNING_KEY=<hex seed> cargo run -p nugget-plugin --example sign-plugin -- <dir> --out <name>.nuggetplugin`.
-   This writes `plugin.sig` (an ed25519 signature over the SHA-256 hashes of both files) and, with
-   `--out`, the single-file `.nuggetplugin` package, and prints the public key for `trusted_keys`.
-3. Install the `.nuggetplugin` file from the app's Plugins page (or the `plugins.install` IPC
-   method). The daemon verifies the signature against `[plugins] trusted_keys`, then asks the user to
-   approve the declared capabilities.
-
-The interface is `../wit/plugin.wit` (`nugget:plugin@0.1.0`, world `plugin`). The author guide,
-covering the manifest, limits, signing and the trust model, is `docs/plugins.md` at the repository
-root.
+Start from `plugins/template`. Interface: `../wit/plugin.wit`. The author guide (manifest, limits,
+packaging, signing, trust) is [`docs/plugins.md`](../../../docs/plugins.md).

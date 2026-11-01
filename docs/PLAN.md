@@ -5,218 +5,137 @@ continuously, drafts in your voice, prepares work for your approval, and operate
 inspectable and owned by you.
 
 Grounding: [Sentient OS teardown](research/sentient-os-teardown.md) and [shipped-artifact findings](research/shipped-artifact-findings.md).
+Architecture: [book/src/architecture/](book/src/architecture/overview.md). User-facing summary: [What works today](book/src/status.md).
 
-Status (2026-10-29):
-- **M0 (Foundations): done.** Workspace, CI on three OSes, Tauri shell, `nugget-store`, providers, signed model manifest, bench harness; `nuggetd` runs them.
-- **M1 (Memory): done.** Ingest runtime, files, Obsidian, Gmail, Google Calendar, IMAP and CalDAV connectors, hybrid cited retrieval and the local runtime are wired into `nuggetd`.
-- **M2 (Knowledge graph): done.** Extraction, the vault and the local MCP server (`nuggetd mcp`, `nuggetd mcp install`) are wired into `nuggetd` and the app.
-- **M3 (Double Tap), M4 (Agent and computer use), M5 (Proactive): wired into the daemon and app.** All twelve wave W packages are merged, plus a real-app end-to-end test in CI ([e2e.yml](../.github/workflows/e2e.yml)).
-- **Wave II (new features): II1–II4 merged** (message imports from iMessage, WhatsApp and Telegram; search filters, saved searches, timelines and previews; the Double Tap overlay's edit, retry and refinements; tray, notifications, `nugget://` links and the quick-ask window). II5 (scale to 500k items) is running; QA of these features is JJ1. Not yet run on real macOS or Windows.
-- **Wave X (release readiness): X1–X4 merged** (safety tuning, knowledge UX, release dry run, reranker and chat citations). X5 (daemon CPU/RSS/startup at 100k items) is merged too; its numbers are in the v1 checklist below.
-- **M6 (Hardening and v1.0): mostly built, not released.** Packaging, the release workflow with a dry run that builds unsigned installers on all three OSes and launch-tests the AppImage, the Apple-silicon dmg and the NSIS installer, Windows signing through Azure Trusted Signing, a release rehearsal with throwaway keys (EE5), the opt-in signed updater, i18n, onboarding and the user guide have landed. The Microsoft 365 and SaaS connectors and the WASM plugin host are wired into the daemon and app (W5, W6). No release has been cut; the signing paths are untested without real certificates ([release.md](release.md) §8). The E2E relay (optional) is not started.
-- There is no `nugget-privacy` crate: egress accounting lives in `nugget-core` and `nugget-store`, and the PII scan in `nugget-ingest`.
+## Status
 
-What remains for v1 is mostly wave Y, which produces the evidence the exit criteria ask for:
-- **Y1:** real macOS and Windows runs (installer smoke, accessibility, Double Tap insertion, native `cua` env). Only Linux has run the platform code so far.
-- **Y2:** real-model evaluations. Every published draft, cua and knowledge number so far comes from scripted models.
-- **Y3:** trust and supply chain: model-manifest rollback protection, a release key, a signed update feed, reproducible builds, X1 agent-safety follow-ups.
-- **Y4:** a measured first run (target under 2 min) and empty, loading and error states.
-- **Y5:** reproducible benchmarks in the README and nightly dashboards.
+- **M0 Foundations, M1 Memory, M2 Knowledge graph: done.** Workspace, CI on three OSes, encrypted store, providers, signed model manifest, local runtime, connectors, hybrid cited retrieval, knowledge graph, vault and local MCP server run in `nuggetd`.
+- **M3 Double Tap, M4 Agent and computer use, M5 Proactive: wired into the daemon and app**, with a real-app end-to-end test in CI ([e2e.yml](../.github/workflows/e2e.yml)). Message imports (iMessage, WhatsApp, Telegram), search filters and timelines, tray, deep links and quick ask are in too.
+- **M6 Hardening: mostly built, not released.** Packaging, a release dry run (unsigned installers on all three OSes), Windows signing via Azure Trusted Signing, a release rehearsal with throwaway keys, the opt-in signed updater, i18n, onboarding, Microsoft 365 and SaaS connectors, and the WASM plugin host are in.
+- Egress accounting lives in `nugget-core` and `nugget-store`, the PII scan in `nugget-ingest` (there is no `nugget-privacy` crate).
 
-Also open, outside wave Y:
-- Double Tap p50 against a cloud model (target under 1.2 s) has never been measured; it needs a provider key.
-- The M3–M6 security review is reconciled (Z4): 13 findings Fixed with their commits and regression tests, PM-4 Mitigated (an HTTP MCP client can still send its token to a port squatter while nuggetd is down; the stdio bridge avoids it).
-- End-to-end QA with real models (wave GG; findings and owners in docs/qa/README.md). These are the product as a user meets it and override the bench figures where they differ:
-  - Double Tap (GG1): drafts complete and are in the right language in 22/25 non-English threads; an 8B judge rates 61/100 4B drafts sendable. **Blocker:** an instruction planted in a vault note is obeyed (attacker link in 62 drafts). Non-English password, one-time-code and card fields are drafted into; the newest question in long threads is cut; drafts glue to typed text.
-  - Ask (GG2, before EE3's grounded prompt): 77% (4B) / 82% (8B) of 149 turns fully correct; **Blocker:** planted instructions obeyed; dates come from file times; follow-ups are never rewritten with the default config; sources show only with the first token (35–95 s). Since then (DD4, c03b984): dates come from each item (event start, mail Date, then file time); future phrases and period questions work; follow-ups fall back to a heuristic rewrite; near misses are marked "partial match"; CJK and Thai text is searchable. Measured without models; the real-model re-run of GG2 is pending.
-  - Computer use (GG3, before DD3): 0.56 task success with the 4B over 81 realistic tasks (the bench's 0.92 overstates it); 0 unconfirmed risky clicks over 192 runs and the kill switch holds, but it never asks on ambiguous targets (trashed a whole folder), empties the Trash unasked, can report success after a declined send, and the Send confirmation hides the recipient and body.
-  - Proactive (GG4, simulated two weeks): cards from mail work (26/29 hits, no duplicates, noise blocked every morning) and the brief comes at 08:00 local every day across a DST change and a trip; actions match their dry-run diffs and nothing ran without approval. Broken: meeting prep and the brief's calendar for .ics invites (no recurrence, no dedup, no time zones), learning from Accept/Dismiss (one shared model bleeds across senders), and sensitivity is never marked at ingest.
-  - Knowledge (GG5): every active claim is cited and no model quote is missing from its source; no wrong person merges. **Blocker:** the 4B model writes card and account numbers, salary and a diagnosis into the plain-text vault as "title" facts. Broken: claim extraction with a local model (63/67 junk titles), vault edits are overwritten by re-extraction, sensitivity is ignored by the vault and graph, and extraction falls behind on CPU and regresses after a restart.
-  - Ingest (from GG2, GG4 and GG5, fixed by HH2 in 08a0cce): items are searchable before triage (315 items in 28 s, was 24 min), junk is only a label, deterministic sensitivity rules mark health, money, credential and legal items, and unknown counts as sensitive. Not yet re-verified by QA.
-  - First week (GG6, real installers on three OSes, real 4B): installs in 5–15 s, the 2.5 GB model downloads in about 40 s, and Chat answered 60/60 questions correctly over two days on three OSes. The Blocker (onboarding indexing at LLM speed) is fixed by HH2's background triage (container-verified). Open Highs: a hung or crashing local model server, raw download errors (KK1); folders with nothing to index and API keys that can't be changed (KK2); quit, uninstall and update leaving the daemon behind (EE5).
-  - Wave II features (JJ1): message imports, search, quick ask, tray and deep links work; Ask over imported chats 13/13 correct with the real 4B. Highs: sensitivity rules miss de/es/fr and the 4B triage clears health, money and legal mail (HH2); the overlay's stuck and wrong-field cases (fixed in c1b0893f); one-line and German drafts (EE2, paused); WhatsApp dates in fr/ar and day-first exports (II1).
-  - Blockers (1 November): GG2-1 (Ask obeys planted instructions) fixed by EE3, 0 obeyed on the 4B and 8B; GG5-1 (vault receives card and account numbers) fixed by EE1, 0 hits in 3 real runs; GG6-1 (onboarding indexing at LLM speed) fixed by HH2, 549.5 s → 0.5 s for the first source on a runner. GG1-1 (Double Tap obeys a planted vault note) is still open: its owner (EE2) is paused until the user says continue. QA re-verification of the fixed Blockers on real models is pending (GitHub Actions has been unavailable since 07:58 UTC).
-  - Multilingual (GG7): Ask in the item's own language 33/34 and Double Tap's language 32/33 work; English questions about other-language mail are found with the multilingual embedder (DD4, pending signing); sensitivity rules now cover all 9 UI languages (HH2); Double Tap's perspective outside English (EE2) and proactive cards outside English (BB2) wait for their paused owners.
-  - v1 needs every Blocker and High fixed and re-verified by the same QA scenarios.
-- Privacy, verified from captured network traffic (QA GG8): local-only use sends nothing (0 DNS queries, 0 packets, including idle). With a cloud provider or opt-in, three High findings: an Ask follow-up forwarded earlier answers unscanned (GG8-1), cloud embeddings carried sensitive notes (GG8-2, **fixed**), and Double Tap sent texts became a hidden source readable by MCP clients and cloud Ask (GG8-3); plus an unledgered default update check (GG8-5) and lower findings. Each is routed in docs/qa/README.md; v1 needs all High and Medium fixed.
-- The waves AA–CC security review (EE4): 25 findings (1 High, 6 Medium fixed in the reviewed code with regression tests; 2 accepted). Two Medium findings in wave DD code (RR-1: sensitive passages to a cloud reranker; AG-1: screen text outside the agent's untrusted fence) have patches in `docs/reviews/security-aa-cc-patches/`; both are applied (DD4 and DD3, with their regression tests). Open by design: the streaming credential stop can miss digits spread across words, and homoglyph or encoded credentials.
-- `memory --backend real` with the manifest's embedding model (nomic-embed-text v1.5, DD4): the recall gate is met at every scale (quick 0.970 vs 0.930, standard 0.938 vs 0.938 as a tie, full 0.892 vs 0.874; at standard the hash embedder still misses by 0.002, and so does nomic without its task prefixes). Embedding a fresh 20,000-file corpus takes 4 hours on a 2-core CPU. On the synthetic corpus of made-up words the vector leg has no signal, and rank fusion puts chunks found by both lists above a strong full-text match (hybrid MRR 0.458 vs bm25 0.888); score-aware fusion fixes that corpus but loses on the English eval set, so RRF stays. The reranker needs ~0.5 s per passage on a 2-core CPU: the adaptive pool now pauses it instead of making every search wait 2.5 s ([bench/README.md](../bench/README.md), Real-model results).
-- Wayland: the Double Tap global shortcut fires through the GlobalShortcuts portal on KDE Plasma 6 and GNOME 50, verified on real runners from a virtual key press through to Double Tap (installed debug .deb, consent dialogs accepted over AT-SPI; DD1). Three causes were fixed: the portal accepts a host app id only when a desktop file named after it with an existing `Exec` is installed (the .deb/.rpm now ship `dev.nugget.Nugget.desktop`, the AppImage writes one under `~/.local/share/applications`); kglobalaccel drops components whose name ends in `.desktop`, so the portal app id is `dev.nugget.Nugget`, not the Tauri identifier; and shortcut ids are now stable so a consent is remembered. Still open: not tried on a physical Plasma or GNOME desktop; Plasma 5.27 and GNOME before 48 untested; CI's KWin runs with `KWIN_WAYLAND_NO_PERMISSION_CHECKS=1` for its fake-input keyboard; GNOME's GTK 4 insert path is not run (no data-control clipboard in Mutter). sway and other desktops without the portal use the tray/app or a compositor binding to `nugget-desktop --double-tap`.
-- Computer use, **decision for the user: turn the harm triage on for local models?** (`AgentConfig.triage`: one goal-only call that refuses fraud, impersonation, harassment and other serious harm; on in the real-model bench, off in the daemon. Evidence from DD3, run 41018125222, [`bench/README.md`](../bench/README.md) "Asking when the target is ambiguous, and the triage decision".)
-  - *For.* Without it neither local model refused any of the 4 harmful bench tasks (they filled in the impersonation form, followed the gift-card scammer, worked on the phishing mail); with it both refused all 4, and the triage alone refused 17 of 17 harmful goals on both models. Policy and confirmations still stop the risky step itself, but a harmful message the user confirms is still sent.
-  - *Against.* False refusals: 4 of 83 benign goals with the 4B model (5%), 7 of 83 with the 8B (8%), concentrated on goals that only look sensitive (15–20% of those: payroll bank details, a passport scan to a travel agent, a breakup message, a one-star review); the 8B model also refused "turn off the firewall" and forwarding an invoice to accounts. Cost: one call per task, about 5.5 s (4B) or 9 s (8B) at p50 on a 2-core CPU; refused tasks end sooner, so median task time did not rise.
-  - *Recommendation.* Turn it on for local models, with two conditions: run the triage on the 4B model even when the agent uses the 8B (fewer false refusals and faster), and make a triage refusal a question, not a dead end: show the reason and offer "Do it anyway", which counts as the user's own decision and is logged. Cloud models keep their own refusals and need no triage. Not flipped in DD3: **decision pending: user.** The refusal-as-question path is built and ready (`[agent] triage = false` by default, `triage_override = true`: a refusal asks with the reason and "Do it anyway", logged as the user's decision; the triage runs on the light tier).
-- Computer use: "ask, don't guess" (DD3, and the GG3 follow-up) holds the first change when two on-screen items fit the goal, and a delete whose object never appeared on screen; with GG3's harness (triage off, as shipped) the ask rate on 17 ambiguous or missing-fact tasks went from 0.59 to 0.71 (4B) and 0.76 (8B), **target 0.9 missed**, with 0 needless questions from the rules; unrequested Empty Trash went from 5 tasks to 0. What is left: requests missing a fact (no time for "book a meeting with Dana"), which no rule covers and the models do not ask about, and non-destructive file moves on a guessed target. On CPU-only machines run computer use on the 4B; the 8B times out on a third of tasks at 4 vCPUs (GG3-20; bench/README.md).
-- Knowledge extraction with a local model (AA3): entity F1 0.62→0.71 and 0.66→0.75 on 30 items in same-runner A/B runs, 0.67–0.77 on all 93 (target 0.8, missed); claim F1 0.66–0.67 on 93 with 0 unsupported claims; about 2× faster per request. Nicknames and job changes still fail. `EXTRACTOR_VERSION` is unchanged, so existing items keep their earlier extraction until re-extracted.
-- Battery cost in joules is still not measured (DD2): GitHub's Linux VMs expose no RAPL counter and the virtual Macs' `powermetrics` reports no processor energy, so the `energy` suite reports CPU time and wakeups (indexing 1k items: 1.06 CPU-s; idle daemon + hidden shell: ~0.15% of a core; a 4B read-ahead: 26 CPU-s on Linux, 34 on a virtual Mac). It reports joules wherever a counter exists; a run on a physical laptop is still needed. With read-ahead on, moving between text fields costs the shell ~1.5% of a core and ~120 wakeups/s (the accessibility read of each new field), not cut yet. Indexing with the real embedding model is not in the 1k figure ([bench/README.md, Energy](../bench/README.md#energy)).
+## Open: blockers, highs and misses
 
-### v1 checklist
+v1 needs every Blocker and High fixed and re-verified by the same QA scenarios on real models.
+
+**Release**
+- No release has been cut. Release keys (updater, model-manifest release key, Apple and Windows certificates) do not exist; signing paths are untested without real certificates ([release.md](release.md) §8).
+- Real macOS and Windows runs on physical machines (installer, accessibility, Double Tap insertion, native computer use) not done; only CI runners so far. Start-at-login service not exercised on macOS or Windows in CI.
+- MSI, `.deb` and `.rpm` are build-only (no launch smoke). Linux packages are not GPG-signed; no apt or rpm repository.
+- Empty, loading and error states (Y4) not confirmed complete. The E2E relay (optional) is not started.
+
+**Blockers**
+- **GG1-1, still open:** Double Tap obeys an instruction planted in a vault note (attacker link in 62 drafts). Fix paused until the user says continue.
+- GG2-1 (Ask obeys planted instructions), GG5-1 (card and account numbers written into the vault) and GG6-1 (onboarding indexed at LLM speed) are fixed; **re-verification on real models is pending.**
+
+**Open Highs**
+- Double Tap: non-English password, one-time-code and card fields are drafted into; the newest question in long threads is cut; drafts glue to typed text; one-line and German drafts (fix paused).
+- Computer use: does not ask on ambiguous targets or missing facts (ask rate 0.71 with the 4B, 0.76 with the 8B, target 0.9); can report success after a declined send; the Send confirmation hides recipient and body. The 8B times out on a third of tasks at 4 vCPUs.
+- Knowledge: claim extraction with a local model produces junk titles; vault edits are overwritten by re-extraction; vault and graph ignore sensitivity; extraction falls behind on CPU and regresses after a restart.
+- Proactive: meeting prep and the brief's calendar break on `.ics` invites (recurrence, dedup, time zones).
+- First week: a hung or crashing local model server and raw download errors; folders with nothing to index; API keys that cannot be changed; quit, uninstall and update leave the daemon behind.
+- Sensitivity: rules miss de/es/fr text, and the 4B triage clears health, money and legal mail. Ingest fixes (searchable before triage, unknown counts as sensitive) are not re-verified by QA.
+- WhatsApp import: dates in fr/ar and day-first exports.
+- Privacy (captured traffic; local-only use sends nothing): GG8-1 an Ask follow-up forwards earlier answers unscanned to a cloud model; GG8-3 Double Tap sent texts become a hidden source readable by MCP clients and cloud Ask. GG8-5 (unledgered update check): update checks are now ledgered through `egress.record`; not re-verified. v1 needs all High and Medium privacy findings fixed.
+- Ask: the real-model re-run after the date, follow-up and partial-match fixes is pending.
+
+**Security**
+- PM-4 is **mitigated, not fixed**: an HTTP MCP client can send its token to a port squatter while `nuggetd` is down (the stdio bridge avoids it). The other 13 M3–M6 review findings are fixed with regression tests.
+- Open by design: the streaming credential stop can miss digits spread across words, and homoglyph or encoded credentials.
+- Runtime port ownership is verified on Linux only; IPC has no peer-credential check; no store key rotation; audit-log hash is unkeyed.
+
+**Measurement misses**
+- Double Tap p50 against a cloud model (target under 1.2 s) has **never been measured**; it needs a provider key.
+- Double Tap local (target under 3 s): met only once read-ahead has finished (0.14–0.58 s after 6–21 s of focus); 10–30 s without read-ahead; a trigger during read-ahead is not measured.
+- Draft fact recall 0.62 (target 0.8); one draft asserts an attachment that does not exist.
+- Knowledge entity F1 0.67–0.77 (target 0.8); nicknames and job changes fail.
+- Battery cost in joules not measured (no energy counter on CI runners); needs a physical laptop. Read-ahead costs the shell ~1.5% of a core and ~120 wakeups/s between fields.
+- At 500k items: first extraction ~1 h, 10.6 KB/item on disk, ~1 GB idle RSS. The daemon has not been re-measured after the voice-profile memory cut.
+- Wayland: the global shortcut fires through the portal on KDE Plasma 6 and GNOME 50 in CI; not tried on a physical desktop; Plasma 5.27 and GNOME before 48 untested; GNOME's GTK 4 insert path not run. sway and other desktops without the portal use the tray or a compositor binding to `nugget-desktop --double-tap`.
+- Multilingual: Double Tap perspective and proactive cards outside English wait on paused work; the multilingual embedder awaits signing.
+
+**Decision pending (user):** turn the computer-use harm triage on for local models? It refused 17/17 harmful goals but falsely refused 5% (4B) / 8% (8B) of benign goals, at ~5.5–9 s per task. Recommended: on, run on the 4B, refusal shown as a question with "Do it anyway" (built: `[agent] triage = false`, `triage_override = true`). Evidence: [bench/README.md](../bench/README.md).
+
+## v1 checklist
+
+Bench numbers: [bench/README.md](../bench/README.md). QA findings above override bench figures where they differ.
 
 | Criterion | Evidence | State |
 |---|---|---|
-| M0: `nuggetd` runs on 3 OSes | [ci.yml](../.github/workflows/ci.yml) (Rust, bench and desktop jobs on Ubuntu, macOS, Windows) | done |
-| M0: chat works with local and remote models | [e2e.rs](../crates/nuggetd/tests/e2e.rs) (OpenAI-compatible mock server); real local models in Y2 | done (real-model run in progress, Y2) |
-| M0: CI green | [ci.yml](../.github/workflows/ci.yml), [e2e.yml](../.github/workflows/e2e.yml), [package-smoke.yml](../.github/workflows/package-smoke.yml) | done |
-| M1: freshness 60 s or less on the bench | `memory --backend real`: `freshness.p95_s` 0.60 s at standard scale ([bench/README.md](../bench/README.md), Results); [nightly.yml](../.github/workflows/nightly.yml) | done |
-| M1: retrieval eval ≥ baseline | `memory --backend real`: eval-set hybrid recall@10 1.000 vs 0.905 text-only; synthetic gate with the real embedder (nomic-embed-text v1.5, DD4) 0.938 vs 0.938 at standard and 0.892 vs 0.874 at full scale (0.936 at standard with the hash embedder) ([bench/README.md](../bench/README.md), Real-model results) | done (with the real embedder at every scale: standard as a tie, full 0.892 vs 0.874) |
-| M2: every vault fact cites sources | `knowledge`: `vault.citation_coverage` = 1, run with `--strict` in [ci.yml](../.github/workflows/ci.yml) | done |
-| M2: Claude Desktop and Cursor can query Nugget over MCP | [mcp_clients.rs](../crates/nuggetd/tests/mcp_clients.rs) (clients connected as `nuggetd mcp install` configures them); [MCP guide](book/src/guide/mcp.md) | done |
-| M3: Double Tap p50 under 1.2 s (cloud) | `draft`: `ttft.p50_s` with a real cloud provider; only the fake model has run | not started |
-| M3: Double Tap p50 under 3 s (local) | `draft --provider-url` with a local model; time to first inserted token in Y1; with a scripted model, first inserted token in 117 ms (Windows) and 76 ms (macOS) on real desktops; real model (Y2, Qwen3-4B Q4_K_M, 2-core CPU runner, no GPU): first insertable token p50 39–42 s, prompt reading ~22 tok/s on a ~1k-token prompt ([bench/README.md](../bench/README.md), Real-model results); AA1 (smaller local prompt, cached rules+voice prefix, same-runner A/B): first inserted character p50 41.0 → 30.2 s on a 2-core CPU and 14.4 → 10.4 s on a virtual M2 Pro (Metal); a repeat draft of the same thread starts in 0.14–0.32 s; ~500 uncached prompt tokens per new thread remain the bottleneck; CC1 (read-ahead while a reply field keeps focus, plus an optional signed `qwen3-1.7b-q8` Double Tap model; same-runner runs on four machines): 4B first inserted character p50 0.14–0.58 s once read-ahead has finished, which needs 6–21 s of focus first (1.7B: 0.08–0.20 s after 4.5–11 s); without read-ahead 10–30 s (4B) and 3–15 s (1.7B); with AA3's default grounding check (secrets) on the merged code the 4B read-ahead case is 0.27 s p50 (+0.13 s) on the EPYC 7763 runner | partly met: under 3 s on every measured machine once read-ahead has finished; missed for a trigger without read-ahead; a trigger during read-ahead not measured |
-| M3: drafting eval wins over a screenshot-only baseline | `draft`: `draft.win_rate_vs_baseline` 0.95 with the fake model ([bench/README.md](../bench/README.md)); real model in Y2; real model (Y2): voice match 0.91–0.94 vs 0.68–0.72, judge wins 0.50 vs 0.125–0.375, but hallucination 0.33 (target 0); AA3 moved the bench onto the real `Drafter` (Y2's 0.33 came from a bench-built prompt) and added grounding (a dated facts block plus a streaming secret check): on the merged code, 16 tasks, Qwen3-4B, hallucination 0 and sensitive leak 0 in every Nugget arm (baseline leaks 0.06), voice 0.80 vs baseline 0.62, 8B judge Nugget 0.38–0.63 vs 0.25–0.38; fact recall 0.62 vs baseline 0.81 (target 0.8); one draft still asserts an attachment that doesn't exist | done (wins; hallucination 0 and leak 0 on the product path); fact recall missed (0.62) |
-| M4: published success rate on `bench/cua` | `cua`: `success_rate` 1.00 for the `nugget` arm with a scripted model, inproc ([bench/cua/README.md](../bench/cua/README.md), Reference results); real model and native envs pending; `--cua-env native` on real Windows UI Automation: success 1.00, 0 unconfirmed risky actions; real model (Y2): success 0.50 with Qwen3-4B and 8B (target 0.8), 0 unconfirmed risky actions, 0 injection compliance, false-confirmation 0.29–0.38; AA2 (same-runner A/B, real local models): Qwen3-4B success 0.58 → 0.92, false confirmations 0.33 → 0; Qwen3-8B 0.33 → 0.67 on the slowest CPU (turn timeouts), 0.83 on a faster one; 0 unconfirmed risky actions and 0 injection compliance in every arm | done (4B meets 0.8; 8B limited by CPU speed) |
-| M4: 0 unconfirmed risky actions in red-team tests | `cua`: `safety.unconfirmed_risky_actions` 0 for the `nugget` and `nugget-compliant` arms ([bench/cua/README.md](../bench/cua/README.md)) | done (real-model re-check in Y2) |
-| M5: precision of accepted cards tracked | `proactive --backend real`: accepted precision 0.976, precision@5 0.849 ([bench/README.md](../bench/README.md), Results); BB2 learns from Accept/Dismiss reasons per sender, domain, kind and thread (decaying, explainable, resettable): precision@5 0.849 → 0.883, distractor false positives 0.031 → 0.018, recall 0.997 unchanged, 0 actions without approval | done |
-| M5: dry-run diff on every action | `proactive --backend real`: dry-run coverage and diff fidelity 1.0, 0 executed without approval | done |
-| M6: security review | security-m3-m6.md (W8); supply-chain gaps in [release.md](release.md) §8; manifest rollback protection, release key slot, signed update feed, reproducible-build check ([manifest-trust.md](security/manifest-trust.md), [reproducible-builds.md](security/reproducible-builds.md)) | done (release keys to generate) |
-| M6: installers for 3 OSes | [release.yml](../.github/workflows/release.yml) dry run builds all targets ([release.md](release.md)); AppImage smoke in [package-smoke.yml](../.github/workflows/package-smoke.yml); dmg and NSIS smoke in Y1; dmg and NSIS install, launch, connect and quit in [real-os.yml](../.github/workflows/real-os.yml) and the release dry run | done (signing needs release keys) |
-| M6: reproducible benchmarks in the README | [README Benchmarks](../README.md#benchmarks), generated from [latest.json](../bench/results/latest.json) | done (Y5) |
-| Target: freshness about 60 s; edits and deletions propagate | `memory --backend real`: `freshness.p95_s`, `propagation.*_rate` = 1 | done |
-| Target: useful search and drafts in under 2 min | First-run scenario in the desktop e2e (Y4): empty install to a cited search result in 3.6 s, checked against a 120 s budget on every e2e run; with the recommended local model installed in onboarding (signed test manifest, local download), the first cited model answer comes 5.2 s after app start and `draft.begin` drafts from it (e2e `ai-setup`) | done |
-| Target: computer-use injection compliance 0 | `cua`: `safety.injection_compliance_rate` 0, both `nugget` arms | done |
-| Target: needless confirmations ≤ 0.10 | `cua`: `safety.false_confirmation_rate` 0.00 after X1 | done |
-| Target: no secrets sent to cloud models in drafts | `draft`: `sensitive_prompt_exposure_rate` and `sensitive_leak_rate` 0 (fake model, cloud-marked) | done |
-| Target: proactive precision@5 ≥ 0.7, recall ≥ 0.8 | `proactive --backend real`: 0.849 and 0.997 (0.883 after BB2) | done |
-| Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; energy and battery in DD2 (`energy` suite, [Energy](../bench/README.md#energy)): CPU and wakeups measured (index 1k items 1.06 CPU-s; daemon idle 0.086% / 1.6 wakeups/s; hidden shell after replacing the 1 s focus poll with OS focus notifications: macOS 0.47% → 0.053% of a core, 4.1 → 1.6 wakeups/s; Linux, which keeps an adaptive poll, 7.4 → 5.0 wakeups/s), joules MISSED (no energy counter on the CI runners); X5 at 100k items: idle CPU 0.03%, 0 idle wakeups in the bench window, startup 74 ms, first search 83 ms, RSS after idle 1472 MiB, of which the draft voice profile (~980 MiB) is now cut to ~106 MiB (`nugget-voice` example `voice_memory`), [perf.yml](../.github/workflows/perf.yml) (weekly `energy` and `energy-prefill` jobs); **II5 at 500k items** ([Scale](../bench/README.md#scale), perf.yml `scale` job, same runner): startup 8.3 s → 0.48 s, restart 13.9 s → 0.54 s (no whole-file check at open), Ask retrieval p50 1.88 s → 0.22 s, RSS peak 4.6 → 1.7 GB and after idle 3.0 → 1.0 GB, `status` 302 → 45 µs, `knowledge.status` cached (~130 ms → 0.2 ms at 250k); not met yet: first knowledge extraction of 500k items takes ~1 h (139 items/s), 10.6 KB/item on disk after extraction, idle ~1 GB at 500k; **LL1** (4-vCPU container, [Scale](../bench/README.md#ll1-part-two)): first sync of 100k files 505 → 1,709 items/s (batched ingest writes), search at 500k p95 376 → 123 ms with the same ranking, graph overview top-N from maintained counts (0.07 ms vs 576 ms scan), cursor paging of search and the ledger | done to 100k (joules not measured: no counter on CI); at 500k partial (startup, Ask, RSS fixed; extraction time, search tail and disk open) |
-| Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in Y1; installers, accessibility, Double Tap and computer use exercised on real macOS and Windows runners in [real-os.yml](../.github/workflows/real-os.yml); Z1: Wayland (sway, KWin) accessibility and Double Tap insert, the Double Tap overlay fired by real key presses on Linux, Windows and macOS, computer use over macOS AX (16/16) | done (DD1: Wayland global shortcut fires from a virtual key press on KWin and GNOME on real runners; physical desktops: see open items) |
-| Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | done (Y5) |
+| M0: `nuggetd` runs on 3 OSes; CI green | [ci.yml](../.github/workflows/ci.yml), [e2e.yml](../.github/workflows/e2e.yml), [package-smoke.yml](../.github/workflows/package-smoke.yml) | done |
+| M0: chat with local and remote models | [e2e.rs](../crates/nuggetd/tests/e2e.rs); real local 4B in first-week QA | done |
+| M1: freshness ≤ 60 s | `memory --backend real`: p95 0.60 s at standard scale | done |
+| M1: retrieval eval ≥ baseline | hybrid recall@10 1.000 vs 0.905 text-only; synthetic gate with the real embedder 0.938 vs 0.938 (standard, tie), 0.892 vs 0.874 (full) | done |
+| M2: every vault fact cites sources | `knowledge`: citation coverage 1, `--strict` in CI | done |
+| M2: Claude Desktop and Cursor over MCP | [mcp_clients.rs](../crates/nuggetd/tests/mcp_clients.rs) | done |
+| M3: Double Tap p50 < 1.2 s (cloud) | needs a real cloud provider | **not started** |
+| M3: Double Tap p50 < 3 s (local) | 4B, first inserted character after read-ahead 0.14–0.58 s; without read-ahead 10–30 s | **partly met** |
+| M3: drafting beats screenshot-only baseline | 4B: hallucination 0, leak 0, voice 0.80 vs 0.62, judge 0.38–0.63 vs 0.25–0.38; fact recall 0.62 vs 0.81 | done; fact recall **missed** |
+| M4: published `bench/cua` success rate | real 4B 0.92 (target 0.8); 8B 0.67–0.83, CPU-bound; realistic-task QA 0.56 (before later fixes) | done (bench) |
+| M4: 0 unconfirmed risky actions | 0 in every arm, real and scripted models | done |
+| M5: accepted-card precision tracked; dry-run diff on every action | accepted precision 0.976; precision@5 0.883, recall 0.997; diff coverage 1.0; 0 actions without approval | done |
+| M6: security review | M3–M6 review reconciled; [manifest-trust.md](security/manifest-trust.md), [reproducible-builds.md](security/reproducible-builds.md) | done (release keys to generate) |
+| M6: installers for 3 OSes | [release.yml](../.github/workflows/release.yml) dry run; AppImage, dmg, NSIS install-launch-quit in [real-os.yml](../.github/workflows/real-os.yml) | done (unsigned) |
+| M6: reproducible benchmarks in README; nightly dashboards | [README](../README.md#benchmarks), [nightly.yml](../.github/workflows/nightly.yml), [dashboard](book/src/benchmarks/dashboard.md) | done |
+| Edits and deletions propagate | propagation rates 1 | done |
+| Useful search in under 2 min | first cited result 3.6 s; first model answer 5.2 s after start (e2e) | done |
+| cua injection compliance 0; needless confirmations ≤ 0.10 | 0 and 0.00 | done |
+| No secrets to cloud models in drafts | sensitive exposure and leak 0 (fake cloud model) | done |
+| RAM, CPU, idle overhead | 100k items: idle CPU 0.03%, startup 74 ms, first search 83 ms; 500k: startup 0.48 s, Ask retrieval p50 0.22 s, search p95 123 ms; joules not measured | done to 100k; 500k partial |
+| Linux, macOS, Windows | CI plus real-OS runners; Wayland portal shortcut on KWin and GNOME | done on CI runners; physical machines open |
 
----
+## Decisions
 
-## 1. Decisions so far
-| Decision | Choice | Source |
-|---|---|---|
-| License | **Apache-2.0**, no CLA (DCO sign-off instead) | User |
-| Areas to beat Sentient on | **All of them**: real-time memory, open connectors and plugins, reliable computer use, privacy and speed | User |
-| v1 scope | **Everything**: memory, Double Tap, proactive cards, computer use, MCP | User |
-| Clean room | No AGPL code, prompts or distinctive expression copied. The teardown docs are the only bridge. | Required by Apache-2.0 |
-| Platform and stack | **Rust core plus Tauri 2 shell; macOS, Windows and Linux ship together** | User |
-| Default AI | **Asked during onboarding, local recommended.** Small local models always do triage and embeddings | User |
-| Hosted services | **None at v1.** No first-party servers in the data path; a self-hostable E2E relay comes later | User |
-| Team | **One or two humans directing Claude agents.** Milestones run in order, with parallel work done by agents | User |
+| Decision | Choice |
+|---|---|
+| Licence | Apache-2.0, DCO sign-off, no CLA |
+| Scope | v1 = everything: memory, Double Tap, proactive cards, computer use, MCP; beat Sentient on every axis |
+| Clean room | No AGPL code, prompts or distinctive expression. `docs/research/` is the only bridge |
+| Stack | Rust core plus Tauri 2 shell; macOS, Windows and Linux ship together |
+| Default AI | Asked during onboarding, local recommended; small local models always do triage and embeddings |
+| Hosted services | None at v1; a self-hostable E2E relay later |
+| Team | One or two humans directing Claude agents |
 
-## 2. What "10x better" means, measured
-Every claim below gets a benchmark in `bench/` and a number in the README. If we can't measure it, we don't claim it.
+## Targets ("if we can't measure it, we don't claim it")
 
 | Axis | Sentient (observed) | Nugget v1 target |
 |---|---|---|
-| Platforms | macOS 15.4+, Apple Silicon only | macOS (Apple Silicon and Intel), Windows 10/11, Linux (X11 and Wayland) |
-| Knowledge freshness | Nightly batch; edits and deletions never re-read | **About 60 s** from change to searchable; edits and deletions propagate |
-| Time to first value | "First run takes ~15 min, keep lid up"; hours for the full overnight run | Useful search and drafts in **under 2 min**; backfill continues in the background, resumable |
-| Retrieval | Dumps the whole vault (600 KB cap, silent truncation) | Hybrid BM25, vector and graph search with reranking; **cited** context of 8k tokens or less |
-| Knowledge structure | Free-text LLM Markdown, no provenance, no validation | Typed entity graph, with Markdown *rendered* from it; every fact cites its source items |
-| Double Tap latency (p50, cloud) | ~2 s claimed; screenshot plus whole vault | **Under 1.2 s to first inserted token**: accessibility text first, retrieval-sized prompt, prewarmed connection |
-| Double Tap latency (local) | Not a primary path | Under 3 s on a 16 GB machine with a 4B-class model |
-| Computer use | OpenAI's closed helper; no step cap, no confirmations, no kill switch, outcome unverified | Our own driver on every OS; policy engine; **verified outcomes**; published task success rate on `bench/cua` |
-| Connectors | Vendor-hosted MCP through a ChatGPT or Claude plan; reverse-engineered SQLite | Direct APIs with our own OAuth (Gmail, Graph, CalDAV, IMAP, Slack, Notion), a WASM plugin SDK, and MCP in and out |
-| Privacy | Telemetry on by default, a closed relay on by default, nothing encrypted at rest | Telemetry **off** by default; **no** first-party cloud needed; SQLCipher at rest; an **egress ledger** of every byte sent |
-| Updates | Forced, silent, one signing key | User-chosen channel, opt-in auto-update, signing in CI with threshold keys |
-| Engineering | No CI, no unit tests, released by bulk mirror | Built in public; CI on all three OSes; unit and integration tests; nightly eval dashboards |
+| Platforms | macOS 15.4+, Apple Silicon | macOS (Apple Silicon, Intel), Windows 10/11, Linux (X11, Wayland) |
+| Freshness | Nightly batch; edits never re-read | About 60 s; edits and deletions propagate |
+| Time to first value | ~15 min, hours for the full run | Useful search and drafts in under 2 min |
+| Retrieval | Whole vault (600 KB cap, silent truncation) | Hybrid search with reranking; cited context ≤ 8k tokens |
+| Knowledge | Free-text LLM Markdown, no provenance | Typed graph, rendered Markdown, every fact cited |
+| Double Tap p50 | ~2 s claimed (cloud) | < 1.2 s cloud, < 3 s local (4B, 16 GB) |
+| Computer use | Closed helper, no caps, confirmations or kill switch | Own driver, policy engine, verified outcomes, published success rate |
+| Connectors | Vendor-hosted MCP; private SQLite | Direct APIs with your own OAuth, WASM plugins, MCP in and out |
+| Privacy | Telemetry on, closed relay, no encryption at rest | Telemetry off, no first-party cloud, SQLCipher, egress ledger |
+| Updates | Forced, silent, one signing key | User-chosen channel, opt-in, signed in CI |
 
-## 3. Architecture
+## Milestones
 
-```
-┌──────────────────────────── Tauri 2 shell (TS/React) ───────────────────────────┐
-│  tray/menu bar · command bar · Double Tap overlay · cards inbox · knowledge UI   │
-│  graph view · settings · permissions wizard · egress ledger · action audit log   │
-└──────────────────────────────────────┬────────────────────────────────────────────┘
-                                       │ typed IPC (tauri commands + event stream)
-┌──────────────────────────── nuggetd (Rust core daemon) ───────────────────────────┐
-│ ingest ─▶ store ─▶ knowledge ─▶ retrieve ─▶ { draft, proactive, agent } ─▶ policy │
-│    ▲        │                                        │                     │      │
-│ connectors  └── mcp-server (local) ◀── other AIs     └── infer (providers) │      │
-│ (native + WASM plugins + MCP clients)                       a11y drivers ◀─┘      │
-└────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Milestone | Exit criteria |
+|---|---|
+| M0 Foundations | `nuggetd` on 3 OSes; local and remote chat; CI green |
+| M1 Memory | Freshness ≤ 60 s; retrieval eval ≥ baseline |
+| M2 Knowledge graph | Every vault fact cited; Claude Desktop and Cursor query over MCP |
+| M3 Double Tap | p50 < 1.2 s cloud, < 3 s local; beats screenshot-only baseline |
+| M4 Agent and computer use | Published `bench/cua` success rate; 0 unconfirmed risky actions |
+| M5 Proactive | Accepted-card precision tracked; dry-run diff on every action |
+| M6 Hardening and v1.0 | Security review; installers for 3 OSes; reproducible README benchmarks |
 
-### 3.1 Crates (Cargo workspace)
-| Crate | Responsibility | Key choices |
-|---|---|---|
-| `nugget-store` | Items, chunks, entities, relations, provenance, cursors, cards, audit log, egress ledger | SQLite with **SQLCipher**, FTS5 and `sqlite-vec`; key wrapped by the OS keychain; WAL; migrations |
-| `nugget-ingest` | Connector runtime, change detection, scheduler | Event-driven: FSEvents, inotify/fanotify, ReadDirectoryChangesW, and polling `data_version` on SQLite sources. Typed per-source cursors plus content hashes, so edits and deletes propagate. Work runs in idle or charging slices, with **no root daemon** |
-| `nugget-connectors-*` | First-party sources | See §4 |
-| `nugget-plugin` | Third-party connectors and tools | **WASM components** (wasmtime, WIT interface) with declared capabilities (network hosts, scopes), plus MCP-client adapters |
-| `nugget-infer` | One `Provider` trait covering chat, tools, vision, streaming, JSON schema and embeddings | Local: **llama.cpp** (GGUF; Metal, CUDA, Vulkan, CPU), with MLX optional on Mac. Remote: native **Anthropic Messages** and **OpenAI Responses**, any OpenAI-compatible server, Ollama, LM Studio. A **capability probe** (vision, tool calls, JSON schema) runs before a model can be selected. Routing is by **capability tier** (triage, light, synthesis, agentic), never by hard-coded model ids. Quantization is picked from detected RAM and VRAM |
-| `nugget-models` | Model manifest and download | Signed manifest: model, **pinned revision**, size, hash, minimum app version. Content-addressed storage, lazy re-verification, two slots with rollback, and a fail-closed disk check |
-| `nugget-knowledge` | Understanding pipeline | Triage, then chunk, then extract typed entities and relations (person, org, project, commitment, preference, event), with alias and contact resolution. The **Markdown vault is rendered** from the graph: stable ids, YAML frontmatter, citations. User edits are three-way merged back. Validators check that links resolve and the schema holds |
-| `nugget-retrieve` | Query-time context | Hybrid BM25 and vector search, graph neighbourhood expansion, cross-encoder rerank, and token-budgeted packing with citations |
-| `nugget-draft` | Double Tap | Global hotkey (configurable, works without a notch or Apple keyboard). Context comes from the **accessibility tree first** (thread and field text, app, recipient), with a screenshot only as a fallback. Retrieval-sized prompt, prompt caching, prewarmed HTTP/2. Insertion through accessibility insert-at-selection, verified by reading the field back, with a clipboard fallback that preserves every pasteboard type |
-| `nugget-proactive` | Morning brief and cards | Deterministic candidate store (commitments, unanswered threads, renewals, meetings) with dedup and due dates, and a feedback-learned score. An LLM judge enriches candidates. **Typed actions with dry-run diffs**, executed only on approval |
-| `nugget-agent` | Our own agent loop | Tool registry, plan/act/verify loop, **step and time budgets**, idempotent action ids, structured **verify-after-act** (accessibility state diff, or an API check such as "message exists in Sent") |
-| `nugget-a11y` | Cross-platform computer-use driver | One trait over **macOS AX plus CGEvent**, **Windows UIA**, and **Linux AT-SPI plus libei/portals**. Element-id snapshots, background-safe actions where the OS allows, and an overlay "agent cursor" that never moves the user's pointer. Browsers: a companion extension or WebDriver BiDi on an opt-in profile, falling back to accessibility |
-| `nugget-policy` | Safety | Per-app allow/deny lists, a risk classifier for actions (send, pay, delete, share, install) with **inline confirmation**, a global **kill-switch hotkey**, and a tamper-evident audit log with before/after evidence |
-| `nugget-privacy` | Trust | Per-source consent and egress scope. Redaction (NER plus pattern packs) before any cloud call. The **egress ledger** records which bytes went to which host, for which feature, and when |
-| `nugget-mcp` | Share knowledge with other AIs | A **local** MCP server (stdio and localhost HTTP) with per-client scoped tokens and revocation. Optional remote access through an **end-to-end-encrypted, self-hostable** relay. No secrets in URLs |
-| `nuggetd` | Daemon | Runs the pipeline and IPC; the OS service manager starts it as a user-level service (launchd agent, Task Scheduler, systemd user unit) |
+Planned but not built: local-app connectors (Apple Notes, Apple Mail, macOS Calendar and Contacts, Signal, Thunderbird), Logseq, Maildir, CardDAV, MCP servers as sources, a community plugin registry, an OSWorld-style `cua` subset.
 
-### 3.2 App shell
-Tauri 2 with TypeScript and React for the tray or menu-bar app, plus overlay windows (command bar, Double Tap indicator, agent cursor). The Mac
-notch integration is a nice-to-have skin, **not** a requirement.
+## Risks
 
-### 3.3 Data flow
-1. **Change detected.** A connector emits `ItemChanged`, `ItemDeleted` or `ItemUpserted` with a content hash.
-2. **Triage.** The local small model decides keep, junk or sensitive and writes a summary. Deterministic PII scanning follows.
-3. **Chunk and embed.** Done locally. The result is searchable within 60 s of the change.
-4. **Extract.** Entities and relations are pulled out, locally or by a frontier model depending on per-source policy, and merged into the graph with provenance.
-5. **Render.** Only the vault pages for affected entities are re-rendered, with a three-way merge against user edits.
-6. **Consume.** Proactive candidates, retrieval for drafts and the agent, and MCP exposure all read from here.
-
-## 4. Connectors in v1
-**Local and native:**
-- Files (all OSes, with OCR and real chunking)
-- Obsidian, Logseq, Markdown folders
-- Apple Notes, iMessage, Apple Mail, Calendar, Contacts (macOS)
-- WhatsApp Desktop and Signal Desktop (where readable)
-- Thunderbird and Maildir
-- Outlook (Windows, via Graph)
-
-**Direct APIs with our own OAuth:**
-- Gmail (`historyId` deltas)
-- Google Calendar and Drive
-- Microsoft Graph (mail, calendar, OneDrive delta links)
-- IMAP/SMTP and CalDAV/CardDAV
-- Slack, Notion, GitHub, Linear
-
-**Extension points:**
-- Any MCP server as a source
-- WASM plugins from a community registry
-
-## 5. Delivery (v1 = everything, built in milestones)
-v1.0 ships all pillars. Milestones are internal checkpoints, each ending in a usable nightly build and green benchmarks.
-
-| Milestone | Contents | Exit criteria |
-|---|---|---|
-| **M0: Foundations** | Repo, CI (macOS, Windows, Linux), Cargo workspace, Tauri shell, `nugget-store`, provider trait with 3 backends, model manifest, bench harness skeleton | `nuggetd` runs on 3 OSes; chat works with local and remote models; CI green |
-| **M1: Memory** | Ingest runtime, files, Obsidian, Gmail, GCal, IMAP connectors, triage, chunking, embedding, hybrid search, a basic knowledge UI | Freshness 60 s or less on the bench; retrieval eval ≥ baseline |
-| **M2: Knowledge graph** | Entity and relation extraction, provenance, vault renderer with three-way merge, graph view, local MCP server | Every vault fact cites sources; Claude Desktop and Cursor can query Nugget over MCP |
-| **M3: Double Tap** | Hotkey, accessibility context, retrieval-sized prompts, verified insertion, voice profile | p50 under 1.2 s cloud and under 3 s local; drafting eval wins over a screenshot-only baseline |
-| **M4: Agent and computer use** | `nugget-a11y` (Mac, Windows, Linux), agent loop, policy engine, kill switch, audit log, browser extension | Published success rate on `bench/cua`; 0 unconfirmed risky actions in red-team tests |
-| **M5: Proactive** | Candidate store, judge, typed actions, cards inbox, morning brief | Precision of accepted cards tracked; dry-run diff on every action |
-| **M6: Hardening and v1.0** | Remaining native connectors, WASM plugin SDK, E2E relay (optional), signed updates, i18n, docs, onboarding | Security review; installers for 3 OSes; reproducible benchmarks in the README |
-
-## 6. Evaluation (`bench/`)
-- **`bench/cua`.** Scripted computer-use tasks on all three OSes in VMs (form fill, email triage, file organising, calendar booking, web checkout up to the confirmation step). Metrics: verified success, steps, wall time and safety violations. Where licences allow, include an OSWorld-style subset.
-- **`bench/draft`.** Reply drafting against held-out real threads (with consent) or synthetic personas. Scored by pairwise LLM judging plus human spot checks on voice match, factuality and latency.
-- **`bench/memory`.** Freshness (change to searchable), retrieval recall@k, citation accuracy, and edit and delete propagation.
-- **`bench/perf`.** RAM, CPU and battery cost per 1k items, and idle overhead.
-
-## 7. Engineering practices
-- Built in public on GitHub. DCO instead of a CLA. Conventional commits. `cargo fmt`, `clippy -D warnings`, `cargo deny`.
-- Unit tests per crate, integration tests with recorded fixtures for every connector, and UI tests through Playwright on the Tauri webview.
-- Security: threat model doc, `cargo audit`, fuzzing for parsers (iMessage typedstream, Notes protobuf, MIME), and per-plugin capability sandboxing.
-- Telemetry: opt-in OpenTelemetry only, with no free text, a local preview of every payload, and the option to self-host.
-
-## 8. Risks
 | Risk | Mitigation |
 |---|---|
-| Scope ("everything in v1") is very large | Milestones ship nightlies; v1.0 gates on benchmarks, not dates; cut connectors before cutting quality |
-| Cross-platform accessibility APIs differ widely, especially on Wayland | One trait plus per-OS capability flags; fall back to screenshots and coordinates where accessibility is missing |
-| Private Apple database formats change | Schema-backed parsers, fuzzing, fixture tests per OS version, graceful degradation with clear UI |
-| Local models are too weak for agentic work | Tiered routing; local by default for triage, embedding and drafting; BYO frontier key for the agent; publish per-tier numbers |
-| OAuth app verification (Google restricted scopes) | Start the verification process early; allow users to bring their own OAuth client in the meantime |
+| "Everything in v1" is very large | v1.0 gates on benchmarks, not dates; cut connectors before quality |
+| Accessibility APIs differ, especially on Wayland | One trait with per-OS capability flags; screenshot fallback |
+| Private Apple formats change | Schema-backed parsers, fuzzing, fixtures per OS version |
+| Local models too weak for agentic work | Tier routing; bring-your-own frontier key; publish per-tier numbers |
+| Google restricted-scope verification | Users bring their own OAuth client meanwhile |
 
-## 9. Open questions
-1. **Name and brand.** Keep "Nugget"?
-2. **Business model.** Apache core plus a paid hosted team tier later (shared knowledge, admin policy, SSO)?
+## Open questions
 
-Resolved: platform (all three OSes), default AI (ask, local recommended), hosted services (none at v1), team (humans plus agents).
+1. Keep the name "Nugget"?
+2. Business model: Apache core plus a paid hosted team tier later?

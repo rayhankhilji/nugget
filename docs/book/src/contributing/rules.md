@@ -2,79 +2,41 @@
 
 ## Developer Certificate of Origin
 
-Nugget uses the [Developer Certificate of Origin](https://developercertificate.org/) (DCO 1.1)
-instead of a Contributor Licence Agreement. There is no CLA. Sign off every commit:
-
-```sh
-git commit -s -m "feat(store): add cursor round-trip"
-```
-
-This adds `Signed-off-by: Your Name <you@example.com>`, which must match the commit author. By adding
-it you certify that you wrote the change or otherwise have the right to submit it under Apache-2.0. The
-`DCO sign-off` CI job checks every commit in a pull request. To fix a branch:
-
-```sh
-git rebase --signoff origin/main
-git push --force-with-lease
-```
-
-Contributions are accepted under Apache-2.0 (inbound = outbound).
+Nugget uses the [DCO 1.1](https://developercertificate.org/), not a CLA. Sign off every commit
+(`git commit -s`); the `Signed-off-by` line must match the author, and CI checks it. To fix a branch:
+`git rebase --signoff origin/main`, then `git push --force-with-lease`. Contributions are accepted under
+Apache-2.0.
 
 ## The clean-room rule
 
-Nugget competes with Sentient OS, which is AGPL-licensed. To keep Nugget cleanly Apache-2.0:
+Sentient OS is AGPL-licensed. To keep Nugget cleanly Apache-2.0:
 
-- **Never read, copy, translate or paraphrase Sentient OS source code**, including its prompts,
-  schemas, tests and distinctive text, not even "just to see how they did it".
-- The documents in [`docs/research/`](https://github.com/rayhankhilji/nugget/tree/main/docs/research)
-  are the **only** bridge. They describe observed behaviour and architecture in our own words. Work
-  from them and from the public documentation of platform APIs.
-- If you have read the Sentient OS source, say so in your pull request and do not work on the matching
-  area of Nugget.
-- The same applies to any GPL, AGPL or LGPL code.
+- **Never read, copy, translate or paraphrase Sentient OS source**, including prompts, schemas, tests
+  and distinctive text.
+- [`docs/research/`](https://github.com/rayhankhilji/nugget/tree/main/docs/research) is the **only**
+  bridge: observed behaviour in our own words. Work from it and public platform documentation.
+- If you have read the Sentient source, say so in your pull request and stay off the matching area.
+- The same applies to any GPL, AGPL or LGPL code. `deny.toml` allows only permissive licences (MPL-2.0
+  only unmodified); npm packages are checked by hand.
 
-## Licences of dependencies
+## Tests and code
 
-Every dependency must be Apache-2.0 compatible. `deny.toml` holds the allow list (Apache-2.0, MIT, BSD,
-ISC, Zlib, Unicode and similar; MPL-2.0 only for unmodified dependencies). GPL, AGPL and LGPL crates
-are rejected. npm packages for the desktop app are checked by hand. Build tools that are not linked
-into the product, such as mdBook (MPL-2.0) for these docs, are fine.
-
-## Testing expectations
-
-- **Every public behaviour has a test.** Unit tests sit next to the code; integration tests go in
-  `tests/`.
-- **No real network.** Use `wiremock` or a local server. Connectors are tested against recorded
-  fixtures and fake servers.
-- **No real credentials, keychain or home directory.** Use `NUGGET_HOME` and temporary directories.
-- **All three OSes.** Tests must pass on Linux, macOS and Windows. Gate OS-specific code with `cfg` and
-  keep a compiling fallback for every other target.
-- **Hostile input.** Parsers enforce size caps and timeouts, return errors instead of panicking, and
-  get fuzz-style tests on malformed input.
-- **Claims need numbers.** A change meant to make Nugget faster, fresher or better adds or updates a
-  `nugget-bench` metric and quotes it in the pull request. Release builds only for quoted numbers.
-
-## Code expectations
-
-- `unsafe` is denied workspace-wide. Unavoidable FFI gets one minimal function with
-  `#[allow(unsafe_code)]` and a `// SAFETY:` comment.
-- No hard-coded model ids in logic: route by tier.
-- Every request that leaves the device records an `EgressEvent`. Never log secrets, and never log user
-  content at `info` level or above.
-- Convert errors to `nugget_core::Error` at public crate boundaries.
-- New crates go under `crates/`, join the workspace `members`, inherit the workspace package fields
-  and `[lints] workspace = true`, and get a row in the [crate map](../architecture/crates.md).
-- A subsystem wired into the daemon is a feature module under `crates/nuggetd/src/features/` that
-  owns its IPC methods, tasks and config section; it does not add fields to the daemon's shared state
-  or arms to its IPC handler.
+- Every public behaviour has a test; integration tests go in `tests/`.
+- No real network, credentials, keychain or home directory: use `wiremock`, fixtures, `NUGGET_HOME`.
+- Tests pass on Linux, macOS and Windows; gate OS code with `cfg` and keep a fallback.
+- Parsers cap sizes, time out and return errors instead of panicking.
+- A change claimed to be faster or better adds or updates a `nugget-bench` metric.
+- `unsafe` is denied; unavoidable FFI gets one minimal `#[allow(unsafe_code)]` function with a
+  `// SAFETY:` comment. Route models by tier. Record every egress. Never log secrets, or content at
+  `info` or above.
+- New crates join the workspace with `[lints] workspace = true` and a row in the
+  [crate map](../architecture/crates.md). New daemon subsystems are feature modules under
+  `crates/nuggetd/src/features/`.
 
 ## Commits and pull requests
 
-Use [Conventional Commits](https://www.conventionalcommits.org/) with the crate as the scope
-(`feat(infer): …`, `fix(store): …`, `docs(book): …`). Keep pull requests focused, fill in the template,
-and keep CI green. If a change alters a config key, CLI flag, IPC method, MCP tool or connector setting,
-update this book in the same pull request: the docs check fails otherwise
-([Working on these docs](docs.md)).
-
-Report security issues privately, as described in
+[Conventional Commits](https://www.conventionalcommits.org/) with the crate as scope
+(`fix(store): …`). Keep pull requests focused and CI green. A change to a config key, CLI flag, IPC
+method, MCP tool or connector setting updates this book in the same pull request
+([Working on these docs](docs.md)). Report security issues privately per
 [`SECURITY.md`](https://github.com/rayhankhilji/nugget/blob/main/SECURITY.md).

@@ -10,8 +10,8 @@
 | `NUGGET_KEYCHAIN` | `0`, `off`, `false` or `no` turns the OS keychain off. The store key then lives in a `store.key` file readable only by you, and source passwords and tokens are kept **in memory only**: you must set them again after every restart |
 | `NUGGET_OCR_MODELS` | A directory holding the two `ocrs` models, `text-detection.rten` and `text-recognition.rten`. Image OCR runs only when they are present. Nugget never downloads them |
 
-Variables that `config.toml` references as `env:VAR` (API keys) must be set in the **daemon's**
-environment. A service started at login does not read your shell profile.
+`env:VAR` references in `config.toml` are read from the **daemon's** environment; a login service
+does not read your shell profile.
 
 ## MCP clients
 
@@ -20,15 +20,12 @@ environment. A service started at login does not read your shell profile.
 |---|---|
 | `NUGGET_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
 
-When the daemon runs with a non-default data root, the setup snippets also set `NUGGET_HOME` for the
-bridge, so it finds the same daemon.
-
 ## Desktop app
 
 <!-- check-refs: env.desktop -->
 | Variable | Meaning |
 |---|---|
-| `NUGGET_HOTKEY_SESSION` | Linux only: `x11` or `wayland` overrides session detection for the global shortcut (`nugget-hotkey`). Status: Double Tap is being wired in (wave W) |
+| `NUGGET_HOTKEY_SESSION` | Linux only: `x11` or `wayland` overrides session detection for the global shortcut (`nugget-hotkey`). |
 | `NUGGET_UPDATER_PUBKEY` | Build time: the minisign public key the updater trusts. Without it the build has no updater |
 | `NUGGET_UPDATER_FEED` | Build time: where the updater manifests live, for forks (default: this repository's `updater-feed` release) |
 

@@ -27,33 +27,23 @@ On macOS, data and config share one directory.
   ipc/
     nuggetd.sock           the IPC socket (macOS, Linux)
     nuggetd.lock           held while a daemon runs; one daemon per data directory
-    desktop-owned.json     which daemon the desktop app started (pid and process start time),
-                           so quitting stops only that one, never a login service or one you started
+    desktop-owned.json     the daemon the desktop app started (only that one is stopped on quit)
   logs/
-    nuggetd.<date>.log     daemon log, JSON lines, one file per day, 14 kept
-    nugget-desktop.<date>.log
-                           desktop app log, plain text, one file per day, 7 kept
-    llama-server-chat.log, llama-server-embedding.log
-                           local model server output (API keys redacted)
-    launchd.log            service output on macOS
+    nuggetd.<date>.log     daemon log (JSON lines, 14 days kept); also desktop app, llama-server
+                           and launchd logs
   models/
     blobs/sha256/<hex>     installed model files, content-addressed
     staging/               downloads in progress (wiped on hash mismatch)
     slots.json             active and previous version of each model
     runtimes/              verified llama-server builds
-  runtime/
-    chat.pid, embedding.pid
-                           running local model servers (orphans are cleaned up at start)
+  runtime/                 pid files of running local model servers
+  plugins/, plugin-catalog/ installed WebAssembly plugins and the plugin catalog
   vault/                   the vault, only with --home or NUGGET_HOME (see below)
 ```
 
-Installed WebAssembly plugins live in `<data>/plugins/`, and the cached plugin catalog in
-`<data>/plugin-catalog/`.
-
 ## The vault
 
-The knowledge graph is rendered as Markdown into the **vault**, outside the data directory so you
-can open it in any editor:
+The knowledge graph is rendered as Markdown into the vault, outside the data directory:
 
 | Install | Vault |
 |---|---|
@@ -61,46 +51,22 @@ can open it in any editor:
 | With `NUGGET_HOME=DIR` or `--home DIR` | `DIR/data/vault` |
 | `[vault] path` set | That directory (see [config.toml](config.md#vault)) |
 
-```text
-<vault>/
-  Person/Ada Example (ent_000042).md    one page per entity, under its kind
-  Organization/…, Project/…, Topic/…
-  .nugget/                              merge bases, conflict sidecars and the page manifest
-```
+Pages are `<Kind>/<Name> (<id>).md`; `.nugget/` holds merge bases and conflict sidecars. Pages are
+written atomically and never through a symlink. The vault is **plain, unencrypted text**: keep it out of
+synced folders if that matters to you.
 
-The daemon writes pages atomically, never through a symlink, and watches the vault for your edits.
-`[vault] enabled = false` turns rendering and watching off. The vault is plain, unencrypted text: it
-is a readable copy of facts that are also in the store, so keep it out of folders you sync if that
-matters to you.
+## The store
 
-## What is in the store
+`nugget.db` is one SQLCipher (AES-256) database: items and chunks with FTS5 and `sqlite-vec` indexes,
+sync cursors, the egress ledger, the hash-chained audit log, the knowledge graph, and MCP clients
+(keyed token hashes, never tokens). Its 256-bit key is in the OS keychain (service
+`dev.nugget.Nugget`), or in `store.key` when no keychain is usable or `NUGGET_KEYCHAIN=off`.
 
-`nugget.db` is one SQLCipher (AES-256) database. It holds:
-
-- items (one per source document) and their chunks, with full-text (FTS5) and vector (`sqlite-vec`)
-  indexes;
-- per-source sync cursors;
-- the egress ledger;
-- the hash-chained audit log;
-- the knowledge graph tables (entities, claims, evidence, mentions, a change feed) and the
-  extraction progress;
-- MCP clients (names, scopes and keyed hashes of their tokens, never the tokens) and the key those
-  hashes use;
-- metadata such as the embedding dimension and the vault's render position.
-
-The key is 256 random bits, kept in the OS keychain (service `dev.nugget.Nugget`), or in `store.key`
-when no keychain is usable or `NUGGET_KEYCHAIN=off`.
-
-## What is not in it
-
-- **Credentials**: in the OS keychain only (see [Connector settings](connectors.md) for the account
-  names). With `NUGGET_KEYCHAIN=off`, source credentials are held in memory and lost at exit.
-- **Your original files**: Nugget reads them in place and never modifies them.
+Not in the store: **credentials** (OS keychain only; with `NUGGET_KEYCHAIN=off`, source credentials
+are held in memory and lost at exit) and **your original files** (read in place, never modified).
 
 ## Backups
 
-Copy the data and config directories while the daemon is stopped. The store is useless without its key:
-back up the keychain entry too, or the `store.key` file if you use one, and keep it as safe as the data
-itself. Model files can be re-downloaded and do not need a backup. The vault is rendered from the
-store, and edits you made in it are already merged into the store as facts you asserted, so it can be
-rebuilt; back it up anyway if you keep your own notes in it.
+Use `nuggetd backup` ([Backup and export](../guide/backup.md)). For a manual copy, stop the daemon and
+copy the data and config directories **and** the store key (keychain entry or `store.key`). Models can
+be re-downloaded; the vault can be re-rendered.

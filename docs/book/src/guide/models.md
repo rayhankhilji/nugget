@@ -10,14 +10,10 @@ Work is grouped into **tiers**, and each provider you configure says which tiers
 | `agentic` | Tool-using agent loops and computer use | Any provider you assign |
 | `embedding` | Vectors for semantic search | **Local or LAN only** unless you opt in |
 
-(`rerank` only marks reranker models in the manifest; it is never routed. See
-[reranking](#reranking-search-results).)
-
 ## Option 1: fully local, managed by Nugget (recommended)
 
-On the **Models** page, install the recommended models. They come from a signed manifest that pins
-each file's revision, size and SHA-256; downloads are verified before install, and an install that
-would fill your disk is refused.
+On the **Models** page, install the recommended models (all Apache-2.0). They come from a signed
+manifest that pins each file's size and SHA-256, and are verified before install.
 
 | Model id | Tiers | Download | Minimum RAM |
 |---|---|---|---|
@@ -27,13 +23,12 @@ would fill your disk is refused.
 | `nomic-embed-text-v2-moe-q8` | embedding (multilingual; the pick for new indexes) | 512 MB | 4 GB |
 | `bge-reranker-v2-m3-q4km` | rerank | 438 MB | 4 GB |
 
-All are Apache-2.0. Nugget then downloads a verified build of llama.cpp's `llama-server` for your
-hardware (Metal, Vulkan or CPU) and runs it on `127.0.0.1` as the providers `local-chat` and
-`local-embedding`, each with a random per-restart API key. Servers stop after 30 idle minutes and
-restart on demand ([`[runtime]`](../reference/config.md#runtime)); a crashed server is restarted, and
-**Status** shows warming-up, failed and **Retry** states (see
-[Troubleshooting](troubleshooting.md#the-on-device-model-is-warming-up-stopped-or-wont-start)).
-These downloads are the only network traffic, and they are in the egress ledger.
+Nugget also downloads a verified llama.cpp `llama-server` for your hardware and runs it on
+`127.0.0.1` as the providers `local-chat` and `local-embedding`. Servers stop after 30 idle minutes
+and restart on demand ([`[runtime]`](../reference/config.md#runtime)); **Status** shows when a model
+is warming up or needs a **Retry** (see
+[Troubleshooting](troubleshooting.md#the-on-device-model-is-warming-up-stopped-or-wont-start)). These
+downloads, logged in the egress ledger, are the only network traffic.
 
 An index keeps the embedding model its vectors were built with, even if a newer manifest recommends
 another, unless `[runtime] embedding_model` names one. Naming a different model for an existing index
@@ -41,7 +36,7 @@ makes search fall back to full-text, and new items get no vectors.
 
 ### Reranking search results
 
-Optional, never picked automatically. Install `bge-reranker-v2-m3-q4km`, then:
+Optional. Install `bge-reranker-v2-m3-q4km`, then:
 
 ```toml
 [runtime]
@@ -69,8 +64,8 @@ Run `ollama pull qwen3:4b` and restart `nuggetd`. A server on `127.0.0.1` or `lo
 **on-device**; one on a private address is **local network** (recorded in the egress ledger, but
 still allowed to triage and embed).
 
-> **Forwarding servers.** Some local servers forward to the cloud (Ollama's `-cloud` models, for
-> example). Nugget can't tell from the address: set `locality = "cloud"` on such a provider.
+> **Forwarding servers** (such as Ollama's `-cloud` models) look local but send prompts to the cloud.
+> Set `locality = "cloud"` on such a provider.
 
 For a `llama-server` on another machine, set `llama_cpp = true` so it reuses its prompt cache (on by
 default for on-device servers). See [`[[providers]]`](../reference/config.md#providers).
@@ -100,9 +95,7 @@ Restart `nuggetd`. Then:
 
 ## Routing and probing
 
-For each tier, `nuggetd` tries on-device and local-network providers (file order), then the managed
-runtime, then cloud providers (file order), moving on after a network error or rate limit.
-
-Before a provider is used beyond plain chat, a **probe** checks streaming, tool calls, JSON-schema
-output, embeddings and vision with live requests. Run it from **Status** or with the
-[`providers.probe`](../reference/ipc.md) IPC method; results are saved in `probes.json`.
+For each tier, `nuggetd` tries on-device and local-network providers, then the managed runtime, then
+cloud providers (each in file order), moving on after a network error or rate limit. Before a
+provider is used beyond plain chat, a **probe** tests streaming, tool calls, JSON output, embeddings
+and vision: run it from **Status** or with [`providers.probe`](../reference/ipc.md).

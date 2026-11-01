@@ -14,34 +14,20 @@ desktop app (**Connected AI apps**, **Connect an app**) and paste one of the sni
 
 ## What an app can do
 
-Only read. The seven tools (`search`, `get_context`, `find_entities`, `get_entity`,
-`get_neighbourhood`, `get_item`, `recent_changes`) and two resource kinds (entity pages and items)
-cannot change your data, send anything or act on your computer. See
-[MCP tools and scopes](../reference/mcp.md).
+Only read: seven read-only tools and two resource kinds (see
+[MCP tools and scopes](../reference/mcp.md)). Each app gets its own client with its own token
+(`ngt_…`, shown once) and scopes. `nuggetd mcp install` uses the defaults (all sources, all tools, no
+sensitive items); **Connect an app** in the desktop app lets you choose. Access is local only,
+audited, rate-limited and revocable on **Connected AI apps**. If you lose a token, revoke the client
+and create a new one.
 
-## How access works
-
-- **One client per app**, each with its own token and scopes. `nuggetd mcp install` uses the
-  defaults (all sources, all tools, no sensitive items). To choose, use **Connect an app** in the
-  desktop app and pick the sources, tools, and whether sensitive items are allowed.
-- **The token (`ngt_…`) is shown once.** Nugget stores only a keyed hash. If you lose it, revoke the
-  client and create a new one.
-- **Local only**: stdio through `nuggetd mcp`, or a listener on `127.0.0.1`.
-- **Revocable, audited, rate-limited.** Revoking a client cuts it off on its next request. Every call
-  is in the audit log (arguments summarised, never content). Each client is limited to bursts of 60
-  requests and 120 per minute.
-
-## Stdio or HTTP?
-
-Prefer **stdio** (`nuggetd mcp --client <id>`): the app launches the bridge, which hands the token
-to the daemon over a user-private local socket, never over TCP. Use **HTTP**
-(`http://127.0.0.1:7319/mcp` with an `Authorization: Bearer` header) only for apps that cannot launch
-a command: if the daemon is stopped and another program takes the port, an HTTP-configured app would
-send it the token.
+**Prefer stdio** (`nuggetd mcp --client <id>`): the token goes to the daemon over a private local
+socket. Use HTTP (`http://127.0.0.1:7319/mcp`) only for apps that can't launch a command: if the
+daemon is stopped and another program takes the port, the app would send it the token.
 
 In the snippets, replace `mcp_YOUR_CLIENT_ID` and `ngt_YOUR_TOKEN` (the desktop app fills them in).
-If `nuggetd` is not on the app's `PATH`, use its full path (in JSON on Windows, double each
-backslash). If the daemon runs with `--home` or `NUGGET_HOME`, add `NUGGET_HOME` to `env` too.
+If `nuggetd` is not on the app's `PATH`, use its full path. If the daemon runs with `--home` or
+`NUGGET_HOME`, add `NUGGET_HOME` to `env` too.
 
 ## Claude Desktop
 
@@ -49,12 +35,9 @@ backslash). If the daemon runs with `--home` or `NUGGET_HOME`, add `NUGGET_HOME`
 nuggetd mcp install --client claude-desktop
 ```
 
-It asks you to confirm (`--yes` skips this), creates the client and adds a `nugget` entry under
-`mcpServers`, keeping the rest of the file and saving a `<file>.nugget-backup-<time>` copy. Running it
-again replaces the entry and revokes the old client. `--config PATH` and `--name NAME` override the
-file and client name. Restart Claude Desktop afterwards.
-
-To do it by hand, add this to the config file and restart:
+This adds a `nugget` entry to Claude Desktop's config (keeping a `<file>.nugget-backup-<time>`
+copy); `--yes` skips the confirmation, `--config PATH` and `--name NAME` override the file and client
+name. Restart Claude Desktop afterwards. By hand, add this to the config file:
 
 | OS | Config file |
 |---|---|
@@ -114,9 +97,7 @@ HTTP:
   "mcpServers": {
     "nugget": {
       "url": "http://127.0.0.1:7319/mcp",
-      "headers": {
-        "Authorization": "Bearer ngt_YOUR_TOKEN"
-      }
+      "headers": { "Authorization": "Bearer ngt_YOUR_TOKEN" }
     }
   }
 }
@@ -131,21 +112,14 @@ secret storage:
 ```json
 {
   "inputs": [
-    {
-      "type": "promptString",
-      "id": "nugget-token",
-      "description": "Nugget MCP token (ngt_...)",
-      "password": true
-    }
+    { "type": "promptString", "id": "nugget-token", "description": "Nugget MCP token (ngt_...)", "password": true }
   ],
   "servers": {
     "nugget": {
       "type": "stdio",
       "command": "nuggetd",
       "args": ["mcp", "--client", "mcp_YOUR_CLIENT_ID"],
-      "env": {
-        "NUGGET_MCP_TOKEN": "${input:nugget-token}"
-      }
+      "env": { "NUGGET_MCP_TOKEN": "${input:nugget-token}" }
     }
   }
 }
@@ -156,20 +130,13 @@ Over HTTP:
 ```json
 {
   "inputs": [
-    {
-      "type": "promptString",
-      "id": "nugget-token",
-      "description": "Nugget MCP token (ngt_...)",
-      "password": true
-    }
+    { "type": "promptString", "id": "nugget-token", "description": "Nugget MCP token (ngt_...)", "password": true }
   ],
   "servers": {
     "nugget": {
       "type": "http",
       "url": "http://127.0.0.1:7319/mcp",
-      "headers": {
-        "Authorization": "Bearer ${input:nugget-token}"
-      }
+      "headers": { "Authorization": "Bearer ${input:nugget-token}" }
     }
   }
 }
@@ -187,9 +154,7 @@ server from the Agent panel's settings with the same command, arguments and envi
       "source": "custom",
       "command": "nuggetd",
       "args": ["mcp", "--client", "mcp_YOUR_CLIENT_ID"],
-      "env": {
-        "NUGGET_MCP_TOKEN": "ngt_YOUR_TOKEN"
-      }
+      "env": { "NUGGET_MCP_TOKEN": "ngt_YOUR_TOKEN" }
     }
   }
 }
@@ -212,9 +177,8 @@ header: Authorization: Bearer ngt_YOUR_TOKEN
 transport: streamable HTTP (loopback only)
 ```
 
-The HTTP listener (`[mcp] http`, port `[mcp] port`) binds `127.0.0.1` only. If the port is taken, the
-daemon serves stdio only. Requests with an `Origin` header are refused unless listed in
-`[mcp] allowed_origins`, and the token is never accepted in the URL.
+The HTTP listener (`[mcp] http`, `[mcp] port`) binds `127.0.0.1` only; browser origins are refused
+unless listed in `[mcp] allowed_origins`.
 
 ## Errors an app may show
 
@@ -230,13 +194,11 @@ daemon serves stdio only. Requests with an `Origin` header are refused unless li
 
 ## Managing access
 
-**Connected AI apps** lists every client with its scopes and last use, and revokes them (IPC:
+**Connected AI apps** lists clients with their scopes and last use, and revokes them (IPC:
 `mcp.clients.list`, `mcp.clients.create`, `mcp.clients.revoke`; see
 [IPC protocol](../reference/ipc.md#mcp-clients)). To turn MCP off, set `enabled = false` under
 `[mcp]` and restart the daemon.
 
-## Prompt injection
-
-Content from your sources (an email, a saved web page) could contain text written to manipulate an
-AI. Nugget wraps it in labelled `<untrusted-content>` blocks and tells the model to treat it as data.
-That reduces the risk but cannot remove it, so give apps only the sources they need.
+**Prompt injection:** content from your sources could contain text written to manipulate an AI.
+Nugget marks it as untrusted data, which reduces the risk but cannot remove it, so give apps only the
+sources they need.
