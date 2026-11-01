@@ -33,12 +33,6 @@ name: Release rehearsal
 
 on:
   workflow_dispatch:
-    inputs:
-      runner:
-        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
-        required: false
-        default: self-hosted
-        type: string
 
 permissions: {}
 
@@ -160,7 +154,7 @@ jobs:
 
   windows:
     name: Rehearsal (Windows x64, NSIS)
-    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
+    runs-on: windows-2022
     permissions:
       contents: read
     timeout-minutes: 150

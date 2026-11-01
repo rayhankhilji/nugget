@@ -1,9 +1,8 @@
 # https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 #
-# Monthly, one grouped PR per ecosystem at most, to stay inside the GitHub Free Actions minutes
-# (CONTRIBUTING.md, "CI on the free tier"). Pull requests do not run CI by themselves; check one
-# with `gh workflow run ci.yml --ref <dependabot branch>` before merging. Security updates are
-# separate (repository settings) and not limited by this file.
+# Monthly, one grouped PR per ecosystem at most, to keep the PR and CI noise down. ci.yml, e2e.yml and
+# docs.yml run on each Dependabot PR. Security updates are separate (repository settings) and not
+# limited by this file.
 version: 2
 updates:
   - package-ecosystem: cargo

@@ -6,6 +6,9 @@ name: Package smoke
 # See packaging/scripts/smoke-appimage.sh.
 
 on:
+  # Weekly, Thursday 04:07 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "7 4 * * 4"
   workflow_dispatch:
   # From another workflow (e.g. release.yml): pass the name of an artifact of the calling run
   # that holds a Linux x86_64 .AppImage to smoke-test it instead of building one.

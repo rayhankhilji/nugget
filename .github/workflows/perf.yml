@@ -3,7 +3,7 @@ name: Perf
 # The daemon and store at real scale: `nugget-bench perf --backend real --scale full` seeds 100k
 # items, launches the release `nuggetd` and measures startup, search, knowledge extraction, the
 # vault render, idle CPU and wakeups, RSS and ingest (see bench/README.md). Too slow for every
-# push: run it by hand (manual only: free tier, CONTRIBUTING.md).
+# push: run it by hand, and weekly to catch drift.
 #
 # `energy` and `energy-prefill`: what Nugget costs in energy and battery (`nugget-bench energy`,
 # bench/README.md "energy (DD2)"), on Linux and macOS: the idle daemon, indexing, the shell's
@@ -16,6 +16,9 @@ name: Perf
 # against `nuggetd` built at `before_ref` on the same runner (same bench, same seeded corpus), for
 # a before/after. Dispatch with `only: scale` to run just this job.
 on:
+  # Weekly, Monday 04:17 UTC, and on demand.
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
     inputs:
       scale:
@@ -39,11 +42,6 @@ on:
         description: "scale: item counts, as a JSON list"
         required: false
         default: "[250000, 500000]"
-        type: string
-      runner:
-        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
-        required: false
-        default: self-hosted
         type: string
 
 permissions:
@@ -118,7 +116,7 @@ jobs:
   energy:
     name: Energy (${{ matrix.os }})
     if: ${{ !contains(fromJSON('["perf", "scale"]'), inputs.only || 'all') }}
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -285,7 +283,7 @@ jobs:
   energy-prefill:
     name: Energy, read-ahead prefill (${{ matrix.os }})
     if: ${{ !contains(fromJSON('["perf", "scale"]'), inputs.only || 'all') }}
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -383,7 +381,7 @@ jobs:
   # knowledge run over every item, the vault render, then startup, search, Ask retrieval, the
   # knowledge page and the hot status paths over IPC, RSS and the store's size on disk. With
   # `before_ref`, the same bench (same corpus, same seed) runs first against `nuggetd` built at
-  # that ref, so before and after share the runner. Hours per run.
+  # that ref, so before and after share the runner. Not on the weekly schedule (hours per run).
   scale:
     name: Scale, ${{ matrix.items }} items (Linux)
     if: ${{ github.event_name == 'workflow_dispatch' && contains(fromJSON('["all", "scale"]'), inputs.only || 'all') }}

@@ -1,20 +1,16 @@
-name: CI (full, all OSes)
+name: CI (weekly, all OSes)
 
-# The full cross-OS matrix that ci.yml used to run on every push and pull request: fmt, clippy and
-# tests on Linux, macOS and Windows, MSRV, bench smoke on all three OSes, the desktop app on all
-# three OSes, and cargo-deny. Manual only, to stay inside the GitHub Free minutes (CONTRIBUTING.md,
-# "CI on the free tier"); ci.yml runs the lean Linux subset automatically. macOS and Windows jobs
-# go to a self-hosted runner unless `runner` is `github-hosted`:
-#   gh workflow run ci-full.yml --ref <branch> [-f runner=github-hosted]
+# The parts of the old every-push CI matrix that ci.yml no longer runs: clippy and the
+# platform-sensitive tests on macOS and Windows, the desktop app on macOS and Windows, MSRV, and
+# bench smoke on all three OSes. fmt, cargo-deny, DCO and the Linux clippy/tests/desktop are in
+# ci.yml and are not repeated here. Weekly and on demand:
+#   gh workflow run ci-weekly.yml --ref <branch>
 
 on:
+  # Weekly, Sunday 03:43 UTC.
+  schedule:
+    - cron: "43 3 * * 0"
   workflow_dispatch:
-    inputs:
-      runner:
-        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
-        required: false
-        default: self-hosted
-        type: string
 
 # Least privilege: every job only reads the repository.
 permissions:
@@ -32,32 +28,19 @@ env:
   RUST_BACKTRACE: "1"
 
 jobs:
-  fmt:
-    name: rustfmt
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component rustfmt
-      - name: cargo fmt
-        run: cargo fmt --all --check
-
-  # Wall time: Linux clippies and tests every crate. macOS and Windows clippy every crate (cheap:
-  # check-mode builds) but test only the crates with per-OS code paths (paths, permissions,
-  # keychain, sockets/pipes, process supervision, hotkeys, accessibility, file watching); the rest
-  # is pure Rust whose behaviour does not depend on the OS. nugget-desktop needs the webview system
-  # libraries and a built frontend, so the desktop job covers it on all three OSes.
+  # macOS and Windows clippy every crate (cheap: check-mode builds) but test only the crates with
+  # per-OS code paths (paths, permissions, keychain, sockets/pipes, process supervision, hotkeys,
+  # accessibility, file watching); the rest is pure Rust whose behaviour does not depend on the
+  # OS, and ci.yml tests all of it on Linux. nugget-desktop needs the webview system libraries and
+  # a built frontend, so the desktop job covers it.
   rust:
     name: Rust (${{ matrix.os }})
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     env:
       PLATFORM_CRATES: >-
         -p nugget-core -p nugget-store -p nugget-ipc -p nugget-runtime -p nugget-infer
@@ -87,17 +70,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/claude/inspiring-wozniak-z3gg3n' || github.ref == 'refs/heads/main' }}
 
       - name: cargo clippy
         run: cargo clippy --locked --workspace --all-targets --exclude nugget-desktop --keep-going -- -D warnings
 
-      - name: cargo test (workspace)
-        if: runner.os == 'Linux'
-        run: cargo test --locked --workspace --exclude nugget-desktop
-
       - name: cargo test (platform-sensitive crates)
-        if: runner.os != 'Linux'
         shell: bash
         run: |
           # shellcheck disable=SC2086 # PLATFORM_CRATES is a list of `-p` flags and must word-split.
@@ -118,7 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v0-rust-msrv
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/claude/inspiring-wozniak-z3gg3n' || github.ref == 'refs/heads/main' }}
       # nugget-desktop is left out for the same reason as in the rust job (webview libraries, built
       # frontend); it has no MSRV-sensitive code of its own beyond what its dependencies check.
       - name: cargo check
@@ -126,7 +104,7 @@ jobs:
 
   bench:
     name: Bench smoke (${{ matrix.os }})
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -152,7 +130,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/claude/inspiring-wozniak-z3gg3n' || github.ref == 'refs/heads/main' }}
 
       # `all` includes `knowledge` (the real M2 pipeline on the fixture corpus, about 2 s).
       - name: Bench smoke run
@@ -187,31 +165,16 @@ jobs:
 
   desktop:
     name: Desktop (${{ matrix.os }})
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-
-      - name: Install Tauri system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            file \
-            libayatana-appindicator3-dev \
-            libgtk-3-dev \
-            librsvg2-dev \
-            libsoup-3.0-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            libxdo-dev
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component clippy
@@ -228,7 +191,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/claude/inspiring-wozniak-z3gg3n' || github.ref == 'refs/heads/main' }}
 
       # The pnpm version comes from `packageManager` in apps/desktop/package.json.
       - uses: pnpm/action-setup@v4
@@ -261,23 +224,3 @@ jobs:
 
       - name: cargo test (desktop)
         run: cargo test --locked -p nugget-desktop
-
-  deny:
-    name: cargo-deny (${{ matrix.checks }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        checks:
-          - advisories
-          - bans licenses sources
-    # A new upstream advisory should not block unrelated PRs; it still shows as a failed job.
-    continue-on-error: ${{ matrix.checks == 'advisories' }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check ${{ matrix.checks }}

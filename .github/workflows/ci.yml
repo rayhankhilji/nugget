@@ -1,18 +1,24 @@
 name: CI
 
-# The one workflow that runs by itself: a single Linux job on every push to the integration branch
-# and main. It is sized for the GitHub Free minutes of a private repository (CONTRIBUTING.md, "CI on
-# the free tier"): fmt, clippy (workspace including the desktop crate, plus nuggetd with
-# fake-runtime), the workspace tests, the desktop frontend build and vitest, cargo-deny, the book
-# and bench-table checks, and DCO sign-offs. Everything else (macOS and Windows, MSRV, bench smoke,
-# e2e, fuzz, real OS, packaging, evals, perf) is a manual workflow: see ci-full.yml and the others.
-#
-# Pull requests do not run it automatically; to check a branch before merging:
-#   gh workflow run ci.yml --ref <branch>
+# Runs on every push to the integration branch and main, and on every pull request: one fast Linux
+# job with fmt, cargo-deny, clippy (the workspace including the desktop crate, plus nuggetd with
+# fake-runtime), the workspace tests, the desktop frontend build and vitest, and DCO sign-offs.
+# Next to it on the same triggers: e2e.yml (real-app end-to-end) and docs.yml (book, links and
+# bench-table checks). macOS, Windows, MSRV and bench smoke are in ci-weekly.yml; the heavy and
+# real-OS suites run weekly and on demand (CONTRIBUTING.md, "CI").
 
 on:
   push:
     branches: [claude/inspiring-wozniak-z3gg3n, main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE*"
+      - "NOTICE*"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+      - ".github/dependabot.yml"
+  pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -27,9 +33,9 @@ on:
 permissions:
   contents: read
 
-# A newer push supersedes a running check of the same branch; only the newest result matters.
+# A newer push (or PR update) supersedes a running check of the same branch; only the newest result matters.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -51,16 +57,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          # The DCO step walks the pushed commits.
+          # The DCO step walks the pushed or pull-request commits.
           fetch-depth: 0
           persist-credentials: false
 
-      - name: DCO sign-off (pushed commits)
+      - name: DCO sign-off
         env:
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.sha }}
+          BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          AFTER: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          # A new branch or a manual run has no usable `before`; check the head commit only.
+          # Pull request: base..head. Push: before..after. A new branch or a manual run has no
+          # usable `before`; check the head commit only.
           if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             range="$AFTER^!"
           else
@@ -81,13 +88,6 @@ jobs:
             echo "Sign off each commit with 'git commit -s' (see CONTRIBUTING.md)."
             exit 1
           fi
-
-      # Seconds each: the book against the code, and the generated bench tables.
-      - name: Book and bench-table checks
-        run: |
-          python3 docs/book/check-refs.py
-          python3 scripts/bench-readme.py --check
-          python3 scripts/bench-dashboard.py --check
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -121,8 +121,8 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libxdo-dev
 
-      # Dependencies only (workspace crates always rebuild). Saved from these two branches, which
-      # every push here comes from, so the next push starts warm.
+      # Dependencies only (workspace crates always rebuild). Saved on pushes to the two branches
+      # above; pull requests restore it.
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-ci-linux

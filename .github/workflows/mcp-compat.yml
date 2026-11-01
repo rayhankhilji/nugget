@@ -18,13 +18,10 @@ name: MCP compatibility
 # Loopback only: nothing but npm and PyPI (dependency install) is reached over the network.
 
 on:
+  # Weekly, Thursday 03:23 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "23 3 * * 4"
   workflow_dispatch:
-    inputs:
-      runner:
-        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
-        required: false
-        default: self-hosted
-        type: string
 
 permissions:
   contents: read
@@ -43,7 +40,7 @@ env:
 jobs:
   compat:
     name: MCP SDK clients (${{ matrix.os }})
-    runs-on: ${{ (startsWith(matrix.os, 'ubuntu') || inputs.runner == 'github-hosted') && matrix.os || fromJSON(format('["{0}","{1}"]', inputs.runner || 'self-hosted', startsWith(matrix.os, 'macos') && 'macOS' || 'Windows')) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     # Linux is required. macOS and Windows run the same legs (the stdio bridge goes over the
     # local IPC socket / named pipe) but do not fail the workflow until they have a green record.

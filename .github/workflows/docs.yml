@@ -1,11 +1,13 @@
 name: Docs
 
-# Builds the book in docs/book, checks its links, and checks it against the code. Manual only (free
-# tier, CONTRIBUTING.md); ci.yml runs check-refs.py and the bench-table checks on every push, so
-# renaming a config key, CLI flag, IPC method, MCP tool or connector setting without updating the
-# book still fails there. This adds the mdBook build and the link check. The book is not published anywhere yet.
+# Builds the book in docs/book, checks its links, and checks it against the code. It runs on every
+# change, not only docs changes: renaming a config key, CLI flag, IPC method, MCP tool or connector
+# setting must fail here until the book is updated. The book is not published anywhere yet.
 
 on:
+  push:
+    branches: [claude/inspiring-wozniak-z3gg3n, main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -13,7 +15,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   book:

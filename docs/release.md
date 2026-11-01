@@ -169,13 +169,6 @@ signature a released `nuggetd` offers no model downloads.
 
 On the exact version-bump merge commit; tag only when all are green.
 
-These runs are manual and count against the GitHub Free Actions allowance, except on self-hosted
-runners. A dry run of `release.yml` on GitHub's images cost about 540 Linux-equivalent minutes
-(macOS bills at about 10×), a quarter of the monthly allowance. Pushing a `v*` tag runs it again.
-Check the remaining minutes first ([CI on the free tier](../CONTRIBUTING.md#ci-on-the-free-tier)).
-`release-rehearsal.yml` and `windows-signing.yml` send their Windows jobs to a self-hosted runner
-unless you pass `-f runner=github-hosted`.
-
 ```sh
 gh workflow run release.yml --ref main -f dry_run=true     # unsigned installers + smoke tests
 gh workflow run release-rehearsal.yml --ref main            # full release with throwaway keys (§3)
@@ -292,7 +285,8 @@ updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line 
 
 - macOS minimum is 11.0 (`bundle.macOS.minimumSystemVersion`). Linux needs glibc 2.35; packages
   depend on WebKitGTK 4.1, GTK 3, libayatana-appindicator.
-- A job that never gets a runner (no log) may mean Actions minutes ran out: check Billing.
+- A job that never gets a runner (no log) fails within seconds: its annotation says why (e.g. a
+  billing lock on the account, cleared in the account's billing settings).
 - MSI versions must be numeric: `packaging/windows/wix-version.ps1` maps `X.Y.Z-rc.N` to
   `X.Y.Z.N`. Windows Installer ignores the fourth field, so the final release still replaces an RC.
 
@@ -365,8 +359,8 @@ Installing one: [install guide](book/src/guide/install.md#dry-run-installers).
 `smoke-windows.ps1` (NSIS, silent install and uninstall) launch the app with throwaway
 `HOME`/`NUGGET_HOME`, wait for a `Nugget` window, `starting nuggetd` and `connected to nuggetd`,
 close it as a user would, expect a clean exit, stop the daemon (SIGTERM; `CTRL_BREAK` on Windows)
-and require `stopped`. `package-smoke.yml` and `real-os.yml` run them (manual runs only; see
-[CI on the free tier](../CONTRIBUTING.md#ci-on-the-free-tier)).
+and require `stopped`. `package-smoke.yml` and `real-os.yml` run them weekly and on demand
+(`gh workflow run real-os.yml --ref <branch>`).
 The x64 dmg, MSI, `.deb` and `.rpm` are built but not launched.
 
 ### Release rehearsal and Windows signing proof

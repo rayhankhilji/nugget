@@ -15,13 +15,10 @@ name: Windows signing
 #    MSI and the installed/extracted nugget-desktop.exe, nuggetd.exe and uninstall.exe.
 
 on:
+  # Weekly, Saturday 04:19 UTC, and on demand; not on every push (CONTRIBUTING.md, CI).
+  schedule:
+    - cron: "19 4 * * 6"
   workflow_dispatch:
-    inputs:
-      runner:
-        description: "Label of the runner for macOS/Windows jobs ('github-hosted' uses GitHub's paid images; anything else picks a self-hosted runner with that label plus the OS label)"
-        required: false
-        default: self-hosted
-        type: string
 
 permissions:
   contents: read
@@ -40,7 +37,7 @@ env:
 jobs:
   sign-script:
     name: sign.ps1 checks
-    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
+    runs-on: windows-2022
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -202,7 +199,7 @@ jobs:
   azure-oidc:
     name: sign.ps1 Azure OIDC (fake identity)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
+    runs-on: windows-2022
     permissions:
       contents: read
       id-token: write
@@ -258,7 +255,7 @@ jobs:
 
   bundles:
     name: Signed bundles (throwaway certificate)
-    runs-on: ${{ inputs.runner == 'github-hosted' && 'windows-2022' || fromJSON(format('["{0}","Windows"]', inputs.runner || 'self-hosted')) }}
+    runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
