@@ -14,7 +14,7 @@ import {
 import { keyOrText } from "../doubletap";
 import { formatRelative, localityLabel } from "../format";
 import { t as translate, useT, type MessageKey } from "../i18n";
-import { textDir } from "../bidi";
+import { textDir, type TextDir } from "../bidi";
 import { detectOs } from "../onboarding/platform";
 import {
   accept,
@@ -255,6 +255,11 @@ export function Overlay() {
   }, [apply, hasHistory]);
 
   const editing = state.mode === "edit";
+  // The editor keeps the direction the draft had when editing began, so typing never flips it.
+  const editDir = useRef<TextDir>("auto");
+  const wasEditing = useRef(false);
+  if (editing && !wasEditing.current) editDir.current = textDir(state.draft);
+  wasEditing.current = editing;
   useLayoutEffect(() => {
     if (!editing || !editor.current) return;
     const el = editor.current;
@@ -326,7 +331,7 @@ export function Overlay() {
         <textarea
           ref={editor}
           className="overlay-editor"
-          dir={textDir(state.draft)}
+          dir={editDir.current}
           aria-label={t("doubletap.overlay.editLabel")}
           value={state.draft}
           onChange={(e) => update(setDraft(ref.current, e.target.value))}

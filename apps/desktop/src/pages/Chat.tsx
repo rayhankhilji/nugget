@@ -174,7 +174,8 @@ export function failedOnDevice(turn: Pick<Turn, "provider">, runtimes: readonly 
   if (turn.provider) {
     return turn.provider.startsWith("local-") || !!runtimes?.some((r) => r.provider === turn.provider);
   }
-  return !!runtimes?.some((r) => r.role === "chat" && (r.state === "failed" || r.state === "starting" || r.state === "stopped"));
+  // `stopped` is an installed model at rest (not started yet, or stopped when idle): not a failure.
+  return !!runtimes?.some((r) => r.role === "chat" && (r.state === "failed" || r.gave_up === true || (r.state === "starting" && !!r.error)));
 }
 
 /** Settled turns as saved; a turn still streaming (e.g. when leaving the page) counts as stopped. */

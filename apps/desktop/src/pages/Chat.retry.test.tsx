@@ -132,6 +132,51 @@ describe("Chat Retry (LL2)", () => {
     expect(chats).toHaveLength(2);
   });
 
+  it("retries a later question with sources, with the earlier turns as history, and saves the new answer", async () => {
+    const asks: Record<string, unknown>[] = [];
+    const saved: { messages: { role: string; text: string; state?: string }[] }[] = [];
+    mockDaemon({
+      chat_history_load: [],
+      chat_history_save: (a: unknown) => {
+        saved.push((a as { conversation: (typeof saved)[number] }).conversation);
+      },
+      runtime_status: [chatRuntime({ state: "ready", gave_up: false, error: null })],
+      retrieve_ask: (a: unknown) => {
+        asks.push((a as Req).request);
+        return {
+          stream_id: `s-ask-${asks.length}`,
+          provider: "local-chat",
+          locality: "on_device",
+          citations: [{ n: 1, item: { source: "files-1", key: "a.md" }, chunk_id: 1, title: "A", url: null, sensitive: false }],
+          excluded_sensitive: 0,
+        };
+      },
+    });
+    const { container } = await render(<ChatPage />);
+    await say(container, "One?");
+    await done("s-ask-1", null, "First [1].");
+    await say(container, "Two?");
+    await done("s-ask-2", "The on-device chat model stopped unexpectedly; restarting it.");
+    await click(byText(container, "button", "Retry")!);
+    await flush();
+    expect(asks).toHaveLength(3);
+    expect(asks[2]).toMatchObject({
+      query: "Two?",
+      history: [
+        { role: "user", text: "One?" },
+        { role: "assistant", text: "First." },
+      ],
+    });
+    await done("s-ask-3", null, "Second [1].");
+    const last = saved[saved.length - 1]!;
+    expect(last.messages.map((m) => [m.role, m.text, m.state])).toEqual([
+      ["user", "One?", undefined],
+      ["assistant", "First [1].", "done"],
+      ["user", "Two?", undefined],
+      ["assistant", "Second [1].", "done"],
+    ]);
+  });
+
   it("still offers Retry when the daemon has no runtime status", async () => {
     const { chats } = setup(() => new Error("missing"));
     const { container } = await render(<ChatPage />);
@@ -151,7 +196,11 @@ describe("failedOnDevice", () => {
     expect(failedOnDevice({ provider: "cloud" }, [chatRuntime()])).toBe(false);
     expect(failedOnDevice({ provider: "llama" }, [chatRuntime({ provider: "llama" })])).toBe(true);
     expect(failedOnDevice({}, [chatRuntime()])).toBe(true);
-    expect(failedOnDevice({}, [chatRuntime({ state: "ready" })])).toBe(false);
+    expect(failedOnDevice({}, [chatRuntime({ state: "ready", gave_up: false })])).toBe(false);
     expect(failedOnDevice({}, null)).toBe(false);
+    // An installed model at rest is not why a cloud call failed.
+    expect(failedOnDevice({}, [chatRuntime({ state: "stopped", gave_up: false, error: null })])).toBe(false);
+    expect(failedOnDevice({}, [chatRuntime({ state: "starting", gave_up: false, error: null })])).toBe(false);
+    expect(failedOnDevice({}, [chatRuntime({ state: "starting", gave_up: false, error: "The on-device chat model stopped responding; restarting it." })])).toBe(true);
   });
 });
