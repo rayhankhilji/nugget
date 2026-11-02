@@ -76,6 +76,9 @@ pub struct AppState {
     pub app_scheme: String,
     /// Website origins: CORS and allowed billing return URLs. Empty = CORS off.
     pub site_origins: Vec<String>,
+    /// How long `POST /v1/sync` waits for its runs before answering 202 (they continue in the
+    /// background; progress is in `GET /v1/connections`).
+    pub sync_wait: Duration,
     toolkits: Mutex<Option<(Instant, Vec<Toolkit>)>>,
     pub limits: Limiters,
     /// Header with the real client IP set by the edge proxy; `None` uses the TCP peer.
@@ -100,6 +103,7 @@ impl AppState {
             public_url: None,
             app_scheme: "nugget".into(),
             site_origins: Vec::new(),
+            sync_wait: Duration::from_secs(20),
             toolkits: Mutex::new(None),
             limits: Limiters::new(Limits::default()),
             client_ip_header: Some("fly-client-ip".into()),
@@ -666,7 +670,10 @@ async fn disconnect(
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn sync(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Value>> {
+async fn sync(
+    State(s): State<Arc<AppState>>,
+    h: HeaderMap,
+) -> ApiResult<(StatusCode, Json<Value>)> {
     let c = caller(&s, &h).await?;
     c.entitled()?;
     let u = c.user;
@@ -692,11 +699,24 @@ async fn sync(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Va
         }
         synced
     });
-    let synced = work.await.map_err(|e| {
-        tracing::error!(error = %e, "sync task failed");
-        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "sync failed")
-    })?;
-    Ok(Json(json!({"synced": synced})))
+    match tokio::time::timeout(s.sync_wait, work).await {
+        Ok(done) => {
+            let synced = done.map_err(|e| {
+                tracing::error!(error = %e, "sync task failed");
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "sync failed")
+            })?;
+            let running = synced.iter().any(|r| r.in_progress);
+            Ok((
+                StatusCode::OK,
+                Json(json!({"synced": synced, "running": running})),
+            ))
+        }
+        // A long first backfill: it carries on in the background; the client polls connections.
+        Err(_) => Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({"synced": [], "running": true})),
+        )),
+    }
 }
 
 #[derive(Deserialize)]

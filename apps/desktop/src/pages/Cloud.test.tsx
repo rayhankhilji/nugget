@@ -314,6 +314,38 @@ describe("Plan & billing", () => {
   });
 });
 
+describe("CloudPage background import", () => {
+  it("shows import progress, says the import continues, and refreshes until it ends", async () => {
+    let polls = 0;
+    const importing: CloudConnections = {
+      ...lists,
+      connections: [{ id: "k1", toolkit: "gmail", status: "active", last_synced_at: null, last_error: null, syncing: true, backfill_done: false, items_synced: 1234 }],
+    };
+    const finished: CloudConnections = {
+      ...lists,
+      connections: [{ id: "k1", toolkit: "gmail", status: "active", last_synced_at: "2026-11-02T08:00:00Z", last_error: null, syncing: false, backfill_done: true, items_synced: 2000 }],
+    };
+    mockDaemon({
+      cloud_session: signedIn,
+      ...billing,
+      cloud_connections_list: () => (++polls < 3 ? importing : finished),
+      cloud_sync: { synced: [], running: true },
+    });
+    const { container } = await render(<CloudPage />);
+    const row = () => container.querySelector("tbody tr")!;
+    expect(row().textContent).toContain("Connected");
+    expect(row().textContent).toContain("Importing… 1,234 items");
+    await click(byText(container, "button", "Sync now"));
+    expect(container.textContent).toContain("Importing in the background");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 3200));
+    });
+    await flush(3);
+    expect(row().textContent).not.toContain("Importing…");
+    expect(polls).toBeGreaterThanOrEqual(3);
+  }, 10_000);
+});
+
 describe("cloudApi", () => {
   it("keeps the cloud error code", async () => {
     mockDaemon({

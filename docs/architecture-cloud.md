@@ -60,10 +60,15 @@ The Rust service costs about £2–3 a month and lets us keep a single language,
 
 ### Ingest workers
 These run inside `nugget-cloud`, as a tokio task per process:
-1. **Sync loop.** Every 5 minutes it asks `nugget_private.due_connections()` for connections that are due. Gmail and Calendar are synced every 30 minutes while the user's desktop app is active (it sends a heartbeat), and once every 24 hours otherwise. A user can also run a sync on demand with `POST /v1/sync`.
+1. **Sync loop.** Every minute it claims due connections with a lease (`nugget_private.claim_due_connections`). The cadence comes from the plan (see section 6) while the user is active, and is once a day otherwise. A user can also start a sync with `POST /v1/sync`. That waits up to 20 s, then answers `202 {running: true}` while the import continues in the background.
+   - Each connection has a run lease (`syncing_until`), so a request and the scheduler never sync the same connection at once.
+   - Progress (`syncing`, `items_synced`, `backfill_done`) is in `GET /v1/connections`, which the desktop polls while an import runs.
+   - A long Gmail backfill resumes where it stopped, one minute later.
 2. **Fetch.** It calls Composio tools as that user: `GMAIL_FETCH_EMAILS` with an `after:` query built from the cursor, and `GOOGLECALENDAR_EVENTS_LIST` with `timeMin`/`timeMax` and `updatedMin`.
 3. **Normalise.** Each email or event becomes an `items` row. HTML is stripped, quoted replies are trimmed, and the body is capped at 64 KB. If the content hash has not changed, the item is skipped, so re-syncs cost nothing.
 4. **Chunk and embed.** Text is split into chunks of about 1,200 characters with overlap. Chunks get embeddings only if an embedder is configured (see the AI gateway). Full-text search always works.
+   - Unchanged items are skipped with one hash lookup per page.
+   - All new chunks on a page are embedded together, at most 100 inputs per provider call, not one call per item.
 5. **Extract** (M2). `nugget-knowledge` extraction runs on new items, using the gateway's cheap model, and writes to `entities` and `claims`.
 
 ## 2. Composio

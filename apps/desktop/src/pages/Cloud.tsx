@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { splitCitations } from "../citations";
 import { CloudError, cloudApi, type BillingInterval, type CloudAnswer, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
 import { formatRelative, formatTime } from "../format";
@@ -75,6 +75,11 @@ function SignedIn({ email, onSignedOut }: { email: string | null; onSignedOut: (
   );
 }
 
+/** The server reports `active`; older builds and Composio say `ACTIVE`. */
+function isActive(status: string): boolean {
+  return status.toLowerCase() === "active";
+}
+
 function Connections() {
   const t = useT();
   const now = useNow();
@@ -114,11 +119,22 @@ function Connections() {
   const sync = () =>
     act("sync", async () => {
       setSynced(null);
-      setSynced((await cloudApi.sync()).synced);
+      const r = await cloudApi.sync();
+      setSynced(r.synced);
+      if (r.running) setNotice(t("cloud.syncRunning"));
       list.reload();
     });
 
-  const connected = new Set(data?.connections.filter((c) => c.status === "ACTIVE").map((c) => c.toolkit) ?? []);
+  // While the cloud imports in the background, refresh the list every few seconds.
+  const importing = data?.connections.some((c) => c.syncing) ?? false;
+  const reload = list.reload;
+  useEffect(() => {
+    if (!importing) return;
+    const timer = setInterval(reload, 3000);
+    return () => clearInterval(timer);
+  }, [importing, reload]);
+
+  const connected = new Set(data?.connections.filter((c) => isActive(c.status)).map((c) => c.toolkit) ?? []);
 
   return (
     <>
@@ -151,14 +167,20 @@ function Connections() {
                   <tr key={c.id}>
                     <th scope="row">{nameOf(c.toolkit)}</th>
                     <td>
-                      <Badge tone={c.status === "ACTIVE" ? "good" : c.status === "INITIATED" ? "neutral" : "bad"}>{c.status === "ACTIVE" ? t("cloud.connected") : c.status}</Badge>
+                      <Badge tone={isActive(c.status) ? "good" : c.status.toLowerCase() === "initiated" ? "neutral" : "bad"}>{isActive(c.status) ? t("cloud.connected") : c.status}</Badge>
                       {c.last_error && (
                         <div className="small muted" dir="auto">
                           {c.last_error}
                         </div>
                       )}
                     </td>
-                    <td title={c.last_synced_at ? formatTime(c.last_synced_at) : undefined}>{formatRelative(c.last_synced_at, now)}</td>
+                    <td title={c.last_synced_at ? formatTime(c.last_synced_at) : undefined}>
+                      {c.syncing ? (
+                        <span role="status">{t("cloud.importing", { count: formatNumber(c.items_synced ?? 0) })}</span>
+                      ) : (
+                        formatRelative(c.last_synced_at, now)
+                      )}
+                    </td>
                     <td>
                       <button type="button" className="btn btn-small btn-danger-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: nameOf(c.toolkit) })}>
                         {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}

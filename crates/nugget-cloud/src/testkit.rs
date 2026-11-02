@@ -44,6 +44,8 @@ pub struct FakeComposio {
     pub data: Mutex<HashMap<String, Value>>,
     pub calls: Mutex<Vec<(String, String, Value)>>,
     pub deleted: Mutex<Vec<String>>,
+    /// Delay per tool call (slow-backfill tests).
+    pub delay_ms: std::sync::atomic::AtomicU64,
 }
 
 #[async_trait]
@@ -117,6 +119,10 @@ impl Composio for FakeComposio {
         tool: &str,
         args: Value,
     ) -> Result<Value, ComposioError> {
+        let delay = self.delay_ms.load(std::sync::atomic::Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
         self.calls
             .lock()
             .unwrap()
@@ -161,7 +167,11 @@ impl Llm for FakeLlm {
 }
 
 /// Deterministic bag-of-words vectors, so similar texts are near each other.
-pub struct FakeEmbedder;
+#[derive(Default)]
+pub struct FakeEmbedder {
+    /// Provider calls made (batching check).
+    pub calls: std::sync::atomic::AtomicUsize,
+}
 
 #[async_trait]
 impl Embedder for FakeEmbedder {
@@ -172,6 +182,7 @@ impl Embedder for FakeEmbedder {
         1536
     }
     async fn embed(&self, texts: &[String]) -> Result<(Vec<Vec<f32>>, u32), GatewayError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let vecs = texts
             .iter()
             .map(|t| {

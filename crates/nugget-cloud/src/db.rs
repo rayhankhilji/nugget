@@ -50,6 +50,22 @@ pub struct Connection {
     pub last_error: Option<String>,
     #[serde(skip)]
     pub sync_cursor: Value,
+    /// A sync is running now (in the background or for a request).
+    pub syncing: bool,
+    /// The first backfill has finished.
+    pub backfill_done: bool,
+    /// Items stored or updated so far.
+    pub items_synced: i32,
+}
+
+/// The outcome of one sync run, for [`Db::finish_sync`].
+#[derive(Debug, Default)]
+pub struct SyncRun<'a> {
+    pub cursor: Option<&'a Value>,
+    pub error: Option<&'a str>,
+    pub next_in_secs: i64,
+    pub items: u32,
+    pub backfill_done: bool,
 }
 
 /// One normalised email, event or doc, ready to store.
@@ -109,6 +125,9 @@ impl Connection {
             last_synced_at: r.get("last_synced_at"),
             last_error: r.get("last_error"),
             sync_cursor: r.get("sync_cursor"),
+            syncing: r.get("syncing"),
+            backfill_done: r.get("backfill_done"),
+            items_synced: r.get("items_synced"),
         }
     }
 }
@@ -573,7 +592,8 @@ impl Db {
         self.scoped(Some(user), async |tx| {
             let rows = tx
                 .query(
-                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor
+                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor,
+                            coalesce(syncing_until > now(), false) as syncing, backfill_done, items_synced
                      from public.connections where user_id = $1 order by created_at",
                     &[&user],
                 )
@@ -597,27 +617,74 @@ impl Db {
         .await
     }
 
+    /// Takes the connection's run lease for `lease_secs`; false when another sync holds it.
+    pub async fn claim_sync(&self, user: Uuid, id: Uuid, lease_secs: i64) -> Result<bool, DbError> {
+        let secs = lease_secs as f64;
+        self.scoped(Some(user), async |tx| {
+            let n = tx
+                .execute(
+                    "update public.connections set syncing_until = now() + make_interval(secs => $3)
+                     where user_id = $1 and id = $2 and (syncing_until is null or syncing_until < now())",
+                    &[&user, &id, &secs],
+                )
+                .await?;
+            Ok(n == 1)
+        })
+        .await
+    }
+
+    /// Records a sync run and releases its lease.
     pub async fn finish_sync(
         &self,
         user: Uuid,
         id: Uuid,
-        cursor: Option<&Value>,
-        error: Option<&str>,
-        next_in_secs: i64,
+        run: &SyncRun<'_>,
     ) -> Result<(), DbError> {
-        let secs = next_in_secs as f64;
+        let secs = run.next_in_secs as f64;
+        let items = i32::try_from(run.items).unwrap_or(i32::MAX);
         self.scoped(Some(user), async |tx| {
             tx.execute(
                 "update public.connections set
                    sync_cursor = coalesce($3, sync_cursor),
                    last_synced_at = case when $4::text is null then now() else last_synced_at end,
                    last_error = $4,
-                   next_sync_at = now() + make_interval(secs => $5)
+                   next_sync_at = now() + make_interval(secs => $5),
+                   items_synced = least(items_synced::bigint + $6, 2147483647)::int,
+                   backfill_done = backfill_done or $7,
+                   syncing_until = null
                  where user_id = $1 and id = $2",
-                &[&user, &id, &cursor, &error, &secs],
+                &[
+                    &user,
+                    &id,
+                    &run.cursor,
+                    &run.error,
+                    &secs,
+                    &i64::from(items),
+                    &run.backfill_done,
+                ],
             )
             .await?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Stored content hashes for these external ids of one source (to skip unchanged items).
+    pub async fn item_hashes(
+        &self,
+        user: Uuid,
+        source: &str,
+        ids: &[String],
+    ) -> Result<HashMap<String, String>, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let rows = tx
+                .query(
+                    "select external_id, content_hash from public.items
+                     where user_id = $1 and source = $2 and external_id = any($3)",
+                    &[&user, &source, &ids],
+                )
+                .await?;
+            Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
         })
         .await
     }
@@ -697,25 +764,6 @@ impl Db {
     }
 
     // ---- items and chunks ----------------------------------------------------------------------
-
-    /// The stored content hash of an item, if any (to skip unchanged items before embedding).
-    pub async fn item_hash(
-        &self,
-        user: Uuid,
-        source: &str,
-        external_id: &str,
-    ) -> Result<Option<String>, DbError> {
-        self.scoped(Some(user), async |tx| {
-            let r = tx
-                .query_opt(
-                    "select content_hash from public.items where user_id = $1 and source = $2 and external_id = $3",
-                    &[&user, &source, &external_id],
-                )
-                .await?;
-            Ok(r.map(|r| r.get(0)))
-        })
-        .await
-    }
 
     /// Inserts or replaces an item and all its chunks in one transaction.
     pub async fn upsert_item(

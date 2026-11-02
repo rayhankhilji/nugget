@@ -18,10 +18,15 @@ export interface CloudSession {
 export interface CloudConnection {
   id: string;
   toolkit: string;
-  /** Composio's status, e.g. `ACTIVE`, `INITIATED`, `FAILED`, `EXPIRED`. */
+  /** The connection's status: `active`, `initiated`, `failed` or `disabled`. */
   status: string;
   last_synced_at: string | null;
   last_error: string | null;
+  /** A sync is running in the cloud now. */
+  syncing?: boolean;
+  /** The first import has finished. */
+  backfill_done?: boolean;
+  items_synced?: number;
 }
 
 export interface CloudApp {
@@ -174,7 +179,7 @@ export const cloudApi = {
   /** Opens the app's consent page in the browser. */
   connect: (toolkit: string) => call<void>("cloud_connect", { toolkit }),
   disconnect: (id: string) => call<void>("cloud_disconnect", { id }),
-  sync: () => call<{ synced: CloudSyncResult[] }>("cloud_sync"),
+  sync: () => call<{ synced: CloudSyncResult[]; running?: boolean }>("cloud_sync"),
   ask: (question: string, conversationId?: string | null, model?: CloudModelTier) =>
     call<CloudAnswer>("cloud_ask", { question, ...(conversationId ? { conversationId } : {}), ...(model ? { model } : {}) }),
   me: () => call<CloudMe>("cloud_me"),
