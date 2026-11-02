@@ -85,6 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.app_scheme = cfg.app_scheme.clone();
     state.logos = nugget_cloud::apps::logos::LogoCache::new();
     state.site_origins = cfg.site_origins.clone();
+    state.waitlist_salt = cfg.waitlist_salt.clone();
     let state = Arc::new(
         state
             .with_limits(cfg.limits)

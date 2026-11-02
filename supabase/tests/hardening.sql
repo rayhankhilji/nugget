@@ -147,3 +147,16 @@ do $$ begin
   assert (select count(*) from public.items where user_id = '00000000-0000-0000-0000-0000000000c1') = 0, 'cascade still works';
 end $$;
 select 'hardening.sql: all assertions passed' as result;
+
+-- The waitlist is the service's alone: no API role reads or deletes it; the service may only
+-- insert (reads and deletions go through nugget_private.waitlist_forget).
+do $$ begin
+  assert not has_table_privilege('authenticated', 'public.waitlist', 'select,delete'),
+    'authenticated can read or delete the waitlist';
+  assert not has_table_privilege('anon', 'public.waitlist', 'select,insert'),
+    'anon can touch the waitlist';
+  assert not has_table_privilege('nugget_service', 'public.waitlist', 'select,update,delete'),
+    'nugget_service can do more than insert into the waitlist';
+  assert has_table_privilege('nugget_service', 'public.waitlist', 'insert'), 'service cannot insert';
+end $$;
+select 'hardening.sql: waitlist assertions passed' as result;

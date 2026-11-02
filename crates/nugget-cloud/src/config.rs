@@ -45,6 +45,8 @@ pub struct Config {
     pub app_scheme: String,
     /// Website origins (`https://heed.app`) allowed for CORS and billing return URLs.
     pub site_origins: Vec<String>,
+    /// Per-deploy secret that salts waitlist IP hashes; without it no IP hash is stored.
+    pub waitlist_salt: Option<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -127,6 +129,7 @@ impl Config {
                     ask_per_min: n("NUGGET_RATE_ASK_PER_MIN", d.ask_per_min),
                     sync_every_secs: n("NUGGET_SYNC_EVERY_SECS", d.sync_every_secs),
                     action_per_min: n("NUGGET_RATE_ACTION_PER_MIN", d.action_per_min),
+                    waitlist_per_hour: n("NUGGET_RATE_WAITLIST_PER_HOUR", d.waitlist_per_hour),
                 }
             },
             client_ip_header: match get("NUGGET_CLIENT_IP_HEADER") {
@@ -140,6 +143,7 @@ impl Config {
                 .unwrap_or_else(|| "https://api.stripe.com".into()),
             public_url: opt("NUGGET_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
             site_origins: parse_origins(&opt("NUGGET_SITE_ORIGINS").unwrap_or_default()),
+            waitlist_salt: opt("NUGGET_WAITLIST_SALT"),
             app_scheme: opt("NUGGET_APP_SCHEME")
                 .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
                 .unwrap_or_else(|| "heed".into()),
