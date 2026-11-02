@@ -3,7 +3,7 @@ import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { SavedKeyProvider } from "../api";
 import { byText, cleanup, click, installDomShims, mockDaemon, render } from "../test/render";
-import { YourProviders } from "./Models";
+import { AiProviderStatus, YourProviders } from "./Models";
 
 beforeEach(() => installDomShims());
 afterEach(cleanup);
@@ -96,5 +96,45 @@ describe("Your providers (Models page)", () => {
     expect(updates).toEqual([{ name: "custom", api_key: "sk-new" }]);
     expect(document.querySelector("dialog")).toBeNull();
     expect(container.querySelector('[role="status"]')?.textContent).toBe("The key of custom was replaced. Heed uses it now.");
+  });
+});
+
+describe("Your AI (provider status)", () => {
+  it("lists ChatGPT and the providers with a key: health, model, one action each", async () => {
+    mockDaemon({
+      cloud_session: { configured: true, signed_in: false, email: null },
+      chatgpt_status: {
+        state: "signed_in",
+        account: { email: "sam@example.com", name: null },
+        plan_usage: true,
+        paused: false,
+        error: null,
+        models: { light: "gpt-4.1-mini", smart: null },
+        manage_usage_url: "https://chatgpt.com/settings/usage",
+      },
+      ai_key_saved: { providers: [custom, work, { ...custom, id: "openrouter", base_url: "https://openrouter.ai/api/v1" }] },
+    });
+    const { container } = await render(
+      <main>
+        <AiProviderStatus />
+      </main>,
+    );
+    const rows = [...container.querySelectorAll("ul.provider-status > li")];
+    expect(rows.map((r) => r.querySelector(".provider-name")?.textContent)).toEqual(["ChatGPT", "OpenAI-compatible (OpenRouter, Ollama, LM Studio…)", "Anthropic", "OpenRouter"]);
+    expect(rows.map((r) => r.querySelector(".provider-dot")?.getAttribute("data-health"))).toEqual(["ok", "ok", "warn", "ok"]);
+    expect(rows[0]!.querySelector(".provider-detail")?.textContent).toBe("Signed in as sam@example.com");
+    expect(rows[0]!.querySelector(".provider-model")?.textContent).toBe("gpt-4.1-mini");
+    expect(rows.map((r) => r.querySelectorAll("button").length)).toEqual([1, 1, 1, 1]);
+    expect(await violations()).toEqual([]);
+  });
+
+  it("leaves ChatGPT out when signed in to Heed Cloud", async () => {
+    mockDaemon({
+      cloud_session: { configured: true, signed_in: true, email: "ana@example.com" },
+      ai_key_saved: { providers: [custom] },
+    });
+    const { container } = await render(<AiProviderStatus />);
+    expect(container.querySelector('li[data-provider="chatgpt"]')).toBeNull();
+    expect(container.querySelectorAll("ul.provider-status > li")).toHaveLength(1);
   });
 });

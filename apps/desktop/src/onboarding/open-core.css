@@ -1,0 +1,349 @@
+/* ---- Open core: the first-run fork, "Choose your AI", API key fields and provider status ----
+   Class names and markup follow docs/brand/open-core.html (branch ds/brand). The look below is
+   ported from that branch's onboarding.css and styles.css, with fallbacks for the brand tokens
+   this branch doesn't have yet; once ds/brand lands, its copies win and this file can go. */
+
+/* Two calm cards over the welcome backdrop: Heed Cloud, or run it yourself. */
+.ob-fork {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  max-inline-size: 46rem;
+  margin-inline: auto;
+}
+
+.ob-fork-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-2);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    transform var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.ob-fork-card:hover {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-3);
+}
+
+.ob-fork-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.ob-fork-card[aria-pressed="true"],
+.ob-fork-card.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-3);
+}
+
+.ob-fork-kicker {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-text, var(--accent));
+}
+
+.ob-fork-card h2 {
+  margin: 0;
+  font-family: var(--font-display, inherit);
+  font-variation-settings: var(--heed-display-settings, normal);
+  font-weight: var(--heed-display-weight, 400);
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.ob-fork-card p {
+  margin: 0;
+  color: var(--text-2, var(--muted));
+}
+
+.ob-fork-points {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2, var(--muted));
+}
+
+.ob-fork-points li {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ob-fork-points li::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-block-start: 2px;
+  border-radius: 50%;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 3' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / 10px no-repeat,
+    var(--accent);
+}
+
+.ob-fork-foot {
+  margin-block-start: auto;
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--hairline);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 40rem) {
+  .ob-fork {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Choose your AI: one row per way in, the chosen one opens beneath it. */
+.ai-choices {
+  display: grid;
+  gap: var(--space-2);
+  max-inline-size: 36rem;
+  margin-inline: auto;
+}
+
+.ai-choice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: pointer;
+}
+
+.ai-choice:has(input:checked),
+.ai-choice.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ai-choice:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ai-choice input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ai-choice-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-text, var(--accent));
+}
+
+.ai-choice-title {
+  font-weight: 600;
+}
+
+.ai-choice-blurb {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.ai-choice-status {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.ai-choice-body {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-2);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--hairline);
+}
+
+/* An API key field: mono, and it says what it found as soon as it has checked. */
+.key-field {
+  display: grid;
+  gap: 6px;
+}
+
+.key-field input {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+}
+
+.key-field-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 1.4em;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.key-field[data-state="valid"] input {
+  border-color: var(--good);
+}
+
+.key-field[data-state="valid"] .key-field-status {
+  color: var(--good);
+}
+
+.key-field[data-state="invalid"] input {
+  border-color: var(--bad);
+}
+
+.key-field[data-state="invalid"] .key-field-status {
+  color: var(--bad);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-fork-card,
+  .ob-fork-card:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Provider status (Settings): one row per AI the app can use; health is the only green here. */
+.provider-status {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.provider-status > li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.provider-status > li + li {
+  border-block-start: 1px solid var(--hairline);
+}
+
+.provider-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--heed-ink-3, var(--muted));
+}
+
+.provider-dot[data-health="ok"] {
+  background: var(--heed-ok, var(--good));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-ok, var(--good)) 18%, transparent);
+}
+
+.provider-dot[data-health="warn"] {
+  background: var(--heed-warn, var(--warn));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-warn, var(--warn)) 18%, transparent);
+}
+
+.provider-name {
+  font-weight: 600;
+}
+
+.provider-detail {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.provider-model {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2, var(--muted));
+}
+
+
+/* ---- additions for the app's markup (not in the spec) ---- */
+
+/* A row's body holds form fields, which a <label> can't contain: the row is a div and its head a
+   label that lays its children out in the row's grid. */
+.ai-choice-label {
+  display: contents;
+  cursor: pointer;
+}
+
+.ai-choice-body {
+  cursor: auto;
+}
+
+/* The hidden radio sits under the icon: let a click (or a test's click) at its place reach it. */
+.ai-choice-icon {
+  pointer-events: none;
+}
+
+.ai-choice input[type="radio"] {
+  pointer-events: auto;
+}
+
+.ai-choice-body > :first-child {
+  margin-block-start: 0;
+}
+
+.ai-choice-body .ob-section {
+  margin: 0;
+}
+
+.ai-choice .badge {
+  margin-inline-start: var(--space-2);
+}
+
+.ob-fork-note {
+  max-inline-size: 46rem;
+  margin: var(--space-4) auto 0;
+}
+
+.key-field-status .spinner {
+  width: 12px;
+  height: 12px;
+}
+
+.key-field-link {
+  justify-self: start;
+}
+
+.chatgpt-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chatgpt-panel .row {
+  flex-wrap: wrap;
+}
+
+.chatgpt-fineprint {
+  margin: 0;
+}
+
+.provider-status .provider-actions {
+  display: flex;
+  gap: var(--space-2);
+}

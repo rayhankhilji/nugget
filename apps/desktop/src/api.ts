@@ -2276,7 +2276,8 @@ export interface AiKeyTestRequest {
   kind: AiKeyKind;
   /** Required for `openai_compatible`; defaults to the provider's own API otherwise. */
   base_url?: string | null;
-  api_key: string;
+  /** Optional: a keyless server (Ollama) is checked without one. */
+  api_key?: string;
   model?: string | null;
 }
 
@@ -2295,7 +2296,8 @@ export interface AiKeySaveRequest {
   name: string;
   kind: AiKeyKind;
   base_url?: string | null;
-  api_key: string;
+  /** Optional: a keyless server (Ollama) is saved without one. */
+  api_key?: string;
   model: string;
 }
 
@@ -3014,8 +3016,14 @@ export function utcOffsetMinutes(d: Date = new Date()): number {
 /** Every reason `ai.key.*` can answer with (test/save ones plus replace/remove and the env fallback). */
 export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable" | "reserved";
 
-/** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
-export type AiKeySource = { api_key: string; key_ref?: undefined } | { key_ref: `env:${string}`; api_key?: undefined };
+/**
+ * Where the key comes from: typed (goes to the OS keychain), the daemon's environment variable,
+ * or none at all (a keyless server such as Ollama on this computer).
+ */
+export type AiKeySource =
+  | { api_key: string; key_ref?: undefined }
+  | { key_ref: `env:${string}`; api_key?: undefined }
+  | { api_key?: undefined; key_ref?: undefined };
 
 export type AiKeyCheckRequest = Omit<AiKeyTestRequest, "api_key"> & AiKeySource;
 export type AiKeyAddRequest = Omit<AiKeySaveRequest, "api_key"> & AiKeySource;
@@ -3068,6 +3076,53 @@ export const aiKeysApi = {
   /** Delete the provider's key and remove it from config.toml. */
   remove: (name: string) => call<AiKeyRemoveResult>("ai_key_remove", { request: { name } }),
   saved: async () => (await call<{ providers: SavedKeyProvider[] }>("ai_key_saved")).providers,
+};
+
+// ---- Sign in with ChatGPT (local mode only) ----
+
+/** Why a ChatGPT sign-in or request failed (`ai.chatgpt.*`). */
+export type ChatgptErrorCode =
+  | "access_denied"
+  | "scope_not_granted"
+  | "invalid_id_token"
+  | "state_mismatch"
+  | "timeout"
+  | "network"
+  | "token_exchange_failed"
+  | "usage_limit"
+  | "reauth_required"
+  | "cancelled"
+  | "no_keychain"
+  /** Refused: Heed Cloud is active, and ChatGPT sign-in is for running Heed yourself. */
+  | "cloud_mode";
+
+/** `ai.chatgpt.status` and the answer of every other `ai.chatgpt.*` method. */
+export interface ChatgptStatus {
+  state: "signed_out" | "signing_in" | "signed_in";
+  account: { email: string | null; name: string | null } | null;
+  /** The account let Heed use the ChatGPT plan (`chatgpt.tokens.use.direct`); false: plan usage is off. */
+  plan_usage: boolean;
+  /** The plan's usage limit was reached: ChatGPT requests are paused until `resume`. */
+  paused: boolean;
+  /** `code` is a {@link ChatgptErrorCode} (or a newer one); `message` is the daemon's, in English. */
+  error: { code: ChatgptErrorCode | (string & {}); message: string } | null;
+  models: { light: string | null; smart: string | null };
+  /** Where the user checks their plan's usage (`https://chatgpt.com/settings/usage`). */
+  manage_usage_url: string;
+}
+
+export const chatgptApi = {
+  status: () => call<ChatgptStatus>("chatgpt_status"),
+  /**
+   * Starts the sign-in: the shell checks the daemon's authorize URL and opens it in the browser.
+   * The answer is usually `signing_in`; poll {@link chatgptApi.status} until it changes.
+   */
+  signIn: () => call<ChatgptStatus>("chatgpt_sign_in"),
+  /** Stops a sign-in that is waiting for the browser. */
+  cancel: () => call<ChatgptStatus>("chatgpt_cancel"),
+  /** Clears the usage-limit pause after the user has checked their usage. */
+  resume: () => call<ChatgptStatus>("chatgpt_resume"),
+  signOut: () => call<ChatgptStatus>("chatgpt_sign_out"),
 };
 
 /** This machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */

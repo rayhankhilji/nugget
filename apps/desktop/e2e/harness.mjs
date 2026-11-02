@@ -160,6 +160,18 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const exactName = (key) => new RegExp(`^${escapeRe(t(key))}$`);
 export const startsWith = (key) => new RegExp(`^${escapeRe(t(key))}`);
 
+/**
+ * The first-run fork: pick "Run it yourself" (open source, your own AI). It moves on to the AI
+ * choice; the local source comes after it. Returns the fork's text for checks.
+ */
+export async function onboardingRunItYourself(page) {
+  await page.getByRole("heading", { level: 1, name: t("onboarding.fork.heading"), exact: true }).waitFor();
+  const text = (await page.locator(".ob-main").textContent()) ?? "";
+  await page.locator('button.ob-fork-card[data-path="local"]').click();
+  await page.getByRole("heading", { level: 1, name: t("onboarding.ai.heading"), exact: true }).waitFor();
+  return text;
+}
+
 /** Onboarding's source step: add `folder` through the stubbed picker and wait until it's indexed. */
 export async function onboardingAddFolder(page, folder) {
   await page.getByRole("button", { name: exactName("onboarding.source.addFolder") }).click();

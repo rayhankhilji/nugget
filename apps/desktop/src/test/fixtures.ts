@@ -153,7 +153,19 @@ export const backupStatus: import("../api").BackupStatus = {
   recovery: null,
 };
 
+/** Sign in with ChatGPT: signed out (`ai.chatgpt.status`). */
+export const chatgptSignedOut = {
+  state: "signed_out",
+  account: null,
+  plan_usage: false,
+  paused: false,
+  error: null,
+  models: { light: null, smart: null },
+  manage_usage_url: "https://chatgpt.com/settings/usage",
+};
+
 export const RESPONSES: Record<string, unknown> = {
+  chatgpt_status: chatgptSignedOut,
   connection_info: { connected: true, socket: "/tmp/nuggetd.sock", error: null },
   status,
   providers_list: providers,

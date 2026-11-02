@@ -97,6 +97,41 @@ Restart `nuggetd`. Then:
   (indexing) and `retrieve.allow_cloud_embedding` (queries). Sensitive items are never embedded in the
   cloud.
 
+In the desktop app, **AI → Add a provider** offers presets for **Anthropic** (paste a key from
+console.anthropic.com), **OpenAI**, **OpenRouter** (`https://openrouter.ai/api/v1`), **Ollama**
+(`http://127.0.0.1:11434/v1`, no key) and **any OpenAI-compatible endpoint** (base URL, optional
+key). Each key is checked by listing the provider's models before it is saved to the OS keychain.
+There is no "Sign in with Claude": Anthropic does not allow other apps to use Claude.ai logins, so
+Claude is used with an API key.
+
+## Option 4: sign in with ChatGPT (local mode only)
+
+If you run Heed yourself, you can sign in with your ChatGPT account and let your ChatGPT plan pay
+for the light and smart tiers, through OpenAI's programme for open-source and locally run apps.
+
+- **How it works.** Heed opens OpenAI's sign-in page in your browser, which comes back to Heed on
+  `127.0.0.1`. Heed never sees your password.
+  - The first sign-in registers this installation with OpenAI (an opaque per-install id, kept in
+    `chatgpt-host.json` in the data directory).
+  - The tokens are kept in the OS keychain only, and are refreshed in the background.
+  - Requests go from this computer straight to `api.openai.com`, with OpenAI storage off
+    (`store: false`).
+- **Plan usage must be granted.** If the sign-in comes back without ChatGPT plan usage
+  (`chatgpt.tokens.use.direct`), nothing is sent. The app offers to try again or to use an API key
+  instead.
+- **Limits.** When your plan's usage limit is reached, ChatGPT requests pause and the app shows
+  **Manage usage** (chatgpt.com/settings/usage).
+  - Heed never moves the request to another, possibly paid, provider on its own.
+  - Choose **Resume** after checking your usage, or pick another AI.
+- **Scope.** Triage of local items and embeddings stay on this computer; they never use the plan.
+- **Not with Heed Cloud.** Sign in with ChatGPT is for local mode only; the hosted Heed Cloud never
+  uses ChatGPT plan tokens.
+- **Signing out** revokes the tokens and deletes them from the keychain. The installation's
+  registration is kept, so the next sign-in reuses it.
+
+The daemon methods are `ai.chatgpt.status`, `ai.chatgpt.sign_in`, `ai.chatgpt.cancel`,
+`ai.chatgpt.resume` and `ai.chatgpt.sign_out`.
+
 ## Routing and probing
 
 For each tier, `nuggetd` tries on-device and local-network providers, then the managed runtime, then

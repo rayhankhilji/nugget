@@ -1,4 +1,4 @@
-import { api, type ModelFit, type ModelInfo } from "../api";
+import { api, chatgptApi, type ModelFit, type ModelInfo } from "../api";
 import type { AiChoice } from "./machine";
 
 /** Recommended first, then by size (smallest first), then by id. */
@@ -19,7 +19,8 @@ export function isSearchModel(m: Pick<ModelInfo, "id" | "tiers">, fit?: Pick<Mod
 
 /**
  * What is already set up on an AI path, from the daemon (not from saved progress): an installed
- * chat model for `local`, a provider from the config file for `byok`. `null` when nothing is, or
+ * chat model for `local`, a provider from the config file for `byok`, a ChatGPT sign-in that
+ * answers for `chatgpt`. `null` when nothing is, or
  * it can't be told.
  */
 export async function detectAiSetup(ai: AiChoice | null): Promise<string | null> {
@@ -27,6 +28,11 @@ export async function detectAiSetup(ai: AiChoice | null): Promise<string | null>
     if (ai === "local") {
       const m = sortModels(await api.modelsList()).find((x) => x.installed && !isSearchModel(x));
       return m?.id ?? null;
+    }
+    if (ai === "chatgpt") {
+      const s = await chatgptApi.status();
+      // i18n-ignore-next-line: a product name.
+      return s.state === "signed_in" && s.plan_usage && !s.paused ? "ChatGPT" : null;
     }
     if (ai === "byok") {
       // The runtime's own models are served as `local-*` providers; anything else was added to

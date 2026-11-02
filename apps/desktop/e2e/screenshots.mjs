@@ -305,7 +305,8 @@ const SHOTS = [
     page: "today",
     onboarding: true,
     async prepare(p) {
-      await p.getByRole("heading", { name: t("onboarding.welcome.heading") }).waitFor();
+      // The first-run fork: Heed Cloud or run it yourself.
+      await p.getByRole("heading", { name: t("onboarding.fork.heading") }).waitFor();
     },
   },
   {

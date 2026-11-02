@@ -6,6 +6,7 @@ import {
   pendingSteps,
   reduce,
   stepGoalMet,
+  stepIndex,
   STEPS,
   STORAGE_KEY,
   type Action,
@@ -130,5 +131,46 @@ describe("onboarding persistence", () => {
     ).toEqual({ ...INITIAL, step: "done", aiSetup: { ai: "byok", what: "anthropic" }, sources: ["Notes"] });
     expect(parseState(JSON.stringify({ version: 1, step: "done", aiSetup: { ai: "cloud", what: 1 } }))).toEqual({ ...INITIAL, step: "done" });
     expect(parseState(JSON.stringify({ version: 1, step: "source", cloudApps: ["Gmail", 2] }))).toEqual({ ...INITIAL, step: "source", cloudApps: ["Gmail"] });
+  });
+});
+
+describe("the first-run fork", () => {
+  it("running it yourself goes to the AI choice, then a local source", () => {
+    let s = reduce(INITIAL, { type: "choosePath", path: "local" });
+    expect(s).toMatchObject({ path: "local", step: "ai", completed: ["welcome"] });
+    expect(stepIndex("ai", s)).toBe(1);
+    s = reduce(s, { type: "next" });
+    expect(s.step).toBe("source");
+    s = reduce(s, { type: "back" });
+    expect(s.step).toBe("ai");
+    s = reduce(s, { type: "back" });
+    expect(s.step).toBe("welcome");
+    s = reduce(s, { type: "choosePath", path: null });
+    expect(s.path).toBeUndefined();
+  });
+
+  it("Heed Cloud stays on the first step (the sign-in) and keeps the usual order", () => {
+    const s = reduce(INITIAL, { type: "choosePath", path: "cloud" });
+    expect(s).toMatchObject({ path: "cloud", step: "welcome" });
+    expect(reduce(s, { type: "next" }).step).toBe("source");
+  });
+
+  it("a row of Choose your AI sets the path it belongs to, and ChatGPT counts once set up", () => {
+    let s = reduce({ ...INITIAL, step: "ai" }, { type: "chooseAiOption", option: "openrouter" });
+    expect(s).toMatchObject({ ai: "byok", aiOption: "openrouter" });
+    s = reduce(s, { type: "chooseAiOption", option: "chatgpt" });
+    expect(s).toMatchObject({ ai: "chatgpt", aiOption: "chatgpt" });
+    expect(stepGoalMet(s)).toBe(false);
+    s = reduce(s, { type: "aiSetUp", ai: "chatgpt", what: "ChatGPT" });
+    expect(stepGoalMet(s)).toBe(true);
+  });
+
+  it("saves and restores the path and the row", () => {
+    const s = reduce(reduce(INITIAL, { type: "choosePath", path: "local" }), { type: "chooseAiOption", option: "ollama" });
+    expect(parseState(JSON.stringify(s))).toMatchObject({ path: "local", ai: "byok", aiOption: "ollama" });
+    // A row that doesn't match the saved choice, or an unknown path, is dropped.
+    const odd = parseState(JSON.stringify({ ...INITIAL, ai: "local", aiOption: "ollama", path: "moon" }))!;
+    expect(odd.aiOption).toBeUndefined();
+    expect(odd.path).toBeUndefined();
   });
 });
