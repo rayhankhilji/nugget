@@ -13,16 +13,39 @@
 //!   `RegisterHotKey`, `XGrabKey`, or the XDG GlobalShortcuts portal) and is told only when it
 //!   is pressed.
 //! - The **kill switch**'s Escape counter additionally recognises Escape, and nothing else.
+//! - The **suggestion tap** ([`start_suggest_tap`], for ghost-text autocomplete) classifies
+//!   every key event at the hook into one of five [`TapKey`] classes (Tab, Escape, Right arrow,
+//!   "a modifier", "some other key") plus the four modifier flags, and drops the key code there.
+//!   Only that class reaches the [`SuggestMachine`], and only a [`SuggestKey`]
+//!   (`Accept`/`AcceptWord`/`Dismiss`/`Typed`/`Click`) reaches the callback. While no
+//!   suggestion is visible the callback gets only `Typed` (some key was pressed) and `Click`,
+//!   the same information a double-tap listener gets. Nothing is buffered: the machine's only
+//!   state is which of Tab, Escape and Right is held after a consumed press.
 //! - No key event, key code or text is ever logged, at any level.
 //!
 //! # Platforms
 //!
-//! | OS / session | Double tap | Chord | Escape ×3 kill switch |
-//! |---|---|---|---|
-//! | macOS | NSEvent `flagsChanged` monitors (no permission needed) | Carbon `RegisterEventHotKey` via `global-hotkey` | needs Accessibility (key-down monitor) |
-//! | Windows | `WH_KEYBOARD_LL` + `WH_MOUSE_LL` hooks | `RegisterHotKey` via `global-hotkey` | `WH_KEYBOARD_LL` |
-//! | Linux X11 | XInput2 raw events (`x11rb`) | `XGrabKey` via `global-hotkey` | XInput2 raw events |
-//! | Linux Wayland | **Unsupported** (use a chord) | XDG portal `GlobalShortcuts` (`ashpd`), stable shortcut ids, rebinds itself; see [`Listener::state`] | **Unsupported** (use a chord) |
+//! | OS / session | Double tap | Chord | Escape ×3 kill switch | Suggestion keys |
+//! |---|---|---|---|---|
+//! | macOS | NSEvent `flagsChanged` monitors (no permission needed) | Carbon `RegisterEventHotKey` via `global-hotkey` | needs Accessibility (key-down monitor) | active `CGEventTap` (session, head insert) on key down/up and mouse down, own thread and run loop; needs Accessibility |
+//! | Windows | `WH_KEYBOARD_LL` + `WH_MOUSE_LL` hooks | `RegisterHotKey` via `global-hotkey` | `WH_KEYBOARD_LL` | own `WH_KEYBOARD_LL` + `WH_MOUSE_LL` hooks, which swallow the consumed keys |
+//! | Linux X11 | XInput2 raw events (`x11rb`) | `XGrabKey` via `global-hotkey` | XInput2 raw events | XInput2 (2.1+) raw events to decide; `XGrabKey` of Tab, Escape and Ctrl+Right only while active, to consume |
+//! | Linux Wayland | **Unsupported** (use a chord) | XDG portal `GlobalShortcuts` (`ashpd`), stable shortcut ids, rebinds itself; see [`Listener::state`] | **Unsupported** (use a chord) | **Unsupported** |
+//!
+//! **Suggestion keys** ([`start_suggest_tap`]): while [`SuggestTap::set_active`] says a
+//! suggestion is visible, Tab (no modifiers) → [`SuggestKey::Accept`], ⌥→ on macOS or Ctrl+→
+//! elsewhere (exactly that modifier) → [`SuggestKey::AcceptWord`], and Escape (no modifiers) →
+//! [`SuggestKey::Dismiss`] are **consumed**, along with their auto-repeats and their release
+//! (even if the tap is deactivated before the key comes up). Any other key press, including
+//! Shift+Tab or Cmd+→, passes through and reports [`SuggestKey::Typed`]; a mouse button press
+//! passes through and reports [`SuggestKey::Click`]. While inactive, nothing is consumed (except
+//! the tail of a key consumed earlier) and every key press, Tab and Escape included, reports
+//! only [`SuggestKey::Typed`] (mouse presses [`SuggestKey::Click`]), so the app can debounce an
+//! automatic suggestion trigger. Events this process injected itself
+//! are ignored on macOS (event source pid) and Windows (every injected event is ignored); on
+//! X11 nothing tells them apart, so this process's own XTest keys report `Typed` (and, while
+//! active, a grabbed key would be swallowed): deactivate the tap and ignore `Typed` while
+//! injecting.
 //!
 //! On Windows and Linux the `Command` modifiers are the Windows/Super keys and `Option` is Alt.
 //! Use [`capabilities`] or [`check`] to ask before starting, and [`recommended_trigger`] for a
@@ -59,6 +82,7 @@ use nugget_core::{Error, Result};
 pub mod chord;
 mod engine;
 pub mod keymap;
+pub mod suggest;
 pub mod tap;
 
 #[cfg(target_os = "linux")]
@@ -75,6 +99,10 @@ mod windows;
 mod x11;
 
 pub use chord::{Chord, ChordKey, ChordModifiers, Platform, parse_chord, parse_chord_for};
+pub use suggest::{
+    Mods, SuggestKey, SuggestMachine, SuggestTap, TapKey, Verdict, check_suggest_tap,
+    start_suggest_tap,
+};
 pub use tap::{EscapeRepeatDetector, InputEvent, KeyClass, TapDetector};
 
 use engine::Dispatcher;
@@ -373,6 +401,8 @@ pub struct Capabilities {
     pub double_tap: bool,
     pub chord: bool,
     pub escape_repeat: bool,
+    /// The ghost-text suggestion keys ([`start_suggest_tap`]).
+    pub suggest_tap: bool,
 }
 
 /// The current session. On Linux, `NUGGET_HOTKEY_SESSION=x11|wayland` overrides detection (for
@@ -432,16 +462,17 @@ pub fn capabilities() -> Capabilities {
 }
 
 fn capabilities_for(session: Session) -> Capabilities {
-    let (double_tap, chord, escape_repeat) = match session {
-        Session::MacOs | Session::Windows | Session::X11 => (true, true, true),
-        Session::Wayland => (false, true, false),
-        Session::Headless | Session::Other => (false, false, false),
+    let (double_tap, chord, escape_repeat, suggest_tap) = match session {
+        Session::MacOs | Session::Windows | Session::X11 => (true, true, true, true),
+        Session::Wayland => (false, true, false, false),
+        Session::Headless | Session::Other => (false, false, false, false),
     };
     Capabilities {
         session,
         double_tap,
         chord,
         escape_repeat,
+        suggest_tap,
     }
 }
 
@@ -677,12 +708,13 @@ mod tests {
     fn capabilities_per_session() {
         let c = |s| {
             let c = capabilities_for(s);
-            (c.double_tap, c.chord, c.escape_repeat)
+            (c.double_tap, c.chord, c.escape_repeat, c.suggest_tap)
         };
-        assert_eq!(c(Session::Wayland), (false, true, false));
-        assert_eq!(c(Session::Headless), (false, false, false));
+        assert_eq!(c(Session::Wayland), (false, true, false, false));
+        assert_eq!(c(Session::Headless), (false, false, false, false));
+        assert_eq!(c(Session::Other), (false, false, false, false));
         for s in [Session::MacOs, Session::Windows, Session::X11] {
-            assert_eq!(c(s), (true, true, true), "{s:?}");
+            assert_eq!(c(s), (true, true, true, true), "{s:?}");
         }
         let msg = unsupported("a modifier double tap", Session::Wayland).to_string();
         assert!(

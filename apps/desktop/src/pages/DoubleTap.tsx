@@ -50,6 +50,7 @@ export function DoubleTapPage() {
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
   const readAheadHintId = useId();
+  const autoSuggestHintId = useId();
   const batteryHintId = useId();
   const tryHintId = useId();
   const tryOff = saved.data !== undefined && !saved.data.enabled;
@@ -166,6 +167,25 @@ export function DoubleTapPage() {
             </label>
             {/* Read-ahead only matters while Double Tap is on: nested under it. */}
             <div className="switch-child">
+            <label className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={form.auto_suggest ?? true}
+                aria-describedby={autoSuggestHintId}
+                onChange={(e) => setForm({ ...form, auto_suggest: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("doubletap.autoSuggest")}</span>
+            </label>
+            <p id={autoSuggestHintId} className="muted small">
+              {t("doubletap.autoSuggestHint", { acceptWord: status.data?.platform === "macos" ? "⌥→" : "Ctrl+→" })}
+            </p>
+            {status.data?.ghost && !status.data.ghost.available && (
+              <p className="muted small" role="note">
+                {t("doubletap.ghostUnavailable")}
+              </p>
+            )}
             <label className="switch">
               <input
                 type="checkbox"

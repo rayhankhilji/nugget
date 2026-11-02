@@ -18,7 +18,7 @@ use windows::Win32::System::Ole::{
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
-use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_I4, VariantClear};
+use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_I4, VT_R8, VariantClear};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement,
     IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern, IUIAutomationRangeValuePattern,
@@ -29,10 +29,10 @@ use windows::Win32::UI::Accessibility::{
     UIA_AriaPropertiesPropertyId, UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId,
     UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
     UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
-    UIA_HasKeyboardFocusPropertyId, UIA_HelpTextPropertyId, UIA_InvokePatternId,
-    UIA_IsEnabledPropertyId, UIA_IsExpandCollapsePatternAvailablePropertyId,
-    UIA_IsInvokePatternAvailablePropertyId, UIA_IsKeyboardFocusablePropertyId,
-    UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
+    UIA_FontSizeAttributeId, UIA_ForegroundColorAttributeId, UIA_HasKeyboardFocusPropertyId,
+    UIA_HelpTextPropertyId, UIA_InvokePatternId, UIA_IsEnabledPropertyId,
+    UIA_IsExpandCollapsePatternAvailablePropertyId, UIA_IsInvokePatternAvailablePropertyId,
+    UIA_IsKeyboardFocusablePropertyId, UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
     UIA_IsRangeValuePatternAvailablePropertyId, UIA_IsScrollItemPatternAvailablePropertyId,
     UIA_IsScrollPatternAvailablePropertyId, UIA_IsSelectionItemPatternAvailablePropertyId,
     UIA_IsTogglePatternAvailablePropertyId, UIA_IsValuePatternAvailablePropertyId,
@@ -347,6 +347,30 @@ fn variant_prop(mut v: VARIANT) -> Option<Prop> {
             Some(Prop::Bool(inner.Anonymous.boolVal.0 != 0))
         } else if inner.vt == VT_I4 {
             Some(Prop::I32(inner.Anonymous.lVal))
+        } else {
+            None
+        };
+        let _ = VariantClear(&mut v);
+        out
+    }
+}
+
+enum Attr {
+    F64(f64),
+    I32(i32),
+}
+
+/// A number out of a text attribute VARIANT, which is cleared. UIA's "mixed" and "not
+/// supported" sentinels are IUnknowns (`VT_UNKNOWN`) and, like any other type, are `None`.
+fn variant_attr(mut v: VARIANT) -> Option<Attr> {
+    // SAFETY: `v` is an initialised VARIANT owned here; the union member read matches `vt`,
+    // and VariantClear releases whatever it holds exactly once.
+    unsafe {
+        let inner = &v.Anonymous.Anonymous;
+        let out = if inner.vt == VT_R8 {
+            Some(Attr::F64(inner.Anonymous.dblVal))
+        } else if inner.vt == VT_I4 {
+            Some(Attr::I32(inner.Anonymous.lVal))
         } else {
             None
         };
@@ -790,6 +814,63 @@ impl UiaEl {
                 width: 1.0,
                 ..r
             })
+        }
+    }
+
+    /// Font size (points) and foreground colour (a COLORREF) of the character before the
+    /// caret, or the one at it when the caret is at the start. `None` for what the provider
+    /// does not report, reports as mixed, or when there is no TextPattern (plain edits).
+    pub fn caret_style(&self) -> (Option<f64>, Option<i32>) {
+        let Some(t) = self.text() else {
+            return (None, None);
+        };
+        // SAFETY: valid interfaces; every VARIANT is owned and cleared by `variant_attr`.
+        unsafe {
+            let probe = (|| {
+                let sel = t.GetSelection().ok()?;
+                if sel.Length().ok()? < 1 {
+                    return None;
+                }
+                let probe = sel.GetElement(0).ok()?.Clone().ok()?;
+                // Collapse to the caret (the selection's end), then take one character back,
+                // or forward at the start of the text.
+                probe
+                    .MoveEndpointByRange(
+                        TextPatternRangeEndpoint_Start,
+                        &probe,
+                        TextPatternRangeEndpoint_End,
+                    )
+                    .ok()?;
+                let back = probe
+                    .MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -1)
+                    .ok()?;
+                if back == 0 {
+                    probe
+                        .MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, 1)
+                        .ok()?;
+                }
+                Some(probe)
+            })();
+            let Some(probe) = probe else {
+                return (None, None);
+            };
+            let size = probe
+                .GetAttributeValue(UIA_FontSizeAttributeId)
+                .ok()
+                .and_then(variant_attr)
+                .map(|a| match a {
+                    Attr::F64(v) => v,
+                    Attr::I32(v) => f64::from(v),
+                });
+            let color = probe
+                .GetAttributeValue(UIA_ForegroundColorAttributeId)
+                .ok()
+                .and_then(variant_attr)
+                .and_then(|a| match a {
+                    Attr::I32(v) => Some(v),
+                    Attr::F64(_) => None,
+                });
+            (size, color)
         }
     }
 

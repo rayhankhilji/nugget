@@ -65,6 +65,8 @@ pub struct DoubleTapStatus {
     pub recommended_trigger: TriggerSpec,
     /// Where the running listener's shortcut stands; `None` when nothing is listening.
     pub shortcut: Option<ShortcutStatus>,
+    /// Ghost text: whether the suggestion keys work here (else Double Tap uses the panel).
+    pub ghost: super::ghost_flow::GhostStatus,
 }
 
 /// A running listener's [`ShortcutState`] for the settings page. Only the Wayland portal moves

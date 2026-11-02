@@ -24,8 +24,8 @@ use std::time::{Duration, Instant};
 
 use nugget_a11y::clipboard::{ClipboardFormat, ClipboardSnapshot};
 use nugget_a11y::{
-    A11yConfig, Accessibility, Backend, DenyList, Focused, InsertMethod, InsertStrategy,
-    Permission, TreeLimits, UiAction, UiActionKind, UiTree, WindowSel,
+    A11yConfig, Accessibility, Backend, CaretTracker, DenyList, Focused, InsertMethod,
+    InsertStrategy, Permission, TreeLimits, UiAction, UiActionKind, UiTree, WindowSel,
 };
 
 const TITLE: &str = "Nugget Wayland - chat";
@@ -244,6 +244,14 @@ fn read_composer_and_thread() {
     // Wayland has no global coordinates: GTK 4 reports extents relative to the window, or
     // none. The overlay then falls back to its default position, so only record it.
     eprintln!("caret on Wayland: {:?}", f.caret);
+    // CaretTracker: the same field without the thread. Geometry is only recorded (window-
+    // relative or missing on Wayland, as above), and so is the style.
+    let b = Backend::new(nugget_a11y::AtspiPlatform::new(), config());
+    let c = b.caret().unwrap().expect("caret read");
+    eprintln!("CaretTracker::caret on Wayland: {c:?}");
+    assert!(!c.denied);
+    assert_eq!(c.field.value, "Hello ");
+    assert_eq!(c.field.selection, Some((6, 6)));
     let got: Vec<(Option<&str>, &str, Option<bool>)> = f
         .thread
         .iter()
@@ -361,6 +369,15 @@ fn secure_field() {
     assert_eq!(f.field.selection, None);
     assert!(f.thread.is_empty());
     assert!(f.caret.is_none());
+    let b = Backend::new(nugget_a11y::AtspiPlatform::new(), config());
+    let c = b
+        .caret()
+        .unwrap()
+        .expect("caret read of the password entry");
+    assert!(
+        c.field.secure && c.field.value.is_empty() && c.geometry.is_none(),
+        "{c:?}"
+    );
     assert!(a.insert("x").is_err(), "insert into a secure field");
     let dump = format!("{f:?}");
     assert!(!dump.contains("hunter2"), "secret leaked: {dump}");

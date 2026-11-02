@@ -225,3 +225,23 @@ body.overlay-body {
   border-color: currentColor;
   color: inherit;
 }
+
+/* Ghost text (`overlay.html#ghost`): a transparent, click-through window over the user's field. */
+html.ghost-root,
+body.overlay-body.ghost-body {
+  background: transparent;
+  overflow: hidden;
+  margin: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.ghost {
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  background: transparent;
+}
