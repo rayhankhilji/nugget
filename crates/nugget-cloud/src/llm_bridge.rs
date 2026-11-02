@@ -216,11 +216,13 @@ impl Provider for GatewayProvider {
             self.cached.fetch_add(1, Ordering::Relaxed);
             return Ok(stream(text, None));
         }
-        if self
+        // `fetch_update` is `try_update` from Rust 1.99, which is newer than the MSRV.
+        #[allow(deprecated)]
+        let spent = self
             .fresh_left
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
-            .is_err()
-        {
+            .is_err();
+        if spent {
             self.refused.fetch_add(1, Ordering::Relaxed);
             return Err(Error::RateLimited {
                 retry_after_ms: None,
