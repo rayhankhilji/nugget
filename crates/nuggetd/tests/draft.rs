@@ -629,7 +629,9 @@ async fn read_ahead_skips_cloud_providers_and_refused_fields_and_cancel_answers(
     assert_eq!(e.code, code::INVALID_PARAMS);
     // No content reached the model: at most a body-less GET that opens (warms) the cloud
     // connection ahead of the trigger. Nothing was audited.
+    // Warm-ups are throttled per drafter (CLOUD_WARM_SPACING), so this test sees at most one.
     let seen = h.model.seen();
+    assert!(seen.len() <= 1, "{seen:?}");
     assert!(
         seen.iter()
             .all(|s| s.method == "GET" && s.body.is_empty() && s.path.starts_with("/v1/")),
