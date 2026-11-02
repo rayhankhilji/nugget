@@ -7,6 +7,13 @@
 //! | `nugget://item?source=<id>&key=<key>` | asks to open that item in its own app |
 //! | `nugget://ask?q=<text>` | opens the quick-ask box with the question typed, not sent |
 //! | a `.nuggetplugin` file | asks to install it, then the usual approval of what it may do |
+//! | `nugget://auth/callback?code=<c>` (or `?error=..&error_description=..`) | finishes a cloud sign-in started in this app |
+//! | `nugget://connections/callback` | Composio is done: shows Connections, which reloads its list |
+//!
+//! The sign-in link is never shown to the page: its code is exchanged in Rust (`cloud.rs`), and
+//! only works while a sign-in this app started is pending (10 minutes, once). The page hears
+//! `nugget:cloud-session`, without the code. The parameters Composio adds to its callback are
+//! dropped: the page only reloads the list from the cloud.
 //!
 //! Everything is validated here ([`parse_url`], [`parse_plugin_path`]) before the UI sees it:
 //! unknown hosts, pages and parameters, credentials, ports, control characters and over-long
@@ -60,16 +67,33 @@ pub const PAGES: &[&str] = &[
     "models",
     "privacy",
     "status",
+    "connections",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Link {
-    Page { page: String },
-    Search { query: String },
-    Item { source: String, key: String },
-    Ask { question: String },
-    Plugin { path: String },
+    Page {
+        page: String,
+    },
+    Search {
+        query: String,
+    },
+    Item {
+        source: String,
+        key: String,
+    },
+    Ask {
+        question: String,
+    },
+    Plugin {
+        path: String,
+    },
+    /// Composio sent the browser back after connecting an app.
+    Connections,
+    /// Supabase sent the browser back after sign-in. Handled in Rust, never sent to the page.
+    #[serde(skip)]
+    AuthCallback(nugget_cloud_client::Callback),
 }
 
 /// Characters that reorder or hide text (bidi overrides and isolates, zero-width marks): a link
@@ -128,6 +152,12 @@ pub fn parse_url(raw: &str) -> Result<Link, String> {
         return Err("unexpected parts in the link".into());
     }
     let host = url.host_str().unwrap_or_default();
+    if host == "auth" {
+        // Its own strict parser (only `/callback` with a code or an error).
+        return nugget_cloud_client::parse_callback(raw)
+            .map(Link::AuthCallback)
+            .map_err(|e| e.to_string());
+    }
     let segments: Vec<String> = url
         .path_segments()
         .map(|s| s.filter(|p| !p.is_empty()).map(str::to_owned).collect())
@@ -181,6 +211,20 @@ pub fn parse_url(raw: &str) -> Result<Link, String> {
                 source: reference(param("source")).map_err(|e| format!("source: {e}"))?,
                 key: reference(param("key")).map_err(|e| format!("key: {e}"))?,
             })
+        }
+        "connections" => {
+            if url.fragment().is_some() {
+                return Err("unexpected parts in the link".into());
+            }
+            for v in params.values() {
+                if v.len() > MAX_REF_LEN {
+                    return Err("parameter too long".into());
+                }
+            }
+            match segments.as_slice() {
+                [p] if p == "callback" => Ok(Link::Connections),
+                _ => Err("unknown link".into()),
+            }
         }
         _ => Err("unknown link".into()),
     }
@@ -288,12 +332,20 @@ pub fn dispatch(app: &AppHandle, links: Vec<Result<Link, String>>) {
         match link {
             Err(e) => tracing::warn!(error = %e, "ignored a link"),
             Ok(Link::Ask { question }) => crate::quickask::show_with(app, Some(question)),
+            Ok(Link::AuthCallback(callback)) => {
+                tracing::info!(kind = "auth_callback", "opening a link");
+                crate::cloud::complete_sign_in(app, callback);
+            }
             Ok(link) => {
                 tracing::info!(kind = kind(&link), "opening a link");
+                let connections = link == Link::Connections;
                 if let Some(p) = app.try_state::<Pending>() {
                     *p.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(link);
                 }
                 crate::tray::show_main(app, None);
+                if connections {
+                    let _ = app.emit_to("main", crate::cloud::CONNECTIONS_EVENT, ());
+                }
                 let _ = app.emit_to("main", EVENT, ());
             }
         }
@@ -308,6 +360,8 @@ fn kind(link: &Link) -> &'static str {
         Link::Item { .. } => "item",
         Link::Ask { .. } => "ask",
         Link::Plugin { .. } => "plugin",
+        Link::Connections => "connections",
+        Link::AuthCallback(_) => "auth_callback",
     }
 }
 
@@ -417,6 +471,48 @@ mod tests {
         assert!(parse_url(&long).is_err());
         let huge = format!("nugget://search?q={}", "a".repeat(MAX_URL_LEN));
         assert!(parse_url(&huge).is_err());
+    }
+
+    #[test]
+    fn cloud_callbacks() {
+        use nugget_cloud_client::Callback;
+        assert_eq!(
+            parse_url("nugget://auth/callback?code=abc-123"),
+            Ok(Link::AuthCallback(Callback::Code("abc-123".into())))
+        );
+        assert!(matches!(
+            parse_url("nugget://auth/callback?error=access_denied&error_description=Cancelled"),
+            Ok(Link::AuthCallback(Callback::Error { .. }))
+        ));
+        assert_eq!(
+            parse_url("nugget://connections/callback?status=success&connectedAccountId=ca_1"),
+            Ok(Link::Connections)
+        );
+        assert_eq!(
+            parse_url("nugget://connections/callback"),
+            Ok(Link::Connections)
+        );
+        for bad in [
+            "nugget://auth/callback",
+            "nugget://auth/callback?code=a&redirect=https://x",
+            "nugget://auth/other?code=a",
+            "nugget://user@auth/callback?code=a",
+            "nugget://connections",
+            "nugget://connections/other",
+            "nugget://connections/callback/x",
+            "nugget://connections/callback#x",
+            "nugget://connections:1/callback",
+            "nugget://connections/callback?a=1&a=2",
+        ] {
+            assert!(parse_url(bad).is_err(), "{bad}");
+        }
+        // The page never receives the sign-in code.
+        let link = parse_url("nugget://auth/callback?code=secret").unwrap();
+        assert!(serde_json::to_string(&link).is_err());
+        assert_eq!(
+            serde_json::to_value(Link::Connections).unwrap(),
+            serde_json::json!({ "kind": "connections" })
+        );
     }
 
     #[test]

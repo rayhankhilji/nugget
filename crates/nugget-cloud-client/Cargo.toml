@@ -1,0 +1,41 @@
+[package]
+name = "nugget-cloud-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Desktop client for Nugget Cloud: Supabase sign-in (PKCE + deep link), keychain session, typed /v1 API."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+# reqwest on rustls WITHOUT a built-in crypto provider: the caller installs the process default.
+# The desktop shell uses `ring` (as its updater already does), so linking this crate does not add
+# a second provider (aws-lc-rs) to that binary. Not the workspace entry, which pulls aws-lc-rs.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy", "json"] }
+# PKCE: verifier from the OS CSPRNG, S256 challenge, base64url without padding.
+getrandom = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+
+# OS keychain for the refresh token: the same backends as nugget-store (see the root Cargo.toml).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
+
+[dev-dependencies]
+wiremock = "0.6"
+# A process-default provider for the tests (the same one the desktop installs).
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@
 
 mod agent;
 mod autostart;
+mod cloud;
 mod commands;
 mod daemon;
 mod deeplink;
@@ -112,6 +113,8 @@ fn main() {
         .manage(daemon::Daemon::new())
         .manage(lifecycle::Lifecycle::default())
         .manage(notify::PendingOpen::default())
+        // Nugget Cloud (or why it is off in this build); tokens stay in Rust (`cloud.rs`).
+        .manage(cloud::Cloud::from_env())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
             commands::start_daemon,
@@ -248,6 +251,14 @@ fn main() {
             lifecycle::shell_info,
             lifecycle::indexing_pause_toggle,
             deeplink::deeplink_take,
+            cloud::cloud_session,
+            cloud::cloud_sign_in,
+            cloud::cloud_sign_out,
+            cloud::cloud_connections_list,
+            cloud::cloud_connect,
+            cloud::cloud_disconnect,
+            cloud::cloud_sync,
+            cloud::cloud_ask,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])
