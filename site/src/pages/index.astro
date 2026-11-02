@@ -42,7 +42,7 @@ const faqLd = {
         <p class="sys">Heed Cloud: {trial}-day free trial · card needed · cancel any time before you're charged</p>
         <p class="oss">Open source · Apache-2.0 · <a href={GITHUB_URL} rel="noopener">View on GitHub</a></p>
       </div>
-      <figure class="print">
+      <figure class="print" data-print>
         <img
           src="/art/painting-toledo.webp"
           srcset="/art/painting-toledo-720.webp 720w, /art/painting-toledo.webp 960w"
@@ -249,8 +249,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 </Base>
 
 <script>
-  // Sky parallax: at most 12px, and none under reduced motion. (The drift itself is pure CSS.)
+  // Parallax on scroll, at most 12px each and none under reduced motion: the sky sinks, the print
+  // rises a little, so the two separate. (The sky's drift itself is pure CSS.)
   const layer = document.querySelector<HTMLElement>("[data-sky]");
+  const print = document.querySelector<HTMLElement>("[data-print]");
   if (layer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
     let ticking = false;
     addEventListener(
@@ -259,7 +261,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
-          layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
+          if (scrollY < 1400) {
+            layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
+            print?.style.setProperty("--pp", `${(-Math.min(12, scrollY * 0.04)).toFixed(1)}px`);
+          }
           ticking = false;
         });
       },
@@ -394,7 +399,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     background: #f6f3ec;
     border-radius: 2px;
     box-shadow: 0 40px 80px -30px rgb(0 0 40 / 0.6);
-    transform: rotate(1.2deg);
+    --tilt: 1.2deg;
+    /* --pp: scroll parallax set by the hero script (at most 12px); 0 under reduced motion. */
+    transform: translate3d(0, var(--pp, 0px), 0) rotate(var(--tilt));
+    will-change: transform;
   }
   .print img {
     width: 100%;
@@ -511,6 +519,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     grid-template-columns: repeat(3, minmax(0, 1fr));
     column-gap: clamp(24px, 3vw, 40px);
     row-gap: 10px;
+  }
+  /* Features rise in a row at a time, 90ms apart (the reveal uses --i × --stagger). */
+  .feat {
+    --stagger: 90ms;
   }
   .feat:nth-child(n + 4) {
     margin-top: clamp(48px, 6vw, 80px);
@@ -916,7 +928,7 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     .print {
       max-width: min(300px, 82vw);
       justify-self: center;
-      transform: rotate(0.8deg);
+      --tilt: 0.8deg;
     }
     /* On phones the full 1440px screenshot is too small to read, so show its main column (greeting,
        ask box, brief) enlarged and cropped instead. */

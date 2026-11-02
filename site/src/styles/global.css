@@ -393,7 +393,7 @@ kbd,
   transition:
     opacity var(--t-brand) var(--ease),
     transform var(--t-brand) var(--ease);
-  transition-delay: calc(var(--i, 0) * 30ms);
+  transition-delay: calc(var(--i, 0) * var(--stagger, 30ms));
 }
 [data-reveal].in {
   opacity: 1;

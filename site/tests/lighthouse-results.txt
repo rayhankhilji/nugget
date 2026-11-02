@@ -7,17 +7,17 @@ route            form     perf a11y best  seo
 /download        desktop   100  100  100  100 
 /signin          mobile    100  100  100  100 
 /signin          desktop   100  100  100  100 
-/signup          mobile     99  100  100  100 
+/signup          mobile    100  100  100  100 
 /signup          desktop   100  100  100  100 
-/account         mobile     99  100  100   69  is-crawlable
+/account         mobile    100  100  100   69  is-crawlable
 /account         desktop   100  100  100   69  is-crawlable
-/checkout        mobile     99  100  100   69  is-crawlable
+/checkout        mobile    100  100  100   69  is-crawlable
 /checkout        desktop   100  100  100   69  is-crawlable
 /legal/privacy   mobile    100  100  100  100 
 /legal/privacy   desktop   100  100  100  100 
-/legal/terms     mobile    100  100  100  100 
+/legal/terms     mobile     99  100  100  100 
 /legal/terms     desktop   100  100  100  100 
-/docs/self-host  mobile     99  100  100  100 
+/docs/self-host  mobile    100  100  100  100 
 /docs/self-host  desktop   100  100  100  100 
 
 all scores ≥ 95

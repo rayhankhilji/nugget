@@ -267,7 +267,9 @@ The lines live in `src/lib/og.ts`. `site.webmanifest` lists the app icons.
 
 **Motion:**
 - Easing is `cubic-bezier(.2,.8,.2,1)`. UI transitions take 200ms; brand moments take 600–900ms.
-- `[data-reveal]` cards rise 8px and fade in, and lists stagger by 30ms.
+- `[data-reveal]` cards rise 8px and fade in, and lists stagger by 30ms. Feature blocks stagger by
+  90ms (`--stagger`).
+- On scroll, the hero sky sinks and the print rises, each by at most 12px.
 - Agent steps tick to a check with a 180ms stroke draw.
 - Under `prefers-reduced-motion`, only fades remain: the sky doesn't drift, the agent card renders
   in its final state, and the ghost text shows its accepted state.
