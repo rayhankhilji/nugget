@@ -2533,5 +2533,7 @@
   "models.ai.title": "Your AI",
   "models.ai.hint": "What Heed can use to answer and write, and whether it works.",
   "models.ai.working": "{name}: working",
-  "models.ai.notWorking": "{name}: not working (see Your providers below)"
+  "models.ai.notWorking": "{name}: not working (see Your providers below)",
+  "chatgpt.unavailable.title": "ChatGPT sign-in isn't available for this account yet",
+  "chatgpt.unavailable.body": "OpenAI didn't let this account use ChatGPT sign-in with Heed. Use an API key instead, or try again later."
 }

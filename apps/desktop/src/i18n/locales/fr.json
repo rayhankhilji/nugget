@@ -2533,5 +2533,7 @@
   "models.ai.title": "Votre IA",
   "models.ai.hint": "Ce que Heed peut utiliser pour répondre et rédiger, et si cela fonctionne.",
   "models.ai.working": "{name} : fonctionne",
-  "models.ai.notWorking": "{name} : ne fonctionne pas (voir Vos fournisseurs plus bas)"
+  "models.ai.notWorking": "{name} : ne fonctionne pas (voir Vos fournisseurs plus bas)",
+  "chatgpt.unavailable.title": "La connexion avec ChatGPT n’est pas encore disponible pour ce compte",
+  "chatgpt.unavailable.body": "OpenAI n’a pas autorisé ce compte à utiliser la connexion ChatGPT avec Heed. Utilisez plutôt une clé d’API, ou réessayez plus tard."
 }

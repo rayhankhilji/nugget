@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { cloudApi, type CloudPlan } from "../cloud";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 import { StepHeading, type StepProps } from "./steps";
@@ -49,7 +49,6 @@ const LOCAL_POINTS: MessageKey[] = ["onboarding.fork.local.point1", "onboarding.
  */
 export function ForkStep({ headingRef, state, dispatch, cloud }: StepProps) {
   const t = useT();
-  const id = useId();
   const configured = cloud?.session?.configured;
   const price = useCloudPrice(configured);
   const unavailable = state.path === "cloud" && configured === false;
@@ -58,22 +57,20 @@ export function ForkStep({ headingRef, state, dispatch, cloud }: StepProps) {
       type="button"
       className="ob-fork-card"
       aria-pressed={state.path === path}
-      aria-labelledby={`${id}-${path}-kicker ${id}-${path}-title`}
-      aria-describedby={`${id}-${path}-body ${id}-${path}-foot`}
       onClick={() => dispatch({ type: "choosePath", path })}
       data-path={path}
     >
-      <span className="ob-fork-kicker" id={`${id}-${path}-kicker`}>
+      <span className="ob-fork-kicker">
         {t(kicker)}
       </span>
-      <h2 id={`${id}-${path}-title`}>{t(title)}</h2>
-      <p id={`${id}-${path}-body`}>{t(body)}</p>
+      <h2>{t(title)}</h2>
+      <p>{t(body)}</p>
       <ul className="ob-fork-points">
         {points.map((k) => (
           <li key={k}>{t(k)}</li>
         ))}
       </ul>
-      <span className="ob-fork-foot" id={`${id}-${path}-foot`}>
+      <span className="ob-fork-foot">
         {foot}
       </span>
     </button>

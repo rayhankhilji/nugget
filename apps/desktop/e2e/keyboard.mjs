@@ -281,8 +281,9 @@ export async function keyboardScenario({ browser }) {
       await page.keyboard.press("Enter");
       await heading("onboarding.ai.heading").waitFor();
       await until(`the "${t("onboarding.ai.heading")}" step's heading takes focus`, async () => [await hasFocus(heading("onboarding.ai.heading")), (await focusOf(page)).desc]);
-      // A radio group is one Tab stop; arrows choose inside it.
-      const radios = page.locator(".ai-choices input[type=radio]");
+      // A radio group is one Tab stop (the checked radio); arrows choose inside it. The group
+      // container has focus when any of its radios does.
+      const radios = page.locator(".ai-choices[role=radiogroup]");
       const later = page.getByRole("radio", { name: startsWith("onboarding.ai.later") });
       await tabTo(page, radios, { what: "the AI choices" });
       for (let i = 0; i < 10 && !(await later.isChecked()); i++) await step(page, "ArrowDown");

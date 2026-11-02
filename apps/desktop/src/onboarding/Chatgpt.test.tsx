@@ -98,7 +98,8 @@ describe("Sign in with ChatGPT", () => {
     const useKey: number[] = [];
     const { container } = await render(<ChatgptPanel onReady={(w) => ready.push(w)} onUseKey={() => useKey.push(1)} />);
     const alert = container.querySelector('[role="alert"]')!;
-    expect(alert.textContent).toContain("Your ChatGPT plan usage isn't enabled");
+    // Plan usage not granted (scope_not_granted): OpenAI refused it for this account.
+    expect(alert.textContent).toContain("ChatGPT sign-in isn't available for this account yet");
     // One note for it, not a second generic error.
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(container.querySelector(".provider-dot")?.hasAttribute("data-health")).toBe(false);
@@ -107,6 +108,49 @@ describe("Sign in with ChatGPT", () => {
     expect(useKey).toEqual([1]);
     await click(button(container, "Try again"));
     expect(calls).toContain("chatgpt_sign_in");
+  });
+
+  it("plan usage off without a code says plan usage isn't enabled", async () => {
+    mockDaemon({ chatgpt_status: () => signedIn({ plan_usage: false }) });
+    const { container } = await render(<main><ChatgptPanel /></main>);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Your ChatGPT plan usage isn't enabled");
+  });
+
+  it.each([
+    ["token_exchange_failed", status({ error: { code: "token_exchange_failed", message: "registration refused" } })],
+    ["scope_not_granted", signedIn({ plan_usage: false, error: { code: "scope_not_granted", message: "no plan usage" } })],
+  ])("OpenAI refused this account (%s): not available yet, the API-key way, and no automatic retry", async (_code, refused) => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const calls = mockDaemon({ chatgpt_status: () => refused, chatgpt_sign_in: () => status({ state: "signing_in" }) });
+    const useKey: number[] = [];
+    const { container } = await render(
+      <main>
+        <ChatgptPanel onUseKey={() => useKey.push(1)} />
+      </main>,
+    );
+    const alerts = [...container.querySelectorAll('[role="alert"]')];
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.textContent).toContain("ChatGPT sign-in isn't available for this account yet");
+    const key = byText(alerts[0] as HTMLElement, "button", "Use an API key instead")!;
+    expect(key.classList.contains("btn-primary")).toBe(true);
+    await act(async () => {
+      vi.advanceTimersByTime(CHATGPT_POLL_MS * 10);
+    });
+    await flush();
+    expect(calls).not.toContain("chatgpt_sign_in");
+    await click(key);
+    expect(useKey).toEqual([1]);
+    expect(calls).not.toContain("chatgpt_sign_in");
+    // Only the user's click on Try again starts a new sign-in.
+    await click(byText(alerts[0] as HTMLElement, "button", "Try again"));
+    expect(calls.filter((c) => c === "chatgpt_sign_in")).toHaveLength(1);
+  });
+
+  it("access_denied keeps its own gentler message", async () => {
+    mockDaemon({ chatgpt_status: () => status({ error: { code: "access_denied", message: "declined" } }) });
+    const { container } = await render(<main><ChatgptPanel onUseKey={() => {}} /></main>);
+    expect(container.textContent).not.toContain("isn't available for this account");
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("The sign-in was turned down in the browser. Try again if you meant to allow it.");
   });
 
   it("usage limit: Manage usage opens ChatGPT's page, Resume resumes, Use another AI goes back", async () => {

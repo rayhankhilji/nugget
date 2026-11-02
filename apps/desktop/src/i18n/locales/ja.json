@@ -2533,5 +2533,7 @@
   "models.ai.title": "あなたの AI",
   "models.ai.hint": "Heed が回答や文章作成に使えるものと、それが動作しているかどうか。",
   "models.ai.working": "{name}：動作中",
-  "models.ai.notWorking": "{name}：動作していません（下の「あなたのプロバイダ」を参照）"
+  "models.ai.notWorking": "{name}：動作していません（下の「あなたのプロバイダ」を参照）",
+  "chatgpt.unavailable.title": "このアカウントでは、ChatGPT でのサインインはまだ利用できません",
+  "chatgpt.unavailable.body": "OpenAI がこのアカウントによる Heed への ChatGPT サインインを許可しませんでした。代わりに API キーを使うか、後でもう一度試してください。"
 }

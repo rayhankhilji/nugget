@@ -295,6 +295,15 @@
   cursor: auto;
 }
 
+/* The hidden radio sits under the icon: let a click (or a test's click) at its place reach it. */
+.ai-choice-icon {
+  pointer-events: none;
+}
+
+.ai-choice input[type="radio"] {
+  pointer-events: auto;
+}
+
 .ai-choice-body > :first-child {
   margin-block-start: 0;
 }

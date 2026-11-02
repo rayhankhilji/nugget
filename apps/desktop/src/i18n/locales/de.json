@@ -2533,5 +2533,7 @@
   "models.ai.title": "Ihre KI",
   "models.ai.hint": "Was Heed zum Antworten und Schreiben nutzen kann, und ob es funktioniert.",
   "models.ai.working": "{name}: funktioniert",
-  "models.ai.notWorking": "{name}: funktioniert nicht (siehe Ihre Anbieter unten)"
+  "models.ai.notWorking": "{name}: funktioniert nicht (siehe Ihre Anbieter unten)",
+  "chatgpt.unavailable.title": "Die Anmeldung mit ChatGPT ist für dieses Konto noch nicht verfügbar",
+  "chatgpt.unavailable.body": "OpenAI erlaubt diesem Konto die Anmeldung mit ChatGPT bei Heed nicht. Verwenden Sie stattdessen einen API-Schlüssel oder versuchen Sie es später erneut."
 }

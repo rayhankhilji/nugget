@@ -2533,5 +2533,7 @@
   "models.ai.title": "ذكاؤك الاصطناعي",
   "models.ai.hint": "ما يمكن لـ Heed استخدامه للإجابة والكتابة، وهل يعمل.",
   "models.ai.working": "{name}: يعمل",
-  "models.ai.notWorking": "{name}: لا يعمل (راجع مزوّدوك أدناه)"
+  "models.ai.notWorking": "{name}: لا يعمل (راجع مزوّدوك أدناه)",
+  "chatgpt.unavailable.title": "تسجيل الدخول باستخدام ChatGPT غير متاح لهذا الحساب بعد",
+  "chatgpt.unavailable.body": "لم تسمح OpenAI لهذا الحساب باستخدام تسجيل الدخول عبر ChatGPT مع Heed. استخدم مفتاح API بدلًا من ذلك، أو حاول مجددًا لاحقًا."
 }

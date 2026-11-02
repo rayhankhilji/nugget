@@ -210,8 +210,11 @@ export function ChatgptNotes({
     );
   }
   const code = s?.error?.code;
-  // The usage limit and plan usage have their own notes; a cancel the user pressed needs none.
-  const shownError = code && code !== "usage_limit" && code !== "cancelled" && !(s?.state === "signed_in" && code === "scope_not_granted");
+  // OpenAI refused this account (registration or plan usage): not available for it yet.
+  const unavailable = code === "token_exchange_failed" || code === "scope_not_granted";
+  const planOff = s?.state === "signed_in" && !s.plan_usage;
+  // The usage limit, plan usage and refusals have their own notes; a cancel the user pressed needs none.
+  const shownError = code && code !== "usage_limit" && code !== "cancelled" && !unavailable;
   return (
     <>
       {s?.state === "signing_in" && (
@@ -227,21 +230,22 @@ export function ChatgptNotes({
           </div>
         </div>
       )}
-      {s?.state === "signed_in" && !s.plan_usage && (
+      {(planOff || unavailable) && (
         <div className="note note-error" role="alert">
           <p>
-            <strong>{t("chatgpt.planOff.title")}</strong>
+            <strong>{t(unavailable ? "chatgpt.unavailable.title" : "chatgpt.planOff.title")}</strong>
           </p>
-          <p>{t("chatgpt.planOff.body")}</p>
+          <p>{t(planOff ? "chatgpt.planOff.body" : "chatgpt.unavailable.body")}</p>
+          {/* A new sign-in starts only from this click: never by itself, never in a loop. */}
           <div className="row">
-            <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={chatgpt.signIn}>
-              {busy === "sign_in" ? t("chatgpt.signingIn") : t("chatgpt.tryAgain")}
-            </button>
             {onUseKey && (
-              <button type="button" className="btn" onClick={onUseKey}>
+              <button type="button" className={unavailable ? "btn btn-primary" : "btn"} onClick={onUseKey}>
                 {t("chatgpt.useKey")}
               </button>
             )}
+            <button type="button" className={unavailable && onUseKey ? "btn" : "btn btn-primary"} disabled={busy !== null} onClick={chatgpt.signIn}>
+              {busy === "sign_in" ? t("chatgpt.signingIn") : t("chatgpt.tryAgain")}
+            </button>
           </div>
         </div>
       )}

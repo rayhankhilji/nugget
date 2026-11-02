@@ -2533,5 +2533,7 @@
   "models.ai.title": "你的 AI",
   "models.ai.hint": "Heed 可以用来回答和写作的 AI，以及它们是否正常工作。",
   "models.ai.working": "{name}：正常工作",
-  "models.ai.notWorking": "{name}：无法工作（参见下方的“你的提供商”）"
+  "models.ai.notWorking": "{name}：无法工作（参见下方的“你的提供商”）",
+  "chatgpt.unavailable.title": "此账户暂时无法使用 ChatGPT 登录",
+  "chatgpt.unavailable.body": "OpenAI 未允许此账户通过 ChatGPT 登录 Heed。请改用 API 密钥，或稍后重试。"
 }
