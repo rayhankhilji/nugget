@@ -1,0 +1,20 @@
+<!-- Heed app icon master (original artwork, Apache-2.0): an attention dot above a line on a
+     graphite tile. Regenerate the platform icons with packaging/scripts/icons.sh; never edit
+     apps/desktop/src-tauri/icons/* by hand. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26272d"/>
+      <stop offset="1" stop-color="#16171b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff5a3c" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff5a3c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tile)"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="32" cy="25" r="14" fill="url(#glow)"/>
+  <circle cx="32" cy="25" r="7.5" fill="#ff5a3c"/>
+  <rect x="19" y="39" width="26" height="5.5" rx="2.75" fill="#f7f7f5"/>
+</svg>

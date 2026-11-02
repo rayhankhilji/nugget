@@ -12,25 +12,30 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
-use crate::composio::Composio;
-use crate::db::{Connection, Db, NewItem, Upsert};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use async_trait::async_trait;
+
+use crate::apps::{self, PullError, RateLimiter, SyncAdapter, SyncMode, Tools};
+use crate::composio::{Composio, ComposioError};
+use crate::db::{Connection, Db, NewItem, SyncRun, Upsert};
 use crate::gateway::Gateway;
 use crate::plans::{Catalog, Plan};
 
 pub const GMAIL: &str = "gmail";
 pub const CALENDAR: &str = "googlecalendar";
-/// Toolkits this build can ingest.
-pub const SUPPORTED: &[&str] = &[GMAIL, CALENDAR];
 
-const MAX_BODY: usize = 64 * 1024;
+pub(crate) const MAX_BODY: usize = 64 * 1024;
 const CHUNK_CHARS: usize = 1200;
 const CHUNK_OVERLAP: usize = 200;
-const MAX_PAGES: usize = 5;
 /// Longest first-sync backfill, whatever the plan's history (keeps the first sync bounded).
 const MAX_BACKFILL_DAYS: u32 = 3 * 365;
 /// How soon to continue a backfill that did not finish in one run.
 const CONTINUE_SECS: i64 = 60;
 const IDLE_SECS: i64 = 24 * 60 * 60;
+/// How long one sync run may hold its connection before another may start (a crashed run's
+/// lease simply expires).
+const RUN_LEASE_SECS: i64 = 15 * 60;
 /// Toolkits that get the plan's full cadence; others sync at most every 15 minutes, which keeps
 /// Composio tool-call cost bounded for users with many apps.
 const PRIMARY: &[&str] = &[GMAIL, CALENDAR];
@@ -80,7 +85,10 @@ pub struct SyncReport {
     pub toolkit: String,
     pub added: u32,
     pub updated: u32,
+    pub deleted: u32,
     pub error: Option<String>,
+    /// Another sync of this connection was already running; this one did nothing.
+    pub in_progress: bool,
 }
 
 // ---- text ---------------------------------------------------------------------------------------
@@ -160,7 +168,7 @@ pub fn trim_quoted(text: &str) -> String {
     out.join("\n").trim().to_owned()
 }
 
-fn cap(mut s: String, max: usize) -> String {
+pub(crate) fn cap(mut s: String, max: usize) -> String {
     if s.len() > max {
         let mut end = max;
         while !s.is_char_boundary(end) {
@@ -234,7 +242,7 @@ pub fn indexed_text(item: &NewItem) -> String {
 
 // ---- parsing --------------------------------------------------------------------------------------
 
-fn first_str(v: &Value, keys: &[&str]) -> Option<String> {
+pub(crate) fn first_str(v: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|k| v.pointer(k).and_then(Value::as_str))
         .map(str::trim)
@@ -243,7 +251,7 @@ fn first_str(v: &Value, keys: &[&str]) -> Option<String> {
 }
 
 /// The list under the first of `keys` found at the top or under `data`/`response_data`.
-fn find_list<'a>(data: &'a Value, keys: &[&str]) -> &'a [Value] {
+pub(crate) fn find_list<'a>(data: &'a Value, keys: &[&str]) -> &'a [Value] {
     for root in [data, &data["data"], &data["response_data"]] {
         for k in keys {
             if let Some(a) = root[*k].as_array() {
@@ -254,13 +262,13 @@ fn find_list<'a>(data: &'a Value, keys: &[&str]) -> &'a [Value] {
     &[]
 }
 
-fn next_token(data: &Value) -> Option<String> {
+pub(crate) fn next_token(data: &Value) -> Option<String> {
     [data, &data["data"], &data["response_data"]]
         .into_iter()
         .find_map(|r| first_str(r, &["/nextPageToken", "/next_page_token"]))
 }
 
-fn parse_time(v: Option<&Value>) -> Option<OffsetDateTime> {
+pub(crate) fn parse_time(v: Option<&Value>) -> Option<OffsetDateTime> {
     match v? {
         Value::String(s) => OffsetDateTime::parse(s, &Rfc3339).ok().or_else(|| {
             // Gmail internalDate-style millisecond strings.
@@ -346,7 +354,16 @@ pub fn parse_gmail(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 metadata: json!({
                     "thread_id": thread,
                     "to": first_str(m, &["/to"]).or_else(|| header(m, "To")),
+                    "cc": first_str(m, &["/cc"]).or_else(|| header(m, "Cc")),
                     "labels": if labels.is_array() { labels } else { json!([]) },
+                    // Threading and bulk-mail signals for knowledge and cards (M2).
+                    "message_id": header(m, "Message-ID"),
+                    "in_reply_to": header(m, "In-Reply-To"),
+                    "references": header(m, "References"),
+                    "list_unsubscribe": header(m, "List-Unsubscribe"),
+                    "list_id": header(m, "List-Id"),
+                    "precedence": header(m, "Precedence"),
+                    "auto_submitted": header(m, "Auto-Submitted"),
                 }),
             })
         })
@@ -360,7 +377,9 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
         .filter(|e| e["status"].as_str() != Some("cancelled"))
         .filter_map(|e| {
             let id = first_str(e, &["/id"])?;
-            let start = e.pointer("/start/dateTime").or_else(|| e.pointer("/start/date"));
+            let start = e
+                .pointer("/start/dateTime")
+                .or_else(|| e.pointer("/start/date"));
             let start_s = start.and_then(Value::as_str).unwrap_or("");
             let end_s = first_str(e, &["/end/dateTime", "/end/date"]).unwrap_or_default();
             let attendees: Vec<String> = e["attendees"]
@@ -370,7 +389,9 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 .filter_map(|a| first_str(a, &["/displayName", "/email"]))
                 .collect();
             let location = first_str(e, &["/location"]);
-            let desc = first_str(e, &["/description"]).map(|d| strip_html(&d)).unwrap_or_default();
+            let desc = first_str(e, &["/description"])
+                .map(|d| strip_html(&d))
+                .unwrap_or_default();
             let mut body = format!("When: {start_s} – {end_s}");
             if let Some(l) = &location {
                 body.push_str(&format!("\nWhere: {l}"));
@@ -398,16 +419,47 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 url: first_str(e, &["/htmlLink"]),
                 occurred_at: occurred,
                 body: cap(body, MAX_BODY),
-                metadata: json!({"start": start_s, "end": end_s, "location": location, "attendees": attendees}),
+                metadata: calendar_meta(e, location),
             })
         })
         .collect();
     (items, next_token(data))
 }
 
+/// Event metadata in the shape of the local Google Calendar connector, which the knowledge
+/// extractors and card generators read.
+fn calendar_meta(e: &Value, location: Option<String>) -> Value {
+    let when = |k: &str| {
+        json!({
+            "date": e.pointer(&format!("/{k}/date")),
+            "date_time": e.pointer(&format!("/{k}/dateTime")),
+            "time_zone": e.pointer(&format!("/{k}/timeZone")),
+        })
+    };
+    let person = |p: &Value| {
+        json!({
+            "email": p["email"], "name": p["displayName"], "response": p["responseStatus"],
+            "optional": p["optional"], "resource": p["resource"],
+        })
+    };
+    json!({
+        "event_id": e["id"],
+        "ical_uid": e["iCalUID"],
+        "status": e["status"],
+        "start": when("start"),
+        "end": when("end"),
+        "all_day": e.pointer("/start/date").is_some(),
+        "time_zone": e.pointer("/start/timeZone"),
+        "location": location,
+        "organizer": e.get("organizer").map(person),
+        "attendees": e["attendees"].as_array().into_iter().flatten().map(person).collect::<Vec<_>>(),
+        "recurring_event_id": e["recurringEventId"],
+    })
+}
+
 // ---- sync -----------------------------------------------------------------------------------------
 
-fn rfc3339(t: OffsetDateTime) -> String {
+pub(crate) fn rfc3339(t: OffsetDateTime) -> String {
     t.format(&Rfc3339).unwrap_or_default()
 }
 
@@ -492,36 +544,138 @@ pub fn next_cursor(
     }
 }
 
+/// One sync's view of Composio: one user, one connected account, the adapter's read tools
+/// only, its rate limit, and a call budget. Every call is metered as a tool call.
+struct BoundTools<'a> {
+    ingest: &'a Ingest,
+    user: Uuid,
+    account: &'a str,
+    adapter: &'static dyn SyncAdapter,
+    calls: AtomicU32,
+}
+
+/// Longest a sync waits for its own rate limit before giving up until next time.
+const MAX_RATE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+#[async_trait]
+impl Tools for BoundTools<'_> {
+    async fn call(&self, tool: &'static str, args: Value) -> Result<Value, ComposioError> {
+        if !self.adapter.tools().contains(&tool) {
+            return Err(ComposioError::Tool {
+                tool: tool.into(),
+                message: "not one of this app's sync tools".into(),
+            });
+        }
+        if self.calls.fetch_add(1, Ordering::SeqCst) >= self.adapter.max_calls() {
+            return Err(ComposioError::Tool {
+                tool: tool.into(),
+                message: "this sync's call budget is used up".into(),
+            });
+        }
+        let key = format!("{}:{}", self.adapter.toolkit(), self.account);
+        let Some(wait) = self
+            .ingest
+            .limiter
+            .try_reserve(&key, self.adapter.rate(), MAX_RATE_WAIT)
+        else {
+            return Err(ComposioError::Http(format!(
+                "429 rate limit for {}: try again later",
+                self.adapter.toolkit()
+            )));
+        };
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+        let out = self
+            .ingest
+            .composio
+            .execute(&self.user.to_string(), self.account, tool, args)
+            .await;
+        let _ = self
+            .ingest
+            .db
+            .record_usage(self.user, crate::db::UsageKind::Tool, tool, 0, 0, 300)
+            .await;
+        out
+    }
+}
+
 #[derive(Clone)]
 pub struct Ingest {
     pub db: Db,
     pub composio: Arc<dyn Composio>,
     pub gateway: Gateway,
     pub catalog: Arc<Catalog>,
+    /// Shared by every sync in the process, keyed by toolkit and connected account.
+    pub limiter: RateLimiter,
+    /// Whether Composio triggers may be enabled (needs `COMPOSIO_WEBHOOK_SECRET`, since a
+    /// trigger is useless if its webhook is refused).
+    pub triggers: bool,
 }
 
 impl Ingest {
-    /// Syncs one connection: fetches new pages, stores changed items, advances the cursor.
+    pub fn new(
+        db: Db,
+        composio: Arc<dyn Composio>,
+        gateway: Gateway,
+        catalog: Arc<Catalog>,
+    ) -> Self {
+        Self {
+            db,
+            composio,
+            gateway,
+            catalog,
+            limiter: RateLimiter::default(),
+            triggers: false,
+        }
+    }
+
+    /// Syncs one connection: fetches what changed, stores changed items, deletes what is gone
+    /// upstream, advances the cursor.
     pub async fn sync(&self, user: Uuid, conn: &Connection) -> SyncReport {
         let mut report = SyncReport {
             toolkit: conn.toolkit.clone(),
             ..Default::default()
         };
+        // One run per connection at a time, whether started by a request or the scheduler.
+        match self.db.claim_sync(user, conn.id, RUN_LEASE_SECS).await {
+            Ok(true) => {}
+            Ok(false) => {
+                report.in_progress = true;
+                return report;
+            }
+            Err(e) => {
+                report.error = Some(e.to_string());
+                return report;
+            }
+        }
         let started = OffsetDateTime::now_utc();
         let policy = SyncPolicy::for_plan(self.plan_of(user).await.as_ref());
+        let mut trigger_id = conn.trigger_id.clone();
+        if trigger_id.is_none() {
+            trigger_id = self.enable_triggers(user, conn).await;
+        }
         let result = self
             .sync_inner(user, conn, started, policy, &mut report)
             .await;
         let active = self.db.recently_active(user).await.unwrap_or(false);
-        let mut next = next_interval(active, &conn.toolkit, policy);
-        let (cursor, err) = match result {
+        let mut next = match trigger_id {
+            // The trigger nudges us; this is the safety net.
+            Some(_) => IDLE_SECS,
+            None => next_interval(active, &conn.toolkit, policy),
+        };
+        let (cursor, err, done) = match result {
             Ok((c, more)) => {
                 if more {
                     next = CONTINUE_SECS;
                 }
-                (Some(c), None)
+                (Some(c), None, !more)
             }
-            Err(e) => (None, Some(e)),
+            Err(SyncFailure::RateLimited(e)) => {
+                next = next.min(15 * 60);
+                (None, Some(e), false)
+            }
+            Err(SyncFailure::Other(e)) => (None, Some(e), false),
         };
         if let Some(days) = policy.history_days
             && let Err(e) = self.db.prune_history(user, days).await
@@ -530,13 +684,56 @@ impl Ingest {
         }
         if let Err(e) = self
             .db
-            .finish_sync(user, conn.id, cursor.as_ref(), err.as_deref(), next)
+            .finish_sync(
+                user,
+                conn.id,
+                &SyncRun {
+                    cursor: cursor.as_ref(),
+                    error: err.as_deref(),
+                    next_in_secs: next,
+                    items: report.added + report.updated,
+                    backfill_done: done,
+                },
+            )
             .await
         {
             tracing::warn!(%e, "could not record sync result");
         }
         report.error = err;
         report
+    }
+
+    /// Enables the app's Composio triggers once, for apps in trigger mode. Failures are logged
+    /// and retried at the next sync; polling carries on meanwhile.
+    async fn enable_triggers(&self, user: Uuid, conn: &Connection) -> Option<String> {
+        let spec = apps::spec(&conn.toolkit)?;
+        if !self.triggers || spec.default_mode != SyncMode::Trigger {
+            return None;
+        }
+        let mut ids = Vec::new();
+        for slug in spec.triggers {
+            match self
+                .composio
+                .upsert_trigger(
+                    &user.to_string(),
+                    &conn.composio_account_id,
+                    slug,
+                    json!({}),
+                )
+                .await
+            {
+                Ok(id) => ids.push(id),
+                Err(e) => {
+                    tracing::warn!(%e, toolkit = %conn.toolkit, trigger = slug, "could not enable trigger");
+                    return None;
+                }
+            }
+        }
+        let joined = ids.join(",");
+        if let Err(e) = self.db.set_trigger(user, conn.id, &joined).await {
+            tracing::warn!(%e, "could not record trigger");
+        }
+        Some(joined)
     }
 
     /// The user's live plan, if any.
@@ -555,115 +752,164 @@ impl Ingest {
         started: OffsetDateTime,
         policy: SyncPolicy,
         report: &mut SyncReport,
-    ) -> Result<(Value, bool), String> {
-        let uid = user.to_string();
-        let mut page: Option<String> = conn.sync_cursor["page"].as_str().map(str::to_owned);
-        let mut newest: Option<OffsetDateTime> = None;
-        let mut pending = None;
-        for i in 0..MAX_PAGES {
-            let Some((tool, args)) = page_request(
-                &conn.toolkit,
-                &conn.sync_cursor,
-                page.as_deref(),
-                started,
-                policy.backfill_days,
-            ) else {
-                return Err(format!("toolkit {} is not supported yet", conn.toolkit));
-            };
-            let data = self
-                .composio
-                .execute(&uid, &conn.composio_account_id, tool, args)
-                .await
-                .map_err(|e| e.to_string())?;
-            let _ = self
-                .db
-                .record_usage(user, crate::db::UsageKind::Tool, tool, 0, 0, 300)
-                .await;
-            let (items, next) = parse_page(&conn.toolkit, &data);
-            for item in items {
-                newest = newest.max(item.occurred_at);
-                match self.store(user, conn.id, &item).await? {
-                    Some(Upsert::Added) => report.added += 1,
-                    Some(Upsert::Updated) => report.updated += 1,
-                    None => {}
+    ) -> Result<(Value, bool), SyncFailure> {
+        let Some(adapter) = apps::adapter(&conn.toolkit) else {
+            return Err(SyncFailure::Other(format!(
+                "toolkit {} is not supported yet",
+                conn.toolkit
+            )));
+        };
+        let tools = BoundTools {
+            ingest: self,
+            user,
+            account: &conn.composio_account_id,
+            adapter,
+            calls: AtomicU32::new(0),
+        };
+        let pull = adapter
+            .pull(&tools, &conn.sync_cursor, started, policy.backfill_days)
+            .await
+            .map_err(|e| match e {
+                PullError::RateLimited(m) => SyncFailure::RateLimited(m),
+                PullError::Composio(c) if apps::is_rate_limited(&c) => {
+                    SyncFailure::RateLimited(format!("rate limited: {c}; retrying later"))
                 }
-            }
-            match next {
-                Some(n) if i + 1 == MAX_PAGES => pending = Some(n),
-                Some(n) => page = Some(n),
-                None => break,
+                PullError::Composio(c) => SyncFailure::Other(c.to_string()),
+            })?;
+        let other = |e: crate::db::DbError| SyncFailure::Other(e.to_string());
+        let source = adapter.toolkit();
+        for item in &pull.items {
+            if item.source != source {
+                return Err(SyncFailure::Other(format!(
+                    "{source} produced an item for {}",
+                    item.source
+                )));
             }
         }
-        // Only Gmail resumes mid-query; other toolkits restart from their cursor.
-        let pending = pending.filter(|_| conn.toolkit == GMAIL);
-        let more = pending.is_some();
-        let cursor = next_cursor(
-            &conn.toolkit,
-            newest,
-            &conn.sync_cursor,
-            started,
-            policy.backfill_days,
-            pending,
-        );
-        Ok((cursor, more))
+        // Deletes first: an item deleted and re-created upstream within one pull is kept.
+        let deleted = self
+            .db
+            .delete_items(user, source, &pull.deleted)
+            .await
+            .map_err(other)?;
+        report.deleted += u32::try_from(deleted).unwrap_or(u32::MAX);
+        // Unchanged items are skipped; new chunks are embedded in batched calls.
+        self.store_page(user, conn.id, pull.items, report)
+            .await
+            .map_err(SyncFailure::Other)?;
+        for w in &pull.windows {
+            // An empty listing more likely means a changed response shape than an empty
+            // mailbox; never delete a whole window on it.
+            if w.seen.is_empty() {
+                continue;
+            }
+            let n = self.db.reconcile(user, source, w).await.map_err(other)?;
+            report.deleted += u32::try_from(n).unwrap_or(u32::MAX);
+        }
+        Ok((pull.cursor, pull.more))
     }
 
-    /// Stores one item unless its content is unchanged. Embeds chunks when an embedder exists.
-    async fn store(
+    /// Stores a page of items: skips unchanged ones (one hash lookup for the page), embeds all
+    /// new chunks in batched calls, then writes each item with its chunks.
+    async fn store_page(
         &self,
         user: Uuid,
         conn: Uuid,
-        item: &NewItem,
-    ) -> Result<Option<Upsert>, String> {
-        let hash = content_hash(item);
-        let old = self
-            .db
-            .item_hash(user, &item.source, &item.external_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        if old.as_deref() == Some(hash.as_str()) {
-            return Ok(None);
-        }
-        let texts = chunk(&indexed_text(item), CHUNK_CHARS, CHUNK_OVERLAP);
-        let embeddings = self
-            .gateway
-            .embed(&self.db, user, &texts)
-            .await
-            .map_err(|e| e.to_string())?;
-        let chunks: Vec<(String, Option<Vec<f32>>)> = match embeddings {
-            Some(v) => texts.into_iter().zip(v.into_iter().map(Some)).collect(),
-            None => texts.into_iter().map(|t| (t, None)).collect(),
+        items: Vec<NewItem>,
+        report: &mut SyncReport,
+    ) -> Result<(), String> {
+        let Some(source) = items.first().map(|i| i.source.clone()) else {
+            return Ok(());
         };
-        self.db
-            .upsert_item(user, Some(conn), item, &hash, &chunks)
+        let ids: Vec<String> = items.iter().map(|i| i.external_id.clone()).collect();
+        let stored = self
+            .db
+            .item_hashes(user, &source, &ids)
             .await
-            .map(Some)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let changed: Vec<(NewItem, String, Vec<String>)> = items
+            .into_iter()
+            .filter_map(|item| {
+                let hash = content_hash(&item);
+                if stored.get(&item.external_id) == Some(&hash) {
+                    return None;
+                }
+                let texts = chunk(&indexed_text(&item), CHUNK_CHARS, CHUNK_OVERLAP);
+                Some((item, hash, texts))
+            })
+            .collect();
+        let all: Vec<String> = changed
+            .iter()
+            .flat_map(|(_, _, t)| t.iter().cloned())
+            .collect();
+        let mut vectors = self
+            .gateway
+            .embed(&self.db, user, &all)
+            .await
+            .map_err(|e| e.to_string())?
+            .map(Vec::into_iter);
+        for (item, hash, texts) in changed {
+            let chunks: Vec<(String, Option<Vec<f32>>)> = texts
+                .into_iter()
+                .map(|t| (t, vectors.as_mut().and_then(Iterator::next)))
+                .collect();
+            match self
+                .db
+                .upsert_item(user, Some(conn), &item, &hash, &chunks)
+                .await
+            {
+                Ok(Upsert::Added) => report.added += 1,
+                Ok(Upsert::Updated) => report.updated += 1,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
     }
 
-    /// One pass of the background scheduler: syncs up to `max` due connections.
+    /// One pass of the background scheduler: claims up to `max` due connections (with a lease,
+    /// so other machines skip them) and syncs them, `SYNC_CONCURRENCY` at a time.
     pub async fn run_due(&self, max: i32) -> usize {
-        let due = match self.db.due_connections(max).await {
+        let due = match self.db.claim_due(max, SYNC_LEASE_SECS).await {
             Ok(d) => d,
             Err(e) => {
-                tracing::warn!(%e, "due_connections failed");
+                tracing::warn!(%e, "claiming due connections failed");
                 return 0;
             }
         };
-        let mut n = 0;
+        let gate = Arc::new(tokio::sync::Semaphore::new(SYNC_CONCURRENCY));
+        let mut tasks = tokio::task::JoinSet::new();
         for (user, conn_id) in due {
-            let Ok(conns) = self.db.connections(user).await else {
-                continue;
-            };
-            if let Some(c) = conns.iter().find(|c| c.id == conn_id) {
-                let r = self.sync(user, c).await;
-                tracing::info!(toolkit = %r.toolkit, added = r.added, updated = r.updated, error = ?r.error, "sync");
+            let this = self.clone();
+            let gate = gate.clone();
+            tasks.spawn(async move {
+                let _permit = gate.acquire_owned().await.ok()?;
+                let conns = this.db.connections(user).await.ok()?;
+                let c = conns.iter().find(|c| c.id == conn_id)?;
+                let r = this.sync(user, c).await;
+                crate::ops::METRICS.sync_run(r.error.is_none());
+                tracing::info!(toolkit = %r.toolkit, added = r.added, updated = r.updated, deleted = r.deleted, failed = r.error.is_some(), "sync");
+                Some(())
+            });
+        }
+        let mut n = 0;
+        while let Some(r) = tasks.join_next().await {
+            if matches!(r, Ok(Some(()))) {
                 n += 1;
             }
         }
         n
     }
 }
+
+enum SyncFailure {
+    RateLimited(String),
+    Other(String),
+}
+
+/// How long a claimed connection is reserved for the claiming pass.
+const SYNC_LEASE_SECS: i32 = 15 * 60;
+/// Connections synced at once per machine (each sync is mostly waiting on Composio).
+const SYNC_CONCURRENCY: usize = 4;
 
 #[cfg(test)]
 mod tests {
@@ -748,6 +994,12 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items[0].body.contains("Where: High St"));
         assert!(items[0].body.contains("Attendees: a@x"));
+        let m = &items[0].metadata;
+        assert_eq!(m["event_id"], "e1");
+        assert_eq!(m["start"]["date_time"], "2026-11-05T10:00:00+00:00");
+        assert_eq!(m["attendees"][0]["email"], "a@x");
+        assert_eq!(items[1].metadata["all_day"], true);
+        assert_eq!(items[1].metadata["start"]["date"], "2026-12-24");
         assert_eq!(
             items[1].occurred_at.unwrap().date().to_string(),
             "2026-12-24"

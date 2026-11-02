@@ -1,0 +1,43 @@
+---
+/** An app logo from simple-icons (CC0). Logos are trademarks of their owners. */
+import * as icons from "simple-icons";
+
+interface Props {
+  slug: string;
+  size?: number;
+  /** A small white tile with the logo in brand colour, like an app badge. */
+  tile?: boolean;
+  /** Monochrome, inheriting currentColor. */
+  mono?: boolean;
+}
+const { slug, size = 24, tile = false, mono = false } = Astro.props;
+const key = `si${slug[0]?.toUpperCase()}${slug.slice(1)}`;
+const icon = (icons as unknown as Record<string, { path: string; hex: string; title: string } | undefined>)[key];
+if (!icon) throw new Error(`no simple-icons glyph for ${slug}`);
+const glyph = tile ? Math.round(size * 0.66) : size;
+---
+{
+  tile ? (
+    <span class="app" style={`width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.28)}px`}>
+      <svg width={glyph} height={glyph} viewBox="0 0 24 24" aria-hidden="true">
+        <path fill={`#${icon.hex}`} d={icon.path} />
+      </svg>
+    </span>
+  ) : (
+    <svg class="app-glyph" width={glyph} height={glyph} viewBox="0 0 24 24" aria-hidden="true">
+      <path fill={mono ? "currentColor" : `#${icon.hex}`} d={icon.path} />
+    </svg>
+  )
+}
+
+<style>
+  .app {
+    display: inline-grid;
+    place-items: center;
+    flex: none;
+    background: #fff;
+    box-shadow:
+      0 0 0 0.5px rgb(0 0 0 / 0.12),
+      0 1px 2px rgb(0 0 0 / 0.1);
+  }
+</style>

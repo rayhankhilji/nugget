@@ -50,6 +50,25 @@ pub struct Connection {
     pub last_error: Option<String>,
     #[serde(skip)]
     pub sync_cursor: Value,
+    /// Composio trigger instance(s) nudging this connection, comma-separated.
+    #[serde(skip)]
+    pub trigger_id: Option<String>,
+    /// A sync is running now (in the background or for a request).
+    pub syncing: bool,
+    /// The first backfill has finished.
+    pub backfill_done: bool,
+    /// Items stored or updated so far.
+    pub items_synced: i32,
+}
+
+/// The outcome of one sync run, for [`Db::finish_sync`].
+#[derive(Debug, Default)]
+pub struct SyncRun<'a> {
+    pub cursor: Option<&'a Value>,
+    pub error: Option<&'a str>,
+    pub next_in_secs: i64,
+    pub items: u32,
+    pub backfill_done: bool,
 }
 
 /// One normalised email, event or doc, ready to store.
@@ -109,6 +128,10 @@ impl Connection {
             last_synced_at: r.get("last_synced_at"),
             last_error: r.get("last_error"),
             sync_cursor: r.get("sync_cursor"),
+            trigger_id: r.get("trigger_id"),
+            syncing: r.get("syncing"),
+            backfill_done: r.get("backfill_done"),
+            items_synced: r.get("items_synced"),
         }
     }
 }
@@ -130,6 +153,40 @@ impl ItemMeta {
 #[derive(Clone)]
 pub struct Db {
     pool: Pool,
+    statement_timeout_ms: u64,
+}
+
+/// Pool limits (`DATABASE_POOL_MAX`, `DATABASE_POOL_TIMEOUT_SECS`,
+/// `DATABASE_STATEMENT_TIMEOUT_MS`). Keep `max_size` × machines under the pooler's limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolOptions {
+    pub max_size: usize,
+    /// How long a request waits for a connection (or to open one) before failing with 503.
+    pub timeout_secs: u64,
+    /// Per-transaction `statement_timeout`; 0 leaves the server default.
+    pub statement_timeout_ms: u64,
+}
+
+impl Default for PoolOptions {
+    fn default() -> Self {
+        Self {
+            max_size: 8,
+            timeout_secs: 5,
+            statement_timeout_ms: 15_000,
+        }
+    }
+}
+
+impl DbError {
+    /// The pool had no connection to give in time (overload, or the database is down).
+    pub fn is_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::Pool(
+                deadpool_postgres::PoolError::Timeout(_) | deadpool_postgres::PoolError::Backend(_)
+            )
+        )
+    }
 }
 
 /// TLS for the database: verify against `DATABASE_CA_CERT` (a PEM file; Supabase's own CA)
@@ -156,6 +213,26 @@ fn tls(ca_pem: Option<&str>) -> Result<tokio_postgres_rustls::MakeRustlsConnect,
         }
     };
     Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
+/// Makes an HNSW scan find `limit` of *this user's* chunks (SEC1 finding 31). The index orders all
+/// users' chunks by distance and the `user_id` filter applies afterwards, so with the default
+/// `hnsw.ef_search` (40) a user among many can get few or no candidates. Per transaction:
+/// - over-fetch: `hnsw.ef_search` = 10 × `limit`, capped at pgvector's maximum (1000);
+/// - pgvector ≥ 0.8: `hnsw.iterative_scan = relaxed_order`, which keeps scanning until enough
+///   rows pass the filter (skipped where the server's pgvector does not have the setting).
+pub(crate) async fn widen_vector_scan(tx: &Transaction<'_>, limit: i64) -> Result<(), DbError> {
+    let ef = (limit.saturating_mul(10)).clamp(40, 1000).to_string();
+    // pgvector's library loads on first use; only then are its settings known.
+    tx.batch_execute("select '[1]'::extensions.vector").await?;
+    tx.execute("select set_config('hnsw.ef_search', $1, true)", &[&ef])
+        .await?;
+    tx.batch_execute(
+        "select set_config('hnsw.iterative_scan', 'relaxed_order', true)
+         where current_setting('hnsw.iterative_scan', true) is not null",
+    )
+    .await?;
+    Ok(())
 }
 
 /// `[0.1,0.2,…]`, pgvector's text form.
@@ -196,6 +273,15 @@ pub fn tsquery(question: &str) -> Option<String> {
 impl Db {
     /// Connects with TLS unless the URL says `sslmode=disable` (local development only).
     pub fn connect(url: &str, ca_pem: Option<&str>) -> Result<Self, DbError> {
+        Self::connect_with(url, ca_pem, PoolOptions::default())
+    }
+
+    /// [`Db::connect`] with explicit pool limits.
+    pub fn connect_with(
+        url: &str,
+        ca_pem: Option<&str>,
+        opts: PoolOptions,
+    ) -> Result<Self, DbError> {
         let pg: tokio_postgres::Config = url.parse()?;
         let mgr_cfg = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
@@ -205,11 +291,32 @@ impl Db {
         } else {
             Manager::from_config(pg, tls(ca_pem)?, mgr_cfg)
         };
+        let wait = Some(std::time::Duration::from_secs(opts.timeout_secs));
         let pool = Pool::builder(mgr)
-            .max_size(8)
+            .max_size(opts.max_size)
+            .runtime(deadpool_postgres::Runtime::Tokio1)
+            .wait_timeout(wait)
+            .create_timeout(wait)
+            .recycle_timeout(wait)
             .build()
             .map_err(|e| DbError::Setup(e.to_string()))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            statement_timeout_ms: opts.statement_timeout_ms,
+        })
+    }
+
+    /// (size, available) of the pool, for metrics.
+    pub fn pool_status(&self) -> (usize, usize) {
+        let s = self.pool.status();
+        (s.size, s.available)
+    }
+
+    /// Readiness: a connection and a trivial query.
+    pub async fn ping(&self) -> Result<(), DbError> {
+        let client = self.pool.get().await?;
+        client.simple_query("select 1").await?;
+        Ok(())
     }
 
     /// Runs `f` in a transaction that RLS confines to `user`, and commits if it succeeds.
@@ -220,7 +327,11 @@ impl Db {
     ) -> Result<T, DbError> {
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
-        tx.batch_execute("set local role nugget_service").await?;
+        tx.batch_execute(&format!(
+            "set local role nugget_service; set local statement_timeout = {}",
+            self.statement_timeout_ms
+        ))
+        .await?;
         if let Some(u) = user {
             tx.execute(
                 "select set_config('nugget.user_id', $1, true)",
@@ -388,6 +499,13 @@ impl Db {
     ) -> Result<bool, DbError> {
         let limit = i64::from(limit);
         self.scoped(Some(user), async |tx| {
+            // One device registration per user at a time: concurrent first requests from a new
+            // device used to race (a duplicate-key 500), and could slip past the limit.
+            tx.execute(
+                "select pg_advisory_xact_lock(hashtextextended('heed.devices:' || $1::uuid::text, 0))",
+                &[&user],
+            )
+            .await?;
             let known = tx
                 .execute(
                     "update public.devices set last_seen_at = now() where user_id = $1 and device_id = $2",
@@ -407,7 +525,11 @@ impl Db {
             if n >= limit {
                 return Ok(false);
             }
-            tx.execute("insert into public.devices (user_id, device_id) values ($1, $2)", &[&user, &device])
+            tx.execute(
+                "insert into public.devices (user_id, device_id) values ($1, $2)
+                 on conflict (user_id, device_id) do update set last_seen_at = now()",
+                &[&user, &device],
+            )
                 .await?;
             Ok(true)
         })
@@ -494,7 +616,8 @@ impl Db {
         self.scoped(Some(user), async |tx| {
             let rows = tx
                 .query(
-                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor
+                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor, trigger_id,
+                            coalesce(syncing_until > now(), false) as syncing, backfill_done, items_synced
                      from public.connections where user_id = $1 order by created_at",
                     &[&user],
                 )
@@ -518,27 +641,103 @@ impl Db {
         .await
     }
 
+    /// Takes the connection's run lease for `lease_secs`; false when another sync holds it.
+    pub async fn claim_sync(&self, user: Uuid, id: Uuid, lease_secs: i64) -> Result<bool, DbError> {
+        let secs = lease_secs as f64;
+        self.scoped(Some(user), async |tx| {
+            let n = tx
+                .execute(
+                    "update public.connections set syncing_until = now() + make_interval(secs => $3)
+                     where user_id = $1 and id = $2 and (syncing_until is null or syncing_until < now())",
+                    &[&user, &id, &secs],
+                )
+                .await?;
+            Ok(n == 1)
+        })
+        .await
+    }
+
+    /// Records a sync run and releases its lease.
     pub async fn finish_sync(
         &self,
         user: Uuid,
         id: Uuid,
-        cursor: Option<&Value>,
-        error: Option<&str>,
-        next_in_secs: i64,
+        run: &SyncRun<'_>,
     ) -> Result<(), DbError> {
-        let secs = next_in_secs as f64;
+        let secs = run.next_in_secs as f64;
+        let items = i32::try_from(run.items).unwrap_or(i32::MAX);
         self.scoped(Some(user), async |tx| {
             tx.execute(
                 "update public.connections set
                    sync_cursor = coalesce($3, sync_cursor),
                    last_synced_at = case when $4::text is null then now() else last_synced_at end,
                    last_error = $4,
-                   next_sync_at = now() + make_interval(secs => $5)
+                   next_sync_at = now() + make_interval(secs => $5),
+                   items_synced = least(items_synced::bigint + $6, 2147483647)::int,
+                   backfill_done = backfill_done or $7,
+                   syncing_until = null
                  where user_id = $1 and id = $2",
-                &[&user, &id, &cursor, &error, &secs],
+                &[
+                    &user,
+                    &id,
+                    &run.cursor,
+                    &run.error,
+                    &secs,
+                    &i64::from(items),
+                    &run.backfill_done,
+                ],
             )
             .await?;
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn set_trigger(&self, user: Uuid, id: Uuid, trigger: &str) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "update public.connections set trigger_id = $3 where user_id = $1 and id = $2",
+                &[&user, &id, &trigger],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn set_connection_status(
+        &self,
+        user: Uuid,
+        id: Uuid,
+        status: &str,
+    ) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "update public.connections set status = $3 where user_id = $1 and id = $2",
+                &[&user, &id, &status],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Stored content hashes for these external ids of one source (to skip unchanged items).
+    pub async fn item_hashes(
+        &self,
+        user: Uuid,
+        source: &str,
+        ids: &[String],
+    ) -> Result<HashMap<String, String>, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let rows = tx
+                .query(
+                    "select external_id, content_hash from public.items
+                     where user_id = $1 and source = $2 and external_id = any($3)",
+                    &[&user, &source, &ids],
+                )
+                .await?;
+            Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
         })
         .await
     }
@@ -588,6 +787,21 @@ impl Db {
         .await
     }
 
+    /// Claims up to `max` due connections across users with a lease of `lease_secs`, so no
+    /// other machine or overlapping pass syncs them meanwhile.
+    pub async fn claim_due(&self, max: i32, lease_secs: i32) -> Result<Vec<(Uuid, Uuid)>, DbError> {
+        self.scoped(None, async |tx| {
+            let rows = tx
+                .query(
+                    "select user_id, connection_id from nugget_private.claim_due_connections($1, $2)",
+                    &[&max, &lease_secs],
+                )
+                .await?;
+            Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+        })
+        .await
+    }
+
     /// Whether the user used Heed in the last 12 hours (sync at the plan's cadence then).
     pub async fn recently_active(&self, user: Uuid) -> Result<bool, DbError> {
         self.scoped(Some(user), async |tx| {
@@ -603,25 +817,6 @@ impl Db {
     }
 
     // ---- items and chunks ----------------------------------------------------------------------
-
-    /// The stored content hash of an item, if any (to skip unchanged items before embedding).
-    pub async fn item_hash(
-        &self,
-        user: Uuid,
-        source: &str,
-        external_id: &str,
-    ) -> Result<Option<String>, DbError> {
-        self.scoped(Some(user), async |tx| {
-            let r = tx
-                .query_opt(
-                    "select content_hash from public.items where user_id = $1 and source = $2 and external_id = $3",
-                    &[&user, &source, &external_id],
-                )
-                .await?;
-            Ok(r.map(|r| r.get(0)))
-        })
-        .await
-    }
 
     /// Inserts or replaces an item and all its chunks in one transaction.
     pub async fn upsert_item(
@@ -664,6 +859,50 @@ impl Db {
                 tx.execute(&stmt, &[&user, &id, &ord, text, &emb]).await?;
             }
             Ok(if inserted { Upsert::Added } else { Upsert::Updated })
+        })
+        .await
+    }
+
+    /// Deletes items (and their chunks) by external id. Returns how many were stored.
+    pub async fn delete_items(
+        &self,
+        user: Uuid,
+        source: &str,
+        ids: &[String],
+    ) -> Result<u64, DbError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.scoped(Some(user), async |tx| {
+            Ok(tx
+                .execute(
+                    "delete from public.items where user_id = $1 and source = $2 and external_id = any($3)",
+                    &[&user, &source, &ids],
+                )
+                .await?)
+        })
+        .await
+    }
+
+    /// Deletes stored items in a completely listed window that the listing no longer has.
+    pub async fn reconcile(
+        &self,
+        user: Uuid,
+        source: &str,
+        w: &crate::apps::Window,
+    ) -> Result<u64, DbError> {
+        let kind = w.kind;
+        self.scoped(Some(user), async |tx| {
+            Ok(tx
+                .execute(
+                    "delete from public.items where user_id = $1 and source = $2
+                       and ($3::text is null or kind = $3)
+                       and starts_with(external_id, $4)
+                       and occurred_at >= $5
+                       and not (external_id = any($6))",
+                    &[&user, &source, &kind, &w.prefix, &w.since, &w.seen],
+                )
+                .await?)
         })
         .await
     }
@@ -721,6 +960,7 @@ impl Db {
     ) -> Result<Vec<Hit>, DbError> {
         let v = vector_literal(embedding);
         self.scoped(Some(user), async |tx| {
+            widen_vector_scan(tx, limit).await?;
             let rows = tx
                 .query(
                     "select c.id, c.item_id, c.text, i.source, i.title,
@@ -844,15 +1084,39 @@ impl Db {
             ),
             (
                 "cards",
-                "select id, kind, title, body, status, created_at from public.cards",
+                "select id, kind, title, body, status, data, created_at from public.cards",
             ),
             (
                 "conversations",
                 "select id, title, created_at from public.conversations",
             ),
             (
+                "briefs",
+                "select day, timezone, prose, citations, data, created_at from public.briefs",
+            ),
+            (
+                "proactive_state",
+                "select state, updated_at from public.proactive_state",
+            ),
+            (
+                "intel_runs",
+                "select items_through, ran_at, stats, last_error from public.intel_runs",
+            ),
+            (
+                "llm_cache",
+                "select key, response, input_tokens, output_tokens, created_at from public.llm_cache",
+            ),
+            (
                 "messages",
                 "select conversation_id, role, content, citations, created_at from public.messages",
+            ),
+            (
+                "pending_actions",
+                "select id, kind, toolkit, status, summary, preview, risk, decision, created_at, decided_at, executed_at, error from public.pending_actions",
+            ),
+            (
+                "action_audit",
+                "select seq, action_id, event, detail, prev_hash, hash, created_at from public.action_audit order by seq",
             ),
             (
                 "usage_events",

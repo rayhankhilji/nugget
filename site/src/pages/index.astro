@@ -1,0 +1,762 @@
+---
+import Base from "../layouts/Base.astro";
+import GhostDemo from "../components/GhostDemo.astro";
+import AppIcon from "../components/AppIcon.astro";
+import PricingCards from "../components/PricingCards.astro";
+import AppShowcase from "../components/AppShowcase.astro";
+import { FAQ } from "../lib/faq";
+
+const apps: [string, string][] = [
+  ["gmail", "Gmail"],
+  ["googlecalendar", "Google Calendar"],
+  ["googledrive", "Google Drive"],
+  ["googledocs", "Google Docs"],
+  ["notion", "Notion"],
+  ["linear", "Linear"],
+  ["github", "GitHub"],
+  ["figma", "Figma"],
+  ["jira", "Jira"],
+  ["hubspot", "HubSpot"],
+  ["asana", "Asana"],
+  ["dropbox", "Dropbox"],
+];
+
+const faqLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: FAQ.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
+};
+---
+<Base
+  title="Heed"
+  description="Heed connects your mail, calendar, docs and chats in one click, answers anything about them with sources, writes for you anywhere on your Mac, and tells you what needs your attention."
+>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="grid-bg" aria-hidden="true"></div>
+    <div class="wrap hero-in">
+      <div class="hero-copy">
+        <p class="eyebrow">For macOS · 14-day free trial</p>
+        <h1>Your work, <span class="hl">paying attention</span> to you.</h1>
+        <p class="lede">
+          Heed connects your mail, calendar, docs and chats in one click. It answers anything about them with sources,
+          writes for you anywhere on your Mac, and tells you what needs you.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
+          <a class="btn btn-secondary btn-lg" href="/download">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            Download for Mac
+          </a>
+        </div>
+      </div>
+      <div class="hero-demo">
+        <GhostDemo />
+      </div>
+    </div>
+  </section>
+
+  <!-- Apps strip -->
+  <section class="apps" aria-labelledby="apps-h">
+    <div class="wrap">
+      <h2 id="apps-h" class="apps-h">Connects to the apps you already live in</h2>
+      <ul class="apps-row">
+        {
+          apps.map(([slug, name]) => (
+            <li title={name}>
+              <AppIcon slug={slug} size={22} mono />
+              <span>{name}</span>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <!-- The real app -->
+  <section class="section showcase" aria-labelledby="app-h">
+    <div class="wrap">
+      <div class="section-head center">
+        <p class="eyebrow">The app</p>
+        <h2 id="app-h">Calm on the surface. Paying attention underneath.</h2>
+        <p>A Mac app that keeps one list of what needs you, answers with sources, and does nothing until you approve it.</p>
+      </div>
+      <AppShowcase />
+    </div>
+  </section>
+
+  <!-- Product -->
+  <section id="product" class="section product">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">What Heed does</p>
+        <h2>One assistant that has read everything, so you don't have to.</h2>
+        <p>Four things, done properly. Each one cites where it came from, and nothing leaves your account without your say.</p>
+      </div>
+
+      <div class="bento">
+        <!-- Ask -->
+        <article class="tile t-ask">
+          <div class="tile-copy">
+            <h3>Ask anything</h3>
+            <p>Questions across every app at once, answered in seconds with links to the exact email, event or doc.</p>
+          </div>
+          <div class="ui ask" aria-hidden="true">
+            <div class="q">What did we agree with Driftwood about the release freeze?</div>
+            <div class="a">
+              <p>
+                The freeze moves to <b>Friday 18:00</b>. Ines asked for a decision on cursor pagination first
+                <span class="cite"><AppIcon slug="notion" size={13} tile />RFC</span>, and Dev confirmed it this morning
+                <span class="cite"><AppIcon slug="gmail" size={13} tile />Mail</span>.
+              </p>
+            </div>
+          </div>
+        </article>
+
+        <!-- Needs you -->
+        <article class="tile t-needs">
+          <div class="tile-copy">
+            <h3>Needs you</h3>
+            <p>The short list of things only you can unblock, ranked by who's waiting and for how long.</p>
+          </div>
+          <ul class="ui needs" aria-hidden="true">
+            <li><span class="dot"></span><span class="who"><AppIcon slug="gmail" size={16} tile /></span><span class="t"><b>Margaret Osei</b> is waiting on a time for kickoff</span><span class="age">2d</span></li>
+            <li><span class="dot"></span><span class="who"><AppIcon slug="googledrive" size={16} tile /></span><span class="t"><b>Lumen contract</b> needs your signature by Friday</span><span class="age">1d</span></li>
+            <li><span class="dot dim"></span><span class="who"><AppIcon slug="linear" size={16} tile /></span><span class="t"><b>Ines</b> asked you to decide on pagination</span><span class="age">5h</span></li>
+          </ul>
+        </article>
+
+        <!-- Brief -->
+        <article class="tile t-brief">
+          <div class="tile-copy">
+            <h3>A daily brief</h3>
+            <p>Every morning: what changed overnight, what's on today, and the one meeting worth preparing for.</p>
+          </div>
+          <div class="ui brief" aria-hidden="true">
+            <p class="hello">Good morning. Three things matter today.</p>
+            <ol class="agenda">
+              <li><time>09:30</time><span>Standup</span></li>
+              <li class="key"><time>11:00</time><span>Driftwood API review <em>prep</em></span></li>
+              <li><time>14:00</time><span>Moorland kickoff</span></li>
+            </ol>
+          </div>
+        </article>
+
+        <!-- Actions -->
+        <article class="tile t-act">
+          <div class="tile-copy">
+            <h3>Acts, with your approval</h3>
+            <p>Heed drafts the reply and books the slot. You check it and press one key.</p>
+          </div>
+          <div class="ui act" aria-hidden="true">
+            <div class="act-h"><AppIcon slug="googlecalendar" size={18} tile /><span>Create event</span></div>
+            <p><b>Moorland kickoff</b><br />Thu 14:00 to 15:00 · Margaret Osei, you</p>
+            <div class="act-b"><span class="btn btn-sm btn-primary">Approve <kbd>↵</kbd></span><span class="btn btn-sm btn-secondary">Edit</span></div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section id="how" class="section how">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">How it works</p>
+        <h2>Running in three minutes.</h2>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="n">1</span>
+          <h3>Connect your apps</h3>
+          <p>Pick Gmail, Calendar and the rest. Each one is a single click and a consent screen from the app itself. No passwords, no setup.</p>
+        </li>
+        <li>
+          <span class="n">2</span>
+          <h3>Heed catches up</h3>
+          <p>It reads back through your history, then keeps up on its own: every 30 minutes on Heed, every 5 on Heed Max.</p>
+        </li>
+        <li>
+          <span class="n">3</span>
+          <h3>Ask, write, decide</h3>
+          <p>Ask a question, press <kbd>Tab</kbd> to take a suggestion as you type, and clear your Needs you list over coffee.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- Privacy -->
+  <section id="privacy" class="section privacy">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Privacy and security</p>
+        <h2>Straight answers about your data.</h2>
+        <p>
+          Heed is a cloud service. Its AI doesn't run on your Mac, so here is exactly what happens to what you connect.
+        </p>
+      </div>
+      <div class="facts">
+        <div class="fact">
+          <h3>Processed in the cloud, stored in London</h3>
+          <p>Synced items live in your account in a London data centre. To answer or write, Heed sends only the relevant snippets and your request to our AI provider, Anthropic (or OpenAI as a fallback).</p>
+        </div>
+        <div class="fact">
+          <h3>Encrypted in transit and at rest</h3>
+          <p>Everything travels over TLS and is stored on encrypted disks. Each account's rows are isolated at the database level, so one user can never read another's.</p>
+        </div>
+        <div class="fact">
+          <h3>Never sold, never used for training</h3>
+          <p>We don't sell your data or use it for ads, and we don't train models on it. Our AI providers don't train on API data by default.</p>
+        </div>
+        <div class="fact">
+          <h3>We never see your passwords</h3>
+          <p>Apps connect through Composio using each app's own sign-in. Access tokens are held there, encrypted, and you can revoke any connection whenever you like.</p>
+        </div>
+        <div class="fact">
+          <h3>Nothing goes out without you</h3>
+          <p>Sending an email or creating an event always waits for your approval, and every action is written to a log you can check.</p>
+        </div>
+        <div class="fact">
+          <h3>Delete everything, any time</h3>
+          <p>Disconnect an app and its data goes. Delete your account and every synced item is deleted with it.</p>
+        </div>
+      </div>
+      <p class="privacy-more"><a href="/legal/privacy">Read the privacy policy</a></p>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="section" aria-labelledby="pricing-h">
+    <div class="wrap">
+      <div class="section-head center">
+        <p class="eyebrow">Pricing</p>
+        <h2 id="pricing-h">Two plans. Both start free for 14 days.</h2>
+      </div>
+      <PricingCards />
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq" class="section faq">
+    <div class="wrap faq-in">
+      <div class="section-head">
+        <p class="eyebrow">FAQ</p>
+        <h2>Questions, answered.</h2>
+      </div>
+      <div class="qs">
+        {
+          FAQ.map((f) => (
+            <details>
+              <summary>
+                {f.q}
+                <span class="plus" aria-hidden="true" />
+              </summary>
+              <p>{f.a}</p>
+            </details>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Final CTA -->
+  <section class="final">
+    <div class="wrap final-in">
+      <span class="dot pulse big" aria-hidden="true"></span>
+      <h2>Let Heed keep watch.</h2>
+      <p class="muted">Two weeks free. Cancel in two clicks if it isn't for you.</p>
+      <div class="hero-cta center">
+        <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
+        <a class="btn btn-ghost btn-lg" href="/download">Download for Mac</a>
+      </div>
+    </div>
+  </section>
+
+  <script type="application/ld+json" set:html={JSON.stringify(faqLd)} />
+</Base>
+
+<style>
+  /* Hero */
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: clamp(48px, 8vw, 96px) 0 clamp(56px, 8vw, 104px);
+  }
+  .grid-bg {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 20%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 20%, transparent 75%);
+  }
+  .hero::after {
+    content: "";
+    position: absolute;
+    width: 520px;
+    height: 520px;
+    right: -120px;
+    top: -160px;
+    border-radius: 50%;
+    background: radial-gradient(closest-side, rgb(255 90 60 / 0.16), transparent);
+    pointer-events: none;
+  }
+  .hero-in {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 64px);
+    align-items: center;
+  }
+  .hero-copy {
+    display: grid;
+    gap: 22px;
+  }
+  h1 {
+    font-size: clamp(40px, 5.4vw, 66px);
+    letter-spacing: -0.045em;
+    line-height: 1.02;
+  }
+  .hl {
+    color: var(--accent-ink);
+  }
+  .lede {
+    font-size: clamp(17px, 1.7vw, 19px);
+    color: var(--text-2);
+    max-width: 34em;
+  }
+  .hero-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 6px;
+  }
+  .hero-cta.center {
+    justify-content: center;
+  }
+
+  /* Apps strip */
+  .apps {
+    border-block: 1px solid var(--line);
+    padding: 28px 0;
+    background: var(--bg-2);
+  }
+  .apps-h {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--text-2);
+    text-align: center;
+    margin-bottom: 18px;
+  }
+  .apps-row {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px 30px;
+    color: var(--text-2);
+  }
+  .apps-row li {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 14px;
+  }
+
+  /* Bento */
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 28px;
+    border-radius: var(--r-4);
+    background: var(--surface);
+    box-shadow: var(--shadow-1), var(--hi);
+    overflow: hidden;
+  }
+  .t-ask {
+    grid-column: span 7;
+  }
+  .t-needs {
+    grid-column: span 5;
+  }
+  .t-brief {
+    grid-column: span 5;
+  }
+  .t-act {
+    grid-column: span 7;
+  }
+  .tile-copy {
+    display: grid;
+    gap: 8px;
+  }
+  .tile h3 {
+    font-size: 20px;
+  }
+  .tile-copy p {
+    color: var(--text-2);
+    font-size: 15px;
+    max-width: 40ch;
+  }
+  .ui {
+    margin-top: auto;
+    border-radius: var(--r-3);
+    background: var(--bg);
+    box-shadow: inset 0 0 0 1px var(--line);
+    padding: 16px;
+    font-size: 14.5px;
+  }
+  .ask .q {
+    justify-self: end;
+    margin-left: auto;
+    width: fit-content;
+    max-width: 85%;
+    padding: 9px 13px;
+    border-radius: 12px 12px 4px 12px;
+    background: var(--surface-2);
+    margin-bottom: 14px;
+  }
+  .ask .a p {
+    line-height: 1.75;
+  }
+  .cite {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px 1px 3px;
+    margin: 0 1px;
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--text-2);
+    background: var(--surface);
+    box-shadow: 0 0 0 0.5px var(--line-2);
+    vertical-align: 0.08em;
+  }
+  .needs {
+    list-style: none;
+    margin-top: auto;
+    display: grid;
+    gap: 2px;
+    padding: 6px;
+  }
+  .needs li {
+    display: grid;
+    grid-template-columns: 8px 18px 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 10px;
+    border-radius: 9px;
+  }
+  .needs li:first-child {
+    background: var(--accent-soft);
+  }
+  .needs .dot {
+    width: 7px;
+    height: 7px;
+  }
+  .needs .dot.dim {
+    background: var(--line-2);
+  }
+  .needs .t {
+    color: var(--text-2);
+    min-width: 0;
+  }
+  .needs .t b {
+    color: var(--text);
+    font-weight: 550;
+  }
+  .needs .age {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .brief .hello {
+    font-weight: 550;
+    margin-bottom: 12px;
+  }
+  .agenda {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+  }
+  .agenda li {
+    display: flex;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    color: var(--text-2);
+    box-shadow: inset 2px 0 0 var(--line-2);
+  }
+  .agenda li.key {
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: inset 2px 0 0 var(--brand), var(--shadow-1);
+  }
+  .agenda time {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text-3);
+    padding-top: 1px;
+  }
+  .agenda em {
+    font-style: normal;
+    font-size: 11px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent-ink);
+    margin-left: 6px;
+  }
+  .act {
+    display: grid;
+    gap: 12px;
+    max-width: 380px;
+    width: 100%;
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+  }
+  .act-h {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .act p {
+    color: var(--text-2);
+  }
+  .act p b {
+    color: var(--text);
+    font-weight: 550;
+  }
+  .act-b {
+    display: flex;
+    gap: 8px;
+  }
+  .act-b .btn {
+    pointer-events: none;
+  }
+  .act-b kbd {
+    background: rgb(0 0 0 / 0.12);
+    box-shadow: none;
+    color: inherit;
+  }
+
+  /* Steps */
+  .how {
+    background: var(--bg-2);
+    border-block: 1px solid var(--line);
+  }
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    counter-reset: s;
+  }
+  .steps li {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    align-content: start;
+    padding: 28px 24px;
+    border-radius: var(--r-4);
+    background: var(--surface);
+    box-shadow: var(--shadow-1), var(--hi);
+  }
+  .steps .n {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    margin-bottom: 8px;
+  }
+  .steps h3 {
+    font-size: 19px;
+  }
+  .steps p {
+    color: var(--text-2);
+    font-size: 15px;
+  }
+
+  /* Privacy */
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    border-radius: var(--r-4);
+    overflow: hidden;
+    background: var(--line);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .fact {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 26px 24px;
+    background: var(--bg);
+  }
+  .fact h3 {
+    font-size: 17px;
+    letter-spacing: -0.015em;
+  }
+  .fact p {
+    font-size: 15px;
+    color: var(--text-2);
+  }
+  .privacy-more {
+    margin-top: 20px;
+    font-size: 15px;
+  }
+  .privacy-more a {
+    color: var(--accent-ink);
+    text-underline-offset: 3px;
+  }
+
+  .showcase {
+    padding-bottom: clamp(40px, 6vw, 72px);
+  }
+  .product {
+    padding-top: clamp(40px, 6vw, 72px);
+  }
+  .section-head.center {
+    margin-inline: auto;
+    text-align: center;
+    justify-items: center;
+  }
+
+  /* FAQ */
+  .faq-in {
+    display: grid;
+    align-items: start;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 48px;
+  }
+  .qs {
+    display: grid;
+    border-top: 1px solid var(--line);
+  }
+  details {
+    border-bottom: 1px solid var(--line);
+  }
+  summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 0;
+    cursor: pointer;
+    list-style: none;
+    font-size: 17px;
+    font-weight: 550;
+    letter-spacing: -0.01em;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  .plus {
+    position: relative;
+    flex: none;
+    width: 14px;
+    height: 14px;
+  }
+  .plus::before,
+  .plus::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 14px;
+    height: 1.6px;
+    border-radius: 2px;
+    background: var(--text-2);
+    transition: transform 0.2s var(--ease);
+  }
+  .plus::after {
+    transform: rotate(90deg);
+  }
+  details[open] .plus::after {
+    transform: rotate(0);
+  }
+  details p {
+    padding: 0 32px 22px 0;
+    color: var(--text-2);
+  }
+
+  /* Final */
+  .final {
+    padding: clamp(80px, 12vw, 140px) 0;
+    border-top: 1px solid var(--line);
+    background: radial-gradient(ellipse 50% 60% at 50% 100%, rgb(255 90 60 / 0.1), transparent);
+  }
+  .final-in {
+    display: grid;
+    justify-items: center;
+    gap: 18px;
+    text-align: center;
+  }
+  .final h2 {
+    font-size: clamp(34px, 5vw, 56px);
+  }
+  .dot.big {
+    width: 16px;
+    height: 16px;
+    margin-bottom: 8px;
+  }
+
+  @media (max-width: 960px) {
+    .hero-in {
+      grid-template-columns: 1fr;
+    }
+    .t-ask,
+    .t-needs,
+    .t-brief,
+    .t-act {
+      grid-column: span 12;
+    }
+    .steps,
+    .facts {
+      grid-template-columns: 1fr 1fr;
+    }
+    .faq-in {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+  }
+  @media (max-width: 640px) {
+    .steps,
+    .facts {
+      grid-template-columns: 1fr;
+    }
+    .tile {
+      padding: 22px;
+    }
+    .apps-row {
+      gap: 12px 20px;
+    }
+    .apps-row li span {
+      font-size: 13px;
+    }
+  }
+</style>

@@ -50,6 +50,15 @@ pub trait Composio: Send + Sync {
     /// The user's connected accounts.
     async fn accounts(&self, user: &str) -> Result<Vec<Account>, ComposioError>;
     async fn delete_account(&self, id: &str) -> Result<(), ComposioError>;
+    /// Creates (or updates) a trigger instance on a connected account and returns its id.
+    /// Events then arrive at our webhook subscription (`/v1/webhooks/composio`).
+    async fn upsert_trigger(
+        &self,
+        user: &str,
+        account: &str,
+        trigger: &str,
+        config: Value,
+    ) -> Result<String, ComposioError>;
     /// Runs a tool as the user through one connected account and returns its `data`.
     async fn execute(
         &self,
@@ -197,6 +206,28 @@ impl Composio for HttpComposio {
         Ok(())
     }
 
+    async fn upsert_trigger(
+        &self,
+        _user: &str,
+        account: &str,
+        trigger: &str,
+        config: Value,
+    ) -> Result<String, ComposioError> {
+        let slug = url::form_urlencoded::byte_serialize(trigger.as_bytes()).collect::<String>();
+        let body = json!({"connected_account_id": account, "trigger_config": config});
+        let v = self
+            .send(
+                self.http
+                    .post(format!("{}/trigger_instances/{slug}/upsert", self.base))
+                    .json(&body),
+            )
+            .await?;
+        // `trigger_id` per the v3 reference; `id` accepted defensively.
+        s(&v, "/trigger_id")
+            .or_else(|| s(&v, "/id"))
+            .ok_or_else(|| http_err("no trigger_id"))
+    }
+
     async fn execute(
         &self,
         user: &str,
@@ -338,6 +369,26 @@ mod tests {
         assert!(e.to_string().contains("token expired"));
         let e = c.execute("u", "ca", "DOWN", json!({})).await.unwrap_err();
         assert!(e.to_string().contains("busy"));
+    }
+
+    #[tokio::test]
+    async fn upsert_trigger_posts_account_and_config() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/trigger_instances/NOTION_PAGE_CREATED/upsert"))
+            .and(header("x-api-key", "ck"))
+            .and(body_json(
+                json!({"connected_account_id": "ca_1", "trigger_config": {}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"trigger_id": "ti_1"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let id = client(&server)
+            .upsert_trigger("u1", "ca_1", "NOTION_PAGE_CREATED", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(id, "ti_1");
     }
 
     #[tokio::test]

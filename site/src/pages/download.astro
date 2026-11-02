@@ -1,0 +1,183 @@
+---
+import Base from "../layouts/Base.astro";
+import { config } from "../lib/config";
+
+const arm = config.downloadMacArm;
+const intel = config.downloadMacIntel;
+const ready = Boolean(arm || intel);
+---
+<Base title="Download" description="Download Heed for macOS. Windows and Linux are coming soon.">
+  <section class="wrap dl">
+    <div class="copy">
+      <p class="eyebrow">Download</p>
+      <h1>Heed for Mac</h1>
+      <p class="lede">macOS 11 Big Sur or later. Sign in with the account you started your trial with.</p>
+      {
+        ready ? (
+          <div class="btns">
+            {arm && (
+              <a class="btn btn-primary btn-lg" href={arm} data-dl="arm">
+                Download for Apple silicon
+              </a>
+            )}
+            {intel && (
+              <a class="btn btn-secondary btn-lg" href={intel} data-dl="intel">
+                Download for Intel
+              </a>
+            )}
+          </div>
+        ) : (
+          <div class="btns">
+            <span class="btn btn-secondary btn-lg" aria-disabled="true">
+              Download opens at launch
+            </span>
+            <a class="btn btn-primary btn-lg" href="/pricing">
+              Start your trial
+            </a>
+          </div>
+        )
+      }
+      {ready && <p class="small hint" data-hint>Not sure which? Open the Apple menu, then About This Mac. "Apple M…" means Apple silicon.</p>}
+      {!ready && <p class="small hint">We'll email your download link as soon as the first release is signed and notarised.</p>}
+    </div>
+
+    <ol class="steps" aria-label="Getting started">
+      <li><span>1</span><div><b>Open the download</b> and drag Heed to Applications.</div></li>
+      <li><span>2</span><div><b>Sign in</b> with your email link or Google.</div></li>
+      <li><span>3</span><div><b>Connect your apps</b> and allow Accessibility so ghost text can follow your cursor.</div></li>
+    </ol>
+  </section>
+
+  <section class="wrap other" aria-labelledby="other-h">
+    <h2 id="other-h">Other platforms</h2>
+    <div class="plats">
+      <div class="plat">
+        <b>Windows</b><span class="soon">Coming soon</span>
+      </div>
+      <div class="plat">
+        <b>Linux</b><span class="soon">Coming soon</span>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<script>
+  // Lead with the build that matches this Mac when the browser can tell us.
+  const ua = navigator as Navigator & { userAgentData?: { getHighEntropyValues(h: string[]): Promise<{ architecture?: string }> } };
+  ua.userAgentData?.getHighEntropyValues(["architecture"]).then(({ architecture }) => {
+    if (architecture !== "x86") return;
+    const intel = document.querySelector<HTMLElement>('[data-dl="intel"]');
+    const arm = document.querySelector<HTMLElement>('[data-dl="arm"]');
+    if (intel && arm) {
+      intel.classList.replace("btn-secondary", "btn-primary");
+      arm.classList.replace("btn-primary", "btn-secondary");
+      intel.parentElement?.prepend(intel);
+    }
+  }).catch(() => undefined);
+</script>
+
+<style>
+  .dl {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 48px;
+    align-items: center;
+    padding-block: clamp(56px, 9vw, 112px) 64px;
+  }
+  .copy {
+    display: grid;
+    gap: 18px;
+  }
+  h1 {
+    font-size: clamp(40px, 6vw, 68px);
+    letter-spacing: -0.045em;
+  }
+  .lede {
+    color: var(--text-2);
+    font-size: 18px;
+  }
+  .btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .btns [aria-disabled="true"] {
+    opacity: 1;
+    color: var(--text-2);
+  }
+  .steps {
+    list-style: none;
+    margin: 0;
+    padding: 8px;
+    display: grid;
+    gap: 4px;
+    border-radius: var(--r-4);
+    background: var(--surface);
+    box-shadow: var(--shadow-2), var(--hi);
+  }
+  .steps li {
+    display: flex;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 12px;
+    color: var(--text-2);
+  }
+  .steps li + li {
+    border-top: 1px solid var(--line);
+    border-radius: 0;
+  }
+  .steps b {
+    color: var(--text);
+    font-weight: 550;
+  }
+  .steps span {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+  }
+  .other {
+    padding-bottom: 120px;
+  }
+  .other h2 {
+    font-size: 20px;
+    margin-bottom: 16px;
+  }
+  .plats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    max-width: 560px;
+  }
+  .plat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 18px;
+    border-radius: var(--r-3);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+  .soon {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-2);
+  }
+  @media (max-width: 860px) {
+    .dl {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 420px) {
+    .plats {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

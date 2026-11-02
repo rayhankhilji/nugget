@@ -1,0 +1,5 @@
+# Cloudflare Pages project for the Heed website. Build: `npm ci && npm run build`, output: dist/.
+# Env vars (NEXT_PUBLIC_*) are set in the Pages dashboard, not here: see README.md.
+name = "heed-site"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"

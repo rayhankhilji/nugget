@@ -1,0 +1,254 @@
+---
+import { loadPlans } from "../lib/plans";
+
+interface Props {
+  /** Heading level for plan names, so the page outline stays in order. */
+  level?: "h2" | "h3";
+}
+const { level = "h3" } = Astro.props;
+const H = level;
+const { plans, source } = await loadPlans();
+const TRIAL_DAYS = plans[0]?.trial_days ?? 14;
+const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
+---
+<div class="pricing" data-plans-source={source}>
+  <fieldset class="toggle">
+    <legend class="sr-only">Billing period</legend>
+    <label><input type="radio" name="interval" value="month" checked /><span>Monthly</span></label>
+    <label
+      ><input type="radio" name="interval" value="year" /><span>Annual <em>2 months free</em></span></label
+    >
+  </fieldset>
+
+  <div class="cards">
+    {
+      plans.map((p) => (
+        <article class:list={["plan", { hl: p.highlight }]} aria-labelledby={`plan-${p.id}`}>
+          <div class="plan-top">
+            <H id={`plan-${p.id}`} class="name">
+              {p.highlight && <span class="dot" aria-hidden="true" />}
+              {p.name}
+            </H>
+            {p.highlight && <span class="badge">Most capable</span>}
+          </div>
+          <p class="pitch">{p.pitch}</p>
+          <div class="price">
+            <p class="m">
+              <span class="amt">{gbp(p.monthly_gbp)}</span>
+              <span class="per">/ month</span>
+            </p>
+            <p class="y">
+              <span class="amt">{gbp(p.annual_gbp)}</span>
+              <span class="per">/ year</span>
+            </p>
+            <p class="sub m">Billed monthly. Cancel any time.</p>
+            <p class="sub y">
+              {gbp(p.annual_gbp / 12)} a month, billed yearly. Save {gbp(p.monthly_gbp * 12 - p.annual_gbp)}.
+            </p>
+          </div>
+          <a class:list={["btn", "btn-lg", "go", "m", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=month`}>
+            Start {TRIAL_DAYS}-day free trial
+          </a>
+          <a class:list={["btn", "btn-lg", "go", "y", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=year`}>
+            Start {TRIAL_DAYS}-day free trial
+          </a>
+          <ul>
+            {p.features.map((f) => (
+              <li>
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+                  <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </article>
+      ))
+    }
+  </div>
+  <p class="fine">
+    Prices include VAT. Both plans start with a {TRIAL_DAYS}-day free trial; a card is required, and you won't be charged
+    if you cancel before it ends. There's no free plan.
+  </p>
+</div>
+
+<style>
+  .pricing {
+    display: grid;
+    gap: 28px;
+    justify-items: center;
+  }
+  .toggle {
+    display: inline-flex;
+    margin: 0;
+    padding: 4px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .toggle label {
+    position: relative;
+    cursor: pointer;
+  }
+  .toggle input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  .toggle span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 16px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-2);
+    transition: background-color 0.2s, color 0.2s;
+  }
+  .toggle em {
+    font-style: normal;
+    font-size: 12px;
+    color: var(--accent-ink);
+  }
+  .toggle input:checked + span {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-1);
+  }
+  .toggle input:focus-visible + span {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    width: 100%;
+    max-width: 880px;
+  }
+  .plan {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 28px;
+    border-radius: var(--r-4);
+    background: var(--surface);
+    box-shadow: var(--shadow-2), var(--hi);
+  }
+  .plan.hl {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
+      0 24px 60px -24px rgb(255 90 60 / 0.35),
+      var(--hi);
+  }
+  .plan-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .name {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 22px;
+  }
+  .name .dot {
+    width: 8px;
+    height: 8px;
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+  }
+  .pitch {
+    color: var(--text-2);
+    font-size: 15px;
+    min-height: 3.1em;
+  }
+  .price p {
+    margin: 0;
+  }
+  .amt {
+    font-size: 48px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+  }
+  .per {
+    color: var(--text-2);
+    font-size: 15px;
+    margin-left: 4px;
+  }
+  .sub {
+    color: var(--text-2);
+    font-size: 13.5px;
+  }
+  .go {
+    width: 100%;
+  }
+  ul {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 18px 0 0;
+    border-top: 1px solid var(--line);
+    display: grid;
+    gap: 12px;
+    font-size: 15px;
+  }
+  li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  li svg {
+    flex: none;
+    margin-top: 3px;
+    color: var(--accent-ink);
+  }
+  .fine {
+    max-width: 620px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--text-2);
+  }
+
+  /* The toggle drives which price and button show: CSS only, no script needed. */
+  .y {
+    display: none;
+  }
+  .pricing:has(input[value="year"]:checked) .m {
+    display: none;
+  }
+  .pricing:has(input[value="year"]:checked) .y {
+    display: block;
+  }
+  .pricing:has(input[value="year"]:checked) a.y {
+    display: inline-flex;
+  }
+
+  @media (max-width: 720px) {
+    .cards {
+      grid-template-columns: 1fr;
+    }
+    .plan {
+      padding: 22px;
+    }
+    .pitch {
+      min-height: 0;
+    }
+  }
+</style>

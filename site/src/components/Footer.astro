@@ -1,0 +1,180 @@
+---
+import Logo from "./Logo.astro";
+interface Props {
+  minimal?: boolean;
+}
+const { minimal = false } = Astro.props;
+const year = new Date().getFullYear();
+const cols = [
+  {
+    title: "Product",
+    links: [
+      ["/#product", "Features"],
+      ["/pricing", "Pricing"],
+      ["/download", "Download"],
+      ["/#faq", "FAQ"],
+    ],
+  },
+  {
+    title: "Account",
+    links: [
+      ["/signup", "Start free trial"],
+      ["/signin", "Sign in"],
+      ["/account", "Manage account"],
+    ],
+  },
+  {
+    title: "Trust",
+    links: [
+      ["/#privacy", "Privacy and security"],
+      ["/legal/privacy", "Privacy policy"],
+      ["/legal/terms", "Terms of service"],
+    ],
+  },
+];
+---
+<footer class="ftr">
+  <div class="wrap">
+    {
+      !minimal && (
+        <div class="top">
+          <div class="brand">
+            <Logo size={20} pulse={false} />
+            <p class="muted">Your always-on chief of staff. Made in the UK.</p>
+          </div>
+          {cols.map((c) => (
+            <nav aria-label={c.title}>
+              <h2>{c.title}</h2>
+              <ul>
+                {c.links.map(([href, label]) => (
+                  <li>
+                    <a href={href}>{label}</a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ))}
+        </div>
+      )
+    }
+    <div class="bottom">
+      <p>© {year} Heed. All rights reserved.</p>
+      <div class="theme" role="radiogroup" aria-label="Colour theme">
+        <button type="button" role="radio" data-theme-set="system" aria-checked="true">Auto</button>
+        <button type="button" role="radio" data-theme-set="light" aria-checked="false">Light</button>
+        <button type="button" role="radio" data-theme-set="dark" aria-checked="false">Dark</button>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const root = document.documentElement;
+  const buttons = document.querySelectorAll<HTMLButtonElement>("[data-theme-set]");
+  const sync = () => {
+    const cur = root.dataset["theme"] ?? "system";
+    buttons.forEach((b) => b.setAttribute("aria-checked", String(b.dataset["themeSet"] === cur)));
+  };
+  buttons.forEach((b) =>
+    b.addEventListener("click", () => {
+      const t = b.dataset["themeSet"];
+      try {
+        if (t === "light" || t === "dark") {
+          root.dataset["theme"] = t;
+          localStorage.setItem("heed-theme", t);
+        } else {
+          delete root.dataset["theme"];
+          localStorage.removeItem("heed-theme");
+        }
+      } catch {
+        /* storage blocked: the theme still applies for this page */
+      }
+      sync();
+    }),
+  );
+  sync();
+</script>
+
+<style>
+  .ftr {
+    border-top: 1px solid var(--line);
+    padding: 56px 0 32px;
+    font-size: 14px;
+  }
+  .top {
+    display: grid;
+    grid-template-columns: 1.6fr repeat(3, 1fr);
+    gap: 32px;
+    padding-bottom: 48px;
+  }
+  .brand {
+    display: grid;
+    gap: 14px;
+    align-content: start;
+  }
+  h2 {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0;
+    color: var(--text-3);
+    margin-bottom: 14px;
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 10px;
+  }
+  a {
+    color: var(--text-2);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--text);
+  }
+  .bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+    color: var(--text-2);
+  }
+  .bottom:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .theme {
+    display: inline-flex;
+    padding: 3px;
+    border-radius: 9px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .theme button {
+    border: 0;
+    background: transparent;
+    padding: 4px 10px;
+    min-height: 28px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-2);
+    cursor: pointer;
+  }
+  .theme button[aria-checked="true"] {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-1);
+  }
+  @media (max-width: 720px) {
+    .top {
+      grid-template-columns: 1fr 1fr;
+    }
+    .brand {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

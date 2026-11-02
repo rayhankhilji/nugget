@@ -6,7 +6,7 @@ import { useT } from "../i18n";
 type Waiting = { kind: "browser" } | { kind: "email"; email: string } | null;
 
 /**
- * Nugget Cloud sign-in: Google in the browser, or an emailed magic link. Either way the
+ * Heed cloud sign-in: Google in the browser, or an emailed magic link. Either way the
  * sign-in finishes when the link comes back to Nugget; the shell then emits
  * `nugget:cloud-session` and the gate re-checks the session. `failure` is that event's error.
  */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch } from "react";
 import { cloudApi, type CloudApp, type CloudConnections, type CloudSession, type CloudSyncResult } from "../cloud";
 import { useAsync, useEvent } from "../hooks";
 import { ErrorNote, Loading } from "../components/ui";
+import { AppLogo } from "../components/AppLogo";
 import { useT } from "../i18n";
 import type { Action } from "./machine";
 
@@ -43,17 +44,6 @@ export function useCloudSession(onSignedIn: () => void): CloudState {
 }
 
 type TileState = "connected" | "authorising" | "idle" | "failed" | "soon";
-
-/** A white tile with the app's logo (only a bundled or inline image can load) or its initial. */
-function AppLogo({ app }: { app: CloudApp }) {
-  const [broken, setBroken] = useState(false);
-  const local = app.logo && (app.logo.startsWith("data:") || app.logo.startsWith("/"));
-  return (
-    <span className="ob-app-logo" aria-hidden="true">
-      {local && !broken ? <img src={app.logo!} alt="" onError={() => setBroken(true)} /> : <span>{app.name.slice(0, 1)}</span>}
-    </span>
-  );
-}
 
 /**
  * One-click cloud app connections, as a grid of tiles: Connected, Authorising (the consent page is
@@ -154,7 +144,7 @@ export function ConnectApps({ dispatch, announce }: { dispatch: Dispatch<Action>
             const conn = status.get(a.slug);
             const body = (
               <>
-                <AppLogo app={a} />
+                <AppLogo className="ob-app-logo" app={a} />
                 <span className="ob-app-name">{a.name}</span>
                 <span className="ob-app-state">
                   {state === "connected" ? (

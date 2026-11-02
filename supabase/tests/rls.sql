@@ -173,6 +173,231 @@ do $$ begin
 end $$;
 rollback;
 
+-- Actions and their audit chain (20261102120001_apps_actions.sql).
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.pending_actions (id, user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+  values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail',
+          'GMAIL_SEND_EMAIL', '{}', 'Send an email', repeat('a', 64), 'send', 'confirm', 'k1');
+insert into public.action_audit (user_id, action_id, seq, event, prev_hash, hash)
+  values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a1', 1, 'proposed', repeat('0', 64), repeat('1', 64));
+update public.pending_actions set status = 'cancelled' where id = '00000000-0000-0000-0000-0000000000a1';
+commit;
+
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 0, 'service as B sees no A actions';
+  assert (select count(*) from public.action_audit) = 0, 'service as B sees no A audit';
+  update public.pending_actions set status = 'pending';
+  assert not found, 'service as B cannot touch A actions';
+  begin
+    insert into public.pending_actions (user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail', 'T', '{}', 's', repeat('b', 64), 'send', 'confirm', 'k2');
+    raise exception 'cross-user action insert was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+
+-- The audit chain is append-only for the service, and actions are never deleted by it.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  begin
+    update public.action_audit set event = 'forged';
+    raise exception 'service could rewrite the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.action_audit;
+    raise exception 'service could delete the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.pending_actions;
+    raise exception 'service could delete actions';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+
+-- A user reads their own actions and audit, and can neither write nor delete them.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 1, 'A sees own action';
+  assert (select count(*) from public.action_audit) = 1, 'A sees own audit';
+  begin
+    update public.pending_actions set status = 'pending';
+    raise exception 'user could approve directly';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.action_audit;
+    raise exception 'user could delete the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.pending_actions (user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail', 'T', '{}', 's', repeat('c', 64), 'send', 'confirm', 'k3');
+    raise exception 'user could propose directly';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 0, 'B sees no A actions';
+  assert (select count(*) from public.action_audit) = 0, 'B sees no A audit';
+end $$;
+rollback;
+
+-- Same-user foreign keys (20261102120002): an action cannot point at another user's
+-- connection, and an audit entry cannot point at another user's action.
+insert into public.connections (id, user_id, toolkit, composio_account_id)
+  values ('00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-00000000000b', 'gmail', 'ca_b_fk');
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  begin
+    insert into public.pending_actions (user_id, connection_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000c2', 'send_mail', 'gmail',
+              'GMAIL_SEND_EMAIL', '{}', 's', repeat('d', 64), 'send', 'confirm', 'fk1');
+    raise exception 'action on another user''s connection was allowed';
+  exception when foreign_key_violation then null;
+  end;
+end $$;
+rollback;
+-- Even a superuser write (a service bug with RLS off) cannot cross users.
+do $$ begin
+  begin
+    insert into public.action_audit (user_id, action_id, seq, event, prev_hash, hash)
+      values ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000a1', 1, 'forged', repeat('0', 64), repeat('2', 64));
+    raise exception 'audit entry for another user''s action was allowed';
+  exception when foreign_key_violation then null;
+  end;
+end $$;
+-- Disconnecting clears only connection_id.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+insert into public.pending_actions (id, user_id, connection_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+  values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000c2',
+          'send_mail', 'gmail', 'GMAIL_SEND_EMAIL', '{}', 's', repeat('e', 64), 'send', 'confirm', 'fk2');
+commit;
+delete from public.connections where id = '00000000-0000-0000-0000-0000000000c2';
+do $$ begin
+  assert (select connection_id is null and user_id = '00000000-0000-0000-0000-00000000000b'
+          from public.pending_actions where id = '00000000-0000-0000-0000-0000000000b1'),
+         'disconnect clears the action''s connection only';
+end $$;
+
+-- Slack and Teams messages are items too.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.items (user_id, source, external_id, kind, body, content_hash)
+  values ('00000000-0000-0000-0000-00000000000a', 'slack', 'C1:1.0', 'message', 'hi', 'h');
+rollback;
+
+-- M2/M3 tables: the same isolation.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.proactive_state (user_id, state) values ('00000000-0000-0000-0000-00000000000a', '{"cards": {}}');
+insert into public.intel_runs (user_id) values ('00000000-0000-0000-0000-00000000000a');
+insert into public.llm_cache (user_id, key, response)
+  values ('00000000-0000-0000-0000-00000000000a', repeat('a', 64), '{}');
+insert into public.briefs (user_id, day, timezone, data)
+  values ('00000000-0000-0000-0000-00000000000a', '2026-11-02', 'Europe/London', '{}');
+insert into public.cards (user_id, kind, title, status, card_key)
+  values ('00000000-0000-0000-0000-00000000000a', 'renewal', 'Renews', 'snoozed', 'k1');
+update public.profiles set timezone = 'UTC' where user_id = '00000000-0000-0000-0000-00000000000a';
+commit;
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.proactive_state) = 0, 'service as B sees no A proactive state';
+  assert (select count(*) from public.intel_runs) = 0, 'service as B sees no A runs';
+  assert (select count(*) from public.llm_cache) = 0, 'service as B sees no A cache';
+  assert (select count(*) from public.briefs) = 0, 'service as B sees no A briefs';
+  assert (select count(*) from public.cards) = 0, 'service as B sees no A cards';
+  begin
+    insert into public.briefs (user_id, day, timezone, data)
+      values ('00000000-0000-0000-0000-00000000000a', '2026-11-03', 'UTC', '{}');
+    raise exception 'cross-user brief insert was allowed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.proactive_state set state = '{}';
+    if found then raise exception 'cross-user update touched A'; end if;
+  end;
+end $$;
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.briefs) = 0, 'B cannot read A briefs';
+  assert (select count(*) from public.llm_cache) = 0, 'B cannot read A cache';
+  begin
+    insert into public.llm_cache (user_id, key, response)
+      values ('00000000-0000-0000-0000-00000000000b', repeat('b', 64), 'x');
+    raise exception 'user insert into llm_cache was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select count(*) from public.briefs) = 1, 'A reads own brief';
+  assert (select status from public.cards where card_key = 'k1') = 'snoozed', 'A reads own card';
+end $$;
+rollback;
+-- The schedulers' definers: A has items and no run or brief yet; only the service may call them.
+begin;
+set local role nugget_service;
+do $$ begin
+  -- A (subscribed) has a run that covers no item yet: due. B has items but no subscription: never.
+  assert (select count(*) from nugget_private.intel_due(10, '6 hours')) = 1, 'intel_due lists subscribed A only';
+  assert (select user_id from nugget_private.intel_due(10, '6 hours')) = '00000000-0000-0000-0000-00000000000a', 'it is A';
+  assert not exists (select 1 from nugget_private.brief_due(10) where user_id = '00000000-0000-0000-0000-00000000000b'), 'no brief for unsubscribed B';
+  perform * from nugget_private.brief_due(10);
+end $$;
+rollback;
+update public.intel_runs set items_through = now() + interval '1 minute';
+begin;
+set local role nugget_service;
+do $$ begin
+  assert (select count(*) from nugget_private.intel_due(10, '6 hours')) = 0, 'a covered, fresh run is not due';
+end $$;
+rollback;
+begin;
+set local role authenticated;
+do $$ begin
+  begin
+    perform nugget_private.intel_due(10, '6 hours');
+    raise exception 'authenticated could call intel_due';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform nugget_private.brief_due(10);
+    raise exception 'authenticated could call brief_due';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
 -- Deleting the auth user cascades everywhere.
 delete from auth.users where id = '00000000-0000-0000-0000-00000000000a';
 do $$ begin
@@ -180,6 +405,11 @@ do $$ begin
   assert (select count(*) from public.chunks) = 0, 'chunks cascade';
   assert (select count(*) from public.usage_events) = 0, 'usage cascade';
   assert (select count(*) from public.connections) = 0, 'connections cascade';
+  assert (select count(*) from public.briefs where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'briefs cascade';
+  assert (select count(*) from public.proactive_state) = 0, 'proactive state cascades';
+  assert (select count(*) from public.llm_cache) = 0, 'llm cache cascades';
+  assert (select count(*) from public.pending_actions where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'actions cascade';
+  assert (select count(*) from public.action_audit where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'audit cascades with the user';
   assert (select count(*) from public.subscriptions) = 0, 'subscriptions cascade';
   assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;

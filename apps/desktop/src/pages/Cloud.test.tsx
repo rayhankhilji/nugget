@@ -5,6 +5,7 @@ import { act } from "react";
 import { CloudError, cloudApi, type CloudAnswer, type CloudConnections, type CloudMe, type CloudPlan, type CloudSession } from "../cloud";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { CloudPage } from "./Cloud";
+import { AccountPage } from "./Account";
 
 beforeEach(installDomShims);
 afterEach(cleanup);
@@ -128,7 +129,7 @@ describe("CloudPage", () => {
       cloud_sync: log("sync", { synced: [{ toolkit: "gmail", added: 3, updated: 1, error: null }, { toolkit: "googlecalendar", added: 0, updated: 0, error: "token expired" }] }),
     });
     const { container } = await render(<CloudPage />);
-    const row = container.querySelector("tbody tr")!;
+    const row = container.querySelector(".cloud-conn")!;
     expect(row.textContent).toContain("Gmail");
     expect(row.textContent).toContain("Connected");
     expect(row.textContent).toContain("never");
@@ -212,7 +213,7 @@ describe("Plan & billing", () => {
         return null;
       },
     });
-    const { container } = await render(<CloudPage />);
+    const { container } = await render(<AccountPage />);
     const s = section(container);
     expect(s.querySelector("h2")?.textContent).toBe("Plan & billing");
     const items = s.querySelectorAll(".cloud-plans li");
@@ -252,7 +253,7 @@ describe("Plan & billing", () => {
         return null;
       },
     });
-    const { container } = await render(<CloudPage />);
+    const { container } = await render(<AccountPage />);
     let s = section(container);
     expect(s.textContent).toMatch(/Trial until .*2026/);
     expect(s.textContent).toContain("Smart asks this month: 7 of 300");
@@ -263,7 +264,7 @@ describe("Plan & billing", () => {
 
     me = { ...trialing, plan: "heed_max", entitlements: ent("heed_max", "Heed Max", 900), subscription: { ...trialing.subscription!, plan: "heed_max", status: "past_due" } };
     mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: () => me, cloud_billing_plans: plans });
-    s = section((await render(<CloudPage />)).container);
+    s = section((await render(<AccountPage />)).container);
     expect(s.textContent).toContain("Heed Max");
     expect(s.textContent).toContain("Payment past due");
     expect(byText(s, "button", "Upgrade to Heed Max")).toBeUndefined();
@@ -271,7 +272,7 @@ describe("Plan & billing", () => {
 
     me = { ...trialing, subscription: { ...trialing.subscription!, status: "active", cancel_at_period_end: true } };
     mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: () => me, cloud_billing_plans: plans });
-    s = section((await render(<CloudPage />)).container);
+    s = section((await render(<AccountPage />)).container);
     expect(s.textContent).toMatch(/Cancels on .*2026/);
   });
 
@@ -288,7 +289,12 @@ describe("Plan & billing", () => {
       cloud_connect: fail("connection_limit_reached"),
       cloud_ask: fail("device_limit_reached"),
     });
-    const { container } = await render(<CloudPage />);
+    const { container } = await render(
+      <>
+        <CloudPage />
+        <AccountPage />
+      </>,
+    );
     await click(byText(container, "button", "Sync now"));
     const prompt = container.querySelector('section[aria-labelledby="cloud-connections"] [role="alert"]')!;
     expect(prompt.textContent).toContain("This needs a Heed subscription");
@@ -312,6 +318,38 @@ describe("Plan & billing", () => {
     await submit(input.closest("form")!);
     expect(container.querySelector(".cloud-answer")?.textContent).toContain("this month's smart asks are used up");
   });
+});
+
+describe("CloudPage background import", () => {
+  it("shows import progress, says the import continues, and refreshes until it ends", async () => {
+    let polls = 0;
+    const importing: CloudConnections = {
+      ...lists,
+      connections: [{ id: "k1", toolkit: "gmail", status: "active", last_synced_at: null, last_error: null, syncing: true, backfill_done: false, items_synced: 1234 }],
+    };
+    const finished: CloudConnections = {
+      ...lists,
+      connections: [{ id: "k1", toolkit: "gmail", status: "active", last_synced_at: "2026-11-02T08:00:00Z", last_error: null, syncing: false, backfill_done: true, items_synced: 2000 }],
+    };
+    mockDaemon({
+      cloud_session: signedIn,
+      ...billing,
+      cloud_connections_list: () => (++polls < 3 ? importing : finished),
+      cloud_sync: { synced: [], running: true },
+    });
+    const { container } = await render(<CloudPage />);
+    const row = () => container.querySelector(".cloud-conn")!;
+    expect(row().textContent).toContain("Connected");
+    expect(row().textContent).toContain("Importing… 1,234 items");
+    await click(byText(container, "button", "Sync now"));
+    expect(container.textContent).toContain("Importing in the background");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 3200));
+    });
+    await flush(3);
+    expect(row().textContent).not.toContain("Importing…");
+    expect(polls).toBeGreaterThanOrEqual(3);
+  }, 10_000);
 });
 
 describe("cloudApi", () => {

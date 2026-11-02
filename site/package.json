@@ -1,0 +1,36 @@
+{
+  "name": "heed-site",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview --port 4321",
+    "check": "astro check",
+    "lint": "eslint .",
+    "test": "node tests/smoke.mjs",
+    "lighthouse": "node tests/lighthouse.mjs",
+    "screenshots": "node tests/screenshots.mjs"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "3.7.4",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@supabase/supabase-js": "2.118.0",
+    "astro": "5.18.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "eslint": "9.39.5",
+    "eslint-plugin-astro": "1.7.0",
+    "lighthouse": "13.6.0",
+    "sharp": "0.35.5",
+    "simple-icons": "16.0.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1"
+  }
+}

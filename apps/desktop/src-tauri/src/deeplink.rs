@@ -79,6 +79,7 @@ pub const PAGES: &[&str] = &[
     "privacy",
     "status",
     "connections",
+    "account",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

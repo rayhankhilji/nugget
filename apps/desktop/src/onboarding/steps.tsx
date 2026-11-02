@@ -93,21 +93,20 @@ export function WelcomeStep({ headingRef, cloud }: StepProps) {
       <StepHeading headingRef={headingRef}>{t("onboarding.welcome.heading")}</StepHeading>
       <p className="ob-lead">{t("onboarding.welcome.lead")}</p>
       <div className="ob-columns">
-        <section className="ob-card" aria-labelledby="ob-stays">
-          <h2 id="ob-stays">{t("onboarding.welcome.staysHeading")}</h2>
+        <section className="ob-card" aria-labelledby="ob-cloud">
+          <h2 id="ob-cloud">{t("onboarding.welcome.cloudHeading")}</h2>
           <ul>
-            <li>{t("onboarding.welcome.stays1")}</li>
-            <li>{t("onboarding.welcome.stays2")}</li>
-            <li>{t("onboarding.welcome.stays3")}</li>
+            <li>{t("onboarding.welcome.cloud1")}</li>
+            <li>{t("onboarding.welcome.cloud2")}</li>
+            <li>{t("onboarding.welcome.cloud3")}</li>
           </ul>
         </section>
-        <section className="ob-card" aria-labelledby="ob-leaves">
-          <h2 id="ob-leaves">{t("onboarding.welcome.leavesHeading")}</h2>
+        <section className="ob-card" aria-labelledby="ob-device">
+          <h2 id="ob-device">{t("onboarding.welcome.deviceHeading")}</h2>
           <ul>
-            <li>{t("onboarding.welcome.leaves1")}</li>
-            <li>{t("onboarding.welcome.leaves2")}</li>
-            <li>{t("onboarding.welcome.leaves3")}</li>
-            <li>{t("onboarding.welcome.leaves4")}</li>
+            <li>{t("onboarding.welcome.device1")}</li>
+            <li>{t("onboarding.welcome.device2")}</li>
+            <li>{t("onboarding.welcome.device3")}</li>
           </ul>
         </section>
       </div>
