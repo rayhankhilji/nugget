@@ -150,7 +150,6 @@ pub fn cloud_capabilities() -> Capabilities {
         json_schema: true,
         embeddings: false,
         context_tokens: Some(200_000),
-        ..Default::default()
     }
 }
 
