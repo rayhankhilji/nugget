@@ -24,6 +24,11 @@
 //! Prompt contents are never logged: logs carry the user id, tier, model, sizes, status and
 //! timings only.
 
+// Handlers here return axum's `Response` as the error type (the idiomatic shape for a relay that
+// already built the exact HTTP answer). Boxing it would add an allocation per call on the
+// ghost-text hot path for no benefit, so the size lint is allowed for this module only.
+#![allow(clippy::result_large_err)]
+
 pub mod entitlements;
 mod openai;
 mod sse;
