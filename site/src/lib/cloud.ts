@@ -57,3 +57,14 @@ export const billingPortal = (token: string) =>
   withReturnUrl((body) => cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST", body }), {});
 
 export const deleteAccount = (token: string) => cloud<void>("/v1/me", token, { method: "DELETE" });
+
+export interface Me {
+  plan: string | null;
+  entitlements: { smart_asks_per_month: number; default_model: string } | null;
+  usage: { smart_asks_used: number; month_cost_micros: number };
+}
+/** The account, plan and this month's usage. Web calls carry no device header, so they take no device seat. */
+export const getMe = (token: string) => cloud<Me>("/v1/me", token, { method: "GET" });
+
+/** Everything Heed stores for the user, as JSON (GET /v1/export; rate-limited by the cloud). */
+export const exportData = (token: string) => cloud<unknown>("/v1/export", token, { method: "GET" });

@@ -12,14 +12,13 @@
     "preview": "astro preview --port 4321",
     "check": "astro check",
     "lint": "eslint .",
-    "test": "node tests/smoke.mjs",
+    "test": "node tests/smoke.mjs && node tests/bare.mjs",
+    "apps": "node scripts/sync-apps.mjs",
     "lighthouse": "node tests/lighthouse.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",
-    "@fontsource-variable/geist": "5.3.0",
-    "@fontsource-variable/geist-mono": "5.3.0",
     "@supabase/supabase-js": "2.118.0",
     "astro": "5.18.2"
   },

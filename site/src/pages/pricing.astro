@@ -1,33 +1,48 @@
 ---
 import Base from "../layouts/Base.astro";
 import PricingCards from "../components/PricingCards.astro";
-import { loadPlans, ai, apps, sync, history, type Plan } from "../lib/plans";
+import { loadPlans, ai, apps, sync, history, CLOUD_PERKS, type Plan } from "../lib/plans";
 
 const { plans } = await loadPlans();
 const [a, b] = plans as [Plan, Plan];
-const yes = (v: boolean) => (v ? "Yes" : "No");
-const rows: [string, string, string][] = [
-  ["AI", ai(a.entitlements), ai(b.entitlements)],
-  ["Connected apps", apps(a.entitlements).replace(" connected apps", ""), apps(b.entitlements).replace(" connected apps", "").replace(" apps", "")],
-  ["Sync", sync(a.entitlements).replace("Sync every", "Every"), sync(b.entitlements).replace("Sync every", "Every")],
-  ["History", history(a.entitlements).replace(" of history", ""), history(b.entitlements).replace(" of history", "").replace("Full history", "Everything")],
-  ["Ghost text anywhere on your Mac", yes(a.entitlements.ghost_text), yes(b.entitlements.ghost_text)],
-  ["Needs you and the daily brief", yes(a.entitlements.needs_you_inbox && a.entitlements.daily_brief), yes(b.entitlements.needs_you_inbox && b.entitlements.daily_brief)],
-  ["Actions with your approval", yes(a.entitlements.actions_with_approval), yes(b.entitlements.actions_with_approval)],
-  ["Agent tasks and computer use", yes(a.entitlements.agent_tasks && a.entitlements.computer_use), yes(b.entitlements.agent_tasks && b.entitlements.computer_use)],
-  ["Devices", String(a.entitlements.devices), String(b.entitlements.devices)],
-  ["Support", a.entitlements.priority_support ? "Priority" : "Standard", b.entitlements.priority_support ? "Priority" : "Standard"],
+const yes = (v: boolean) => (v ? "Yes" : "–");
+// Free | Heed | Heed Max
+const rows: [string, string, string, string][] = [
+  ["Price", "£0, open source", `£${a.monthly_gbp} a month`, `£${b.monthly_gbp} a month`],
+  ["AI", "Bring your own: ChatGPT sign-in, API key or local model", ai(a.entitlements), ai(b.entitlements)],
+  ["Connecting apps", "Your own OAuth, IMAP or CalDAV", "One click", "One click"],
+  ["Connected apps", "Any you set up", apps(a.entitlements).replace(" connected apps", ""), apps(b.entitlements).replace(" apps", "")],
+  ["Sync", "While your Mac is awake", sync(a.entitlements).replace("Sync every", "Always on, every"), sync(b.entitlements).replace("Sync every", "Always on, every")],
+  ["Morning brief while your Mac sleeps", "–", "Yes", "Yes"],
+  ["History", "What you sync", history(a.entitlements).replace(" of history", ""), history(b.entitlements).replace(" of history", "").replace("Full history", "Everything")],
+  ["Where your data lives", "On your Mac", "Your account, in London", "Your account, in London"],
+  ["Ghost text anywhere on your Mac", "Yes, with your AI", yes(a.entitlements.ghost_text), yes(b.entitlements.ghost_text)],
+  ["Needs you and the daily brief", "Yes, while your Mac is awake", yes(a.entitlements.needs_you_inbox && a.entitlements.daily_brief), yes(b.entitlements.needs_you_inbox && b.entitlements.daily_brief)],
+  ["Actions with your approval", "Yes, through your own connections", yes(a.entitlements.actions_with_approval), yes(b.entitlements.actions_with_approval)],
+  ["Agent tasks and computer use", "Yes, on your Mac with your AI", yes(a.entitlements.agent_tasks && a.entitlements.computer_use), yes(b.entitlements.agent_tasks && b.entitlements.computer_use)],
+  ["Devices", "Each Mac you run it on", String(a.entitlements.devices), String(b.entitlements.devices)],
+  ["Support", "Community", a.entitlements.priority_support ? "Priority" : "Standard", b.entitlements.priority_support ? "Priority" : "Standard"],
 ];
-const description = `Heed is £${a.monthly_gbp} a month, or £${b.monthly_gbp} for ${b.name}. Both start with a ${a.trial_days}-day free trial; annual plans get two months free.`;
+const description = `Heed is free and open source. Heed Cloud is £${a.monthly_gbp} a month, or £${b.monthly_gbp} for ${b.name}, with a ${a.trial_days}-day free trial.`;
 ---
 <Base title="Pricing" description={description}>
   <section class="wrap top">
     <p class="eyebrow">Pricing</p>
-    <h1>Pay for the hours it gives back.</h1>
-    <p class="lede">Two plans, no free tier, no surprises. Try either one free for 14 days.</p>
+    <h1>Free to run yourself. Easier in the cloud.</h1>
+    <p class="lede">
+      The Heed app is open source. Bring your own AI and connect your apps yourself, or let Heed Cloud do it for you.
+    </p>
   </section>
-  <section class="wrap" aria-label="Plans">
+
+  <div class="band" data-bg role="img" aria-label="Dithered mountain landscape in ultramarine"></div>
+
+  <section class="wrap plans" aria-label="Plans">
     <PricingCards level="h2" />
+  </section>
+
+  <section class="wrap why" aria-labelledby="why-h">
+    <h2 id="why-h">Why pay for Heed Cloud?</h2>
+    <ul>{CLOUD_PERKS.map((p) => <li>{p}</li>)}</ul>
   </section>
 
   <section class="wrap compare" aria-labelledby="cmp-h">
@@ -35,22 +50,31 @@ const description = `Heed is £${a.monthly_gbp} a month, or £${b.monthly_gbp} f
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th scope="col"><span class="sr-only">Feature</span></th><th scope="col">{a.name}</th><th scope="col">{b.name}</th></tr>
+          <tr>
+            <th scope="col"><span class="sr-only">Feature</span></th>
+            <th scope="col">Free</th>
+            <th scope="col">{a.name}</th>
+            <th scope="col">{b.name}</th>
+          </tr>
         </thead>
         <tbody>
-          {rows.map(([k, a, b]) => (
-            <tr>
-              <th scope="row">{k}</th>
-              <td data-v={a}>{a}</td>
-              <td data-v={b}>{b}</td>
-            </tr>
-          ))}
+          {
+            rows.map(([k, f, x, y]) => (
+              <tr>
+                <th scope="row">{k}</th>
+                <td>{f}</td>
+                <td>{x}</td>
+                <td>{y}</td>
+              </tr>
+            ))
+          }
         </tbody>
       </table>
     </div>
     <p class="note">
-      Fair use applies to AI on both plans: in a very heavy month, answers switch to the fast model before a hard cap is
-      reached. Devices count when used in the last 30 days.
+      Fair use applies to AI on the cloud plans: in a very heavy month, answers switch to the fast model before a hard cap
+      is reached. Cloud devices count when used in the last 30 days. Want to run the cloud yourself? See the
+      <a href="/#faq">FAQ</a>.
     </p>
   </section>
 </Base>
@@ -58,66 +82,104 @@ const description = `Heed is £${a.monthly_gbp} a month, or £${b.monthly_gbp} f
 <style>
   .top {
     display: grid;
-    justify-items: center;
-    gap: 16px;
-    text-align: center;
-    padding-block: clamp(56px, 8vw, 96px) 40px;
+    gap: 18px;
+    padding-block: clamp(56px, 8vw, 104px) clamp(32px, 4vw, 48px);
   }
   h1 {
-    font-size: clamp(36px, 5.6vw, 64px);
-    letter-spacing: -0.045em;
-    max-width: 14em;
+    font-size: clamp(44px, 7vw, 96px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
+    line-height: 0.98;
+    max-width: 13ch;
   }
   .lede {
+    max-width: 36em;
+    font-size: clamp(17px, 1.5vw, 19px);
     color: var(--text-2);
-    font-size: 18px;
+  }
+  /* A calm full-bleed art band above the row (DS1's dithered landscape). */
+  .band {
+    --bg-img: url("/art/ds-dither.png");
+    height: clamp(140px, 18vw, 240px);
+    background-color: #e9ecff;
+    background-position: 50% 70%;
+    background-size: cover;
+    background-repeat: no-repeat;
+    image-rendering: pixelated;
+  }
+  .plans {
+    padding-top: clamp(32px, 4vw, 56px);
+  }
+  .why {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 32px;
+    padding-block: clamp(64px, 8vw, 112px) 0;
+  }
+  .why h2 {
+    font-size: clamp(32px, 4vw, 48px);
+  }
+  .why ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--text);
+  }
+  .why li {
+    padding: 14px 0;
+    border-bottom: 1px dashed var(--line-2);
+    font-size: 17px;
   }
   .compare {
-    max-width: calc(880px + var(--gutter) * 2);
-    padding-block: 96px 120px;
+    padding-block: clamp(64px, 8vw, 112px) 120px;
   }
   .compare h2 {
-    font-size: 28px;
-    margin-bottom: 24px;
+    font-size: clamp(32px, 4vw, 48px);
+    margin-bottom: 28px;
   }
   .table-wrap {
     overflow-x: auto;
-    border-radius: var(--r-4);
-    background: var(--surface);
-    box-shadow: var(--shadow-1);
   }
   table {
     width: 100%;
+    min-width: 640px;
     border-collapse: collapse;
     font-size: 15px;
-    min-width: 480px;
   }
   th,
   td {
     text-align: left;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--line);
-  }
-  tbody tr:last-child > * {
-    border-bottom: 0;
+    vertical-align: top;
+    padding: 14px 16px 14px 0;
+    border-bottom: 1px dashed var(--line-2);
   }
   thead th {
-    font-size: 14px;
-    color: var(--text-2);
+    border-bottom: 1px solid var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
     font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
   }
   tbody th {
     font-weight: 500;
+    width: 28%;
   }
   td {
     color: var(--text-2);
-  }
-  td[data-v="No"] {
-    color: var(--text-3);
   }
   .note {
     margin-top: 16px;
     font-size: 14px;
     color: var(--text-2);
+  }
+  .note a {
+    color: var(--text);
+  }
+  @media (max-width: 900px) {
+    .why {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

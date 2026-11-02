@@ -6,3 +6,5 @@ dist/
 !.env.example
 tests/out/
 dist-test/
+.vercel/
+dist-bare/

@@ -13,3 +13,6 @@ export const config = {
 
 export const supportEmail = "support@heed.app";
 export const privacyEmail = "privacy@heed.app";
+
+/** Heed Cloud accounts work only when Supabase and the cloud API are configured for this build. */
+export const cloudOpen = Boolean(config.supabaseUrl && config.supabaseAnonKey && config.cloudUrl);

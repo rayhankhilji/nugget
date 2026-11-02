@@ -1,25 +1,17 @@
 ---
 import Base from "../layouts/Base.astro";
-import GhostDemo from "../components/GhostDemo.astro";
 import AppIcon from "../components/AppIcon.astro";
-import PricingCards from "../components/PricingCards.astro";
-import AppShowcase from "../components/AppShowcase.astro";
+import AppMark from "../components/AppMark.astro";
+import ApprovalCard from "../components/cards/ApprovalCard.astro";
+import GhostCard from "../components/cards/GhostCard.astro";
+import StepCard from "../components/cards/StepCard.astro";
+import { APPS, label } from "../lib/apps";
 import { FAQ } from "../lib/faq";
+import { loadPlans, GITHUB_URL } from "../lib/plans";
 
-const apps: [string, string][] = [
-  ["gmail", "Gmail"],
-  ["googlecalendar", "Google Calendar"],
-  ["googledrive", "Google Drive"],
-  ["googledocs", "Google Docs"],
-  ["notion", "Notion"],
-  ["linear", "Linear"],
-  ["github", "GitHub"],
-  ["figma", "Figma"],
-  ["jira", "Jira"],
-  ["hubspot", "HubSpot"],
-  ["asana", "Asana"],
-  ["dropbox", "Dropbox"],
-];
+const { plans } = await loadPlans();
+const trial = plans[0]?.trial_days ?? 14;
+const from = Math.min(...plans.map((p) => p.monthly_gbp));
 
 const faqLd = {
   "@context": "https://schema.org",
@@ -28,221 +20,205 @@ const faqLd = {
 };
 ---
 <Base
+  footerCta={false}
   title="Heed"
-  description="Heed connects your mail, calendar, docs and chats in one click, answers anything about them with sources, writes for you anywhere on your Mac, and tells you what needs your attention."
+  description="Heed reads your mail, calendar, docs and chats, tells you what needs you, answers with sources and writes for you anywhere on your Mac. You approve; it does the rest."
 >
-  <!-- Hero -->
-  <section class="hero">
-    <div class="grid-bg" aria-hidden="true"></div>
+  <!-- Hero: one signal-blue field, one huge line, one monumental print. -->
+  <section class="hero" aria-labelledby="hero-h">
+    <div class="sky" aria-hidden="true" data-sky><div class="drift"></div></div>
     <div class="wrap hero-in">
       <div class="hero-copy">
-        <p class="eyebrow">For macOS · 14-day free trial</p>
-        <h1>Your work, <span class="hl">paying attention</span> to you.</h1>
+        <p class="kicker">Heed for Mac</p>
+        <h1 id="hero-h">Everything that needs you. Nothing that doesn't.</h1>
         <p class="lede">
-          Heed connects your mail, calendar, docs and chats in one click. It answers anything about them with sources,
-          writes for you anywhere on your Mac, and tells you what needs you.
+          Heed reads your mail, calendar, docs and chats, tells you what needs you, and writes wherever you type. You
+          approve. It does the rest.
         </p>
-        <div class="hero-cta">
-          <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
-          <a class="btn btn-secondary btn-lg" href="/download">
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0L4.5 6.5M8 10l3.5-3.5M3 13h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-            Download for Mac
-          </a>
+        <div class="cta">
+          <a class="btn btn-lg btn-cream" href="/pricing">Start free trial</a>
+          <a class="btn btn-lg btn-glass" href="/download">Download for Mac</a>
         </div>
+        <p class="sys">Heed Cloud: {trial}-day free trial · card needed · cancel any time before you're charged</p>
+        <p class="oss">Open source · Apache-2.0 · <a href={GITHUB_URL} rel="noopener">View on GitHub</a></p>
       </div>
-      <div class="hero-demo">
-        <GhostDemo />
-      </div>
+      <figure class="print">
+        <img
+          src="/art/painting-toledo.webp"
+          srcset="/art/painting-toledo-720.webp 720w, /art/painting-toledo.webp 960w"
+          sizes="(max-width: 760px) 360px, 34vw"
+          alt="A storm over a hilltop city, printed in ultramarine on cream"
+          width="960"
+          height="1085"
+          fetchpriority="high"
+          decoding="async"
+        />
+        <figcaption>After El Greco, <i>View of Toledo</i>, c. 1600 · CC0</figcaption>
+      </figure>
     </div>
   </section>
 
-  <!-- Apps strip -->
-  <section class="apps" aria-labelledby="apps-h">
+  <!-- One big product window, set into a painting. -->
+  <section class="showcase" aria-label="The Heed app">
     <div class="wrap">
-      <h2 id="apps-h" class="apps-h">Connects to the apps you already live in</h2>
-      <ul class="apps-row">
+      <div class="canvas" data-bg>
+        <figure class="window-wrap shot" data-reveal>
+          <img class="l" src="/screens/home-light.webp" srcset="/screens/home-light-960.webp 960w, /screens/home-light.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
+          <img class="d" src="/screens/home-dark.webp" srcset="/screens/home-dark-960.webp 960w, /screens/home-dark.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
+          <figcaption>The Home screen in Heed. Real screenshot; every name in it is fictional.</figcaption>
+        </figure>
+      </div>
+      <ul class="apps" data-apps aria-label="Apps Heed connects to">
+        <li class="apps-k">Works with</li>
         {
-          apps.map(([slug, name]) => (
-            <li title={name}>
-              <AppIcon slug={slug} size={22} mono />
-              <span>{name}</span>
+          APPS.map((a) => (
+            <li data-app={a.slug}>
+              <AppMark slug={a.slug} size={16} />
+              <span>{label(a)}</span>
             </li>
           ))
         }
+        <li class="apps-more">More coming soon</li>
       </ul>
     </div>
   </section>
 
-  <!-- The real app -->
-  <section class="section showcase" aria-labelledby="app-h">
+  <!-- Features: editorial blocks with big image tiles. -->
+  <section id="product" class="section features" aria-labelledby="feat-h">
     <div class="wrap">
-      <div class="section-head center">
-        <p class="eyebrow">The app</p>
-        <h2 id="app-h">Calm on the surface. Paying attention underneath.</h2>
-        <p>A Mac app that keeps one list of what needs you, answers with sources, and does nothing until you approve it.</p>
+      <div class="feat-head">
+        <h2 id="feat-h">What Heed does</h2>
+        <p>Six things, done properly. Every answer cites where it came from, and nothing leaves your account without your say.</p>
       </div>
-      <AppShowcase />
-    </div>
-  </section>
-
-  <!-- Product -->
-  <section id="product" class="section product">
-    <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">What Heed does</p>
-        <h2>One assistant that has read everything, so you don't have to.</h2>
-        <p>Four things, done properly. Each one cites where it came from, and nothing leaves your account without your say.</p>
-      </div>
-
-      <div class="bento">
-        <!-- Ask -->
-        <article class="tile t-ask">
-          <div class="tile-copy">
-            <h3>Ask anything</h3>
-            <p>Questions across every app at once, answered in seconds with links to the exact email, event or doc.</p>
-          </div>
-          <div class="ui ask" aria-hidden="true">
-            <div class="q">What did we agree with Driftwood about the release freeze?</div>
-            <div class="a">
-              <p>
-                The freeze moves to <b>Friday 18:00</b>. Ines asked for a decision on cursor pagination first
-                <span class="cite"><AppIcon slug="notion" size={13} tile />RFC</span>, and Dev confirmed it this morning
-                <span class="cite"><AppIcon slug="gmail" size={13} tile />Mail</span>.
+      <div class="grid">
+        <article class="feat" data-reveal style="--i:0">
+          <p class="tag">01 · Ask</p>
+          <h3>Answers, with receipts.</h3>
+          <p class="copy">Ask across every app at once. Each answer links to the exact email, event or doc it came from.</p>
+          <div class="tile art-harvesters" data-bg>
+            <div class="answer" aria-label="Example answer with sources">
+              <p class="q">What did we agree with Driftwood about the freeze?</p>
+              <p class="a">
+                The freeze moves to <b>Friday 18:00</b>. Ines wanted a decision on pagination first
+                <span class="chip"><AppIcon slug="notion" size={12} tile />RFC</span>, and Dev confirmed it this morning
+                <span class="chip"><AppIcon slug="gmail" size={12} tile />Mail</span>.
               </p>
             </div>
           </div>
         </article>
-
-        <!-- Needs you -->
-        <article class="tile t-needs">
-          <div class="tile-copy">
-            <h3>Needs you</h3>
-            <p>The short list of things only you can unblock, ranked by who's waiting and for how long.</p>
-          </div>
-          <ul class="ui needs" aria-hidden="true">
-            <li><span class="dot"></span><span class="who"><AppIcon slug="gmail" size={16} tile /></span><span class="t"><b>Margaret Osei</b> is waiting on a time for kickoff</span><span class="age">2d</span></li>
-            <li><span class="dot"></span><span class="who"><AppIcon slug="googledrive" size={16} tile /></span><span class="t"><b>Lumen contract</b> needs your signature by Friday</span><span class="age">1d</span></li>
-            <li><span class="dot dim"></span><span class="who"><AppIcon slug="linear" size={16} tile /></span><span class="t"><b>Ines</b> asked you to decide on pagination</span><span class="age">5h</span></li>
-          </ul>
+        <article class="feat" data-reveal style="--i:1">
+          <p class="tag">02 · Ghost text</p>
+          <h3>Writes where you type.</h3>
+          <p class="copy">Suggestions appear right after your cursor in any app on your Mac, in your voice. Press Tab to take one.</p>
+          <div class="tile art-sky" data-bg><GhostCard /></div>
         </article>
-
-        <!-- Brief -->
-        <article class="tile t-brief">
-          <div class="tile-copy">
-            <h3>A daily brief</h3>
-            <p>Every morning: what changed overnight, what's on today, and the one meeting worth preparing for.</p>
-          </div>
-          <div class="ui brief" aria-hidden="true">
-            <p class="hello">Good morning. Three things matter today.</p>
-            <ol class="agenda">
-              <li><time>09:30</time><span>Standup</span></li>
-              <li class="key"><time>11:00</time><span>Driftwood API review <em>prep</em></span></li>
-              <li><time>14:00</time><span>Moorland kickoff</span></li>
-            </ol>
+        <article class="feat" data-reveal style="--i:2">
+          <p class="tag">03 · Needs you</p>
+          <h3>One list of what's waiting on you.</h3>
+          <p class="copy">The replies, decisions and prep only you can do. Each item shows why it's there and the draft, ready to send.</p>
+          <div class="tile art-andes" data-bg><ApprovalCard /></div>
+        </article>
+        <article class="feat" data-reveal style="--i:0">
+          <p class="tag">04 · Daily brief</p>
+          <h3>A calm brief every morning.</h3>
+          <p class="copy">What changed overnight, what's on today, and the one meeting worth preparing for.</p>
+          <div class="tile art-dither" data-bg role="img" aria-label="Dithered mountain landscape"></div>
+        </article>
+        <article class="feat" data-reveal style="--i:1">
+          <p class="tag">05 · You approve</p>
+          <h3>Nothing goes out without you.</h3>
+          <p class="copy">Heed drafts the reply and finds the slot. You check it and approve. Every action is logged.</p>
+          <div class="tile art-engr" data-bg>
+            <div class="steps-wrap">
+              <StepCard
+                title="Reply to Margaret"
+                meta="Needs you"
+                steps={[
+                  { label: "Found her question about Thursday", state: "done" },
+                  { label: "Checked your calendar", detail: "Free from 14:00", state: "done" },
+                  { label: "Drafted a reply", state: "done" },
+                  { label: "Waiting for your approval", state: "current" },
+                ]}
+                actions={[{ label: "Pause" }, { label: "View draft", primary: true }]}
+              />
+            </div>
           </div>
         </article>
-
-        <!-- Actions -->
-        <article class="tile t-act">
-          <div class="tile-copy">
-            <h3>Acts, with your approval</h3>
-            <p>Heed drafts the reply and books the slot. You check it and press one key.</p>
-          </div>
-          <div class="ui act" aria-hidden="true">
-            <div class="act-h"><AppIcon slug="googlecalendar" size={18} tile /><span>Create event</span></div>
-            <p><b>Moorland kickoff</b><br />Thu 14:00 to 15:00 · Margaret Osei, you</p>
-            <div class="act-b"><span class="btn btn-sm btn-primary">Approve <kbd>↵</kbd></span><span class="btn btn-sm btn-secondary">Edit</span></div>
-          </div>
+        <article class="feat" data-reveal style="--i:2">
+          <p class="tag">06 · Connected</p>
+          <h3>Your work, in one place.</h3>
+          <p class="copy">Mail, calendar, Drive, Slack, Teams and Notion, kept in sync and searchable together.</p>
+          <div class="tile art-land" data-bg role="img" aria-label="Engraved landscape with a low sun"></div>
         </article>
       </div>
     </div>
   </section>
 
-  <!-- How it works -->
-  <section id="how" class="section how">
+  <!-- How it works: hairlines, not boxes. -->
+  <section id="how" class="section how" aria-labelledby="how-h">
     <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">How it works</p>
-        <h2>Running in three minutes.</h2>
-      </div>
-      <ol class="steps">
-        <li>
-          <span class="n">1</span>
-          <h3>Connect your apps</h3>
-          <p>Pick Gmail, Calendar and the rest. Each one is a single click and a consent screen from the app itself. No passwords, no setup.</p>
-        </li>
-        <li>
-          <span class="n">2</span>
-          <h3>Heed catches up</h3>
-          <p>It reads back through your history, then keeps up on its own: every 30 minutes on Heed, every 5 on Heed Max.</p>
-        </li>
-        <li>
-          <span class="n">3</span>
-          <h3>Ask, write, decide</h3>
-          <p>Ask a question, press <kbd>Tab</kbd> to take a suggestion as you type, and clear your Needs you list over coffee.</p>
-        </li>
+      <h2 id="how-h">It does the legwork.<br />You make the calls.</h2>
+      <ol class="flow">
+        <li><span class="n">01</span><b>Connect your apps</b><p>One click each, through the app's own sign-in. Heed never sees your passwords.</p></li>
+        <li><span class="n">02</span><b>Heed reads and learns</b><p>It catches up on your history, then keeps in sync as new mail, events and docs arrive.</p></li>
+        <li><span class="n">03</span><b>It drafts and asks</b><p>Replies, event changes and prep notes, ready for you to check.</p></li>
+        <li><span class="n">04</span><b>You approve</b><p>Nothing leaves your account until you do.</p></li>
       </ol>
     </div>
   </section>
 
   <!-- Privacy -->
-  <section id="privacy" class="section privacy">
+  <section id="privacy" class="section privacy" aria-labelledby="privacy-h">
     <div class="wrap">
-      <div class="section-head">
-        <p class="eyebrow">Privacy and security</p>
-        <h2>Straight answers about your data.</h2>
-        <p>
-          Heed is a cloud service. Its AI doesn't run on your Mac, so here is exactly what happens to what you connect.
-        </p>
+      <figure class="painting" data-reveal>
+        <img src="/art/painting-oxbow.webp" alt="A river bend under a clearing storm, printed in ultramarine on cream" width="1400" height="944" loading="lazy" decoding="async" />
+        <div class="block"><p>Never sold.<br />Never used for training.</p></div>
+        <figcaption>After Thomas Cole, <i>The Oxbow</i>, 1836. The Met, Open Access (CC0), duotoned.</figcaption>
+      </figure>
+      <div class="priv-in">
+        <div>
+          <p class="tag">Privacy</p>
+          <h2 id="privacy-h">Your data, in plain English.</h2>
+          <p class="muted">The free app keeps your data on your Mac. Heed Cloud runs in the cloud, and this is what that means for you.</p>
+          <p class="more"><a href="/legal/privacy">Read the privacy policy</a></p>
+        </div>
+        <dl class="facts">
+          <div><dt>Where it lives</dt><dd>Your synced items are stored in your account in London. To answer or write, Heed sends only the relevant snippets and your request to our AI provider, Anthropic, or OpenAI as a fallback.</dd></div>
+          <div><dt>How it's protected</dt><dd>It's encrypted in transit and at rest, and each account is isolated at the database level. It isn't end-to-end encrypted, because Heed has to read it to help you.</dd></div>
+          <div><dt>What we never do</dt><dd>We never sell your data, use it for ads or train models on it. Our AI providers don't train on API data by default.</dd></div>
+          <div><dt>Passwords and actions</dt><dd>Apps connect through each app's own sign-in, so we never see your passwords. Sending an email or creating an event always waits for your approval.</dd></div>
+          <div><dt>Leaving</dt><dd>When you disconnect an app, its data is deleted. When you delete your account, everything goes with it.</dd></div>
+        </dl>
       </div>
-      <div class="facts">
-        <div class="fact">
-          <h3>Processed in the cloud, stored in London</h3>
-          <p>Synced items live in your account in a London data centre. To answer or write, Heed sends only the relevant snippets and your request to our AI provider, Anthropic (or OpenAI as a fallback).</p>
-        </div>
-        <div class="fact">
-          <h3>Encrypted in transit and at rest</h3>
-          <p>Everything travels over TLS and is stored on encrypted disks. Each account's rows are isolated at the database level, so one user can never read another's.</p>
-        </div>
-        <div class="fact">
-          <h3>Never sold, never used for training</h3>
-          <p>We don't sell your data or use it for ads, and we don't train models on it. Our AI providers don't train on API data by default.</p>
-        </div>
-        <div class="fact">
-          <h3>We never see your passwords</h3>
-          <p>Apps connect through Composio using each app's own sign-in. Access tokens are held there, encrypted, and you can revoke any connection whenever you like.</p>
-        </div>
-        <div class="fact">
-          <h3>Nothing goes out without you</h3>
-          <p>Sending an email or creating an event always waits for your approval, and every action is written to a log you can check.</p>
-        </div>
-        <div class="fact">
-          <h3>Delete everything, any time</h3>
-          <p>Disconnect an app and its data goes. Delete your account and every synced item is deleted with it.</p>
-        </div>
-      </div>
-      <p class="privacy-more"><a href="/legal/privacy">Read the privacy policy</a></p>
     </div>
   </section>
 
-  <!-- Pricing -->
-  <section class="section" aria-labelledby="pricing-h">
-    <div class="wrap">
-      <div class="section-head center">
-        <p class="eyebrow">Pricing</p>
-        <h2 id="pricing-h">Two plans. Both start free for 14 days.</h2>
+  <!-- Get it -->
+  <section class="get" aria-labelledby="get-h">
+    <div class="wrap get-in">
+      <div>
+        <h2 id="get-h">Get Heed for Mac.</h2>
+        <div class="cta left">
+          <a class="btn btn-lg btn-primary" href="/download">Download for Mac</a>
+          <a class="btn btn-lg btn-secondary" href={GITHUB_URL} rel="noopener">View on GitHub</a>
+        </div>
+        <pre class="install" aria-label="Get the source"><code><span class="c"># or get the source</span>
+git clone https://github.com/rayhankhilji/nugget</code></pre>
       </div>
-      <PricingCards />
+      <dl class="specs">
+        <div><dt>System</dt><dd>macOS 11 Big Sur or later</dd></div>
+        <div><dt>Chips</dt><dd>Apple silicon and Intel</dd></div>
+        <div><dt>Free</dt><dd>Open source, Apache-2.0 · bring your own AI</dd></div>
+        <div><dt>Heed Cloud</dt><dd>From £{from} a month · {trial}-day free trial, card needed · <a href="/pricing">compare plans</a></dd></div>
+        <div><dt>Windows, Linux</dt><dd>Coming soon</dd></div>
+      </dl>
     </div>
   </section>
 
   <!-- FAQ -->
-  <section id="faq" class="section faq">
+  <section id="faq" class="section faq" aria-labelledby="faq-h">
     <div class="wrap faq-in">
-      <div class="section-head">
-        <p class="eyebrow">FAQ</p>
-        <h2>Questions, answered.</h2>
-      </div>
+      <h2 id="faq-h">Questions, answered.</h2>
       <div class="qs">
         {
           FAQ.map((f) => (
@@ -259,406 +235,600 @@ const faqLd = {
     </div>
   </section>
 
-  <!-- Final CTA -->
-  <section class="final">
-    <div class="wrap final-in">
-      <span class="dot pulse big" aria-hidden="true"></span>
-      <h2>Let Heed keep watch.</h2>
-      <p class="muted">Two weeks free. Cancel in two clicks if it isn't for you.</p>
-      <div class="hero-cta center">
-        <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
-        <a class="btn btn-ghost btn-lg" href="/download">Download for Mac</a>
-      </div>
-    </div>
-  </section>
-
   <script type="application/ld+json" set:html={JSON.stringify(faqLd)} />
 </Base>
 
+<script>
+  // Sky parallax: at most 12px, and none under reduced motion. (The drift itself is pure CSS.)
+  const layer = document.querySelector<HTMLElement>("[data-sky]");
+  if (layer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    let ticking = false;
+    addEventListener(
+      "scroll",
+      () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
+          ticking = false;
+        });
+      },
+      { passive: true },
+    );
+  }
+</script>
+
 <style>
-  /* Hero */
+  /* ---------- Hero ---------- */
   .hero {
     position: relative;
     overflow: hidden;
-    padding: clamp(48px, 8vw, 96px) 0 clamp(56px, 8vw, 104px);
+    isolation: isolate;
+    color: #f6f3ec;
+    padding: clamp(56px, 8vw, 112px) 0 clamp(64px, 9vw, 128px);
   }
-  .grid-bg {
+  /* Dithered sky (scripts/art/sky.mjs): 640x360 cells at 3x, so one tile is 1920x1080 CSS px and repeats
+     seamlessly in x. The layer is two tiles wide and slides left one tile per 36s loop. */
+  .sky {
     position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(var(--grid) 1px, transparent 1px),
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 20%, transparent 75%);
-    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 70% 40%, #000 20%, transparent 75%);
+    inset: -12px 0 0;
+    z-index: -1;
+    overflow: hidden;
+    background: #070798;
+    transform: translate3d(0, var(--py, 0px), 0);
   }
-  .hero::after {
-    content: "";
+  /* Anchored so the image's dark upper part (cream text keeps ≥6:1 there) sits behind the copy and only
+     the cloud tops show along the hero's bottom edge. */
+  .drift {
     position: absolute;
-    width: 520px;
-    height: 520px;
-    right: -120px;
-    top: -160px;
-    border-radius: 50%;
-    background: radial-gradient(closest-side, rgb(255 90 60 / 0.16), transparent);
-    pointer-events: none;
+    left: 0;
+    bottom: -420px;
+    width: 3840px;
+    height: 1080px;
+    background: url("/art/sky-light.webp") 0 0 / 1920px 1080px repeat-x;
+    image-rendering: pixelated;
+    animation: drift 36s linear infinite;
+    will-change: transform;
+  }
+  @keyframes drift {
+    to {
+      transform: translate3d(-1920px, 0, 0);
+    }
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .sky {
+      background-color: #0b0b1a;
+    }
+    :global(:root:not([data-theme="light"])) .drift {
+      background-image: url("/art/sky-dark.webp");
+    }
+  }
+  :global(:root[data-theme="dark"]) .sky {
+    background-color: #0b0b1a;
+  }
+  :global(:root[data-theme="dark"]) .drift {
+    background-image: url("/art/sky-dark.webp");
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .drift {
+      animation: none;
+    }
   }
   .hero-in {
-    position: relative;
-    z-index: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: clamp(32px, 5vw, 64px);
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+    gap: clamp(32px, 6vw, 96px);
     align-items: center;
   }
   .hero-copy {
     display: grid;
-    gap: 22px;
+    gap: 24px;
+    justify-items: start;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(246 243 236 / 0.86);
   }
   h1 {
-    font-size: clamp(40px, 5.4vw, 66px);
-    letter-spacing: -0.045em;
-    line-height: 1.02;
-  }
-  .hl {
-    color: var(--accent-ink);
+    font-size: clamp(52px, 8.4vw, 120px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
+    line-height: 0.96;
   }
   .lede {
-    font-size: clamp(17px, 1.7vw, 19px);
-    color: var(--text-2);
-    max-width: 34em;
+    max-width: 32em;
+    font-size: clamp(17px, 1.5vw, 20px);
+    color: rgb(246 243 236 / 0.92);
   }
-  .hero-cta {
+  .cta {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-top: 6px;
   }
-  .hero-cta.center {
-    justify-content: center;
+  .btn-cream {
+    background: #f6f3ec;
+    color: #14110f;
+  }
+  .btn-cream:hover {
+    background: #fff;
+  }
+  .btn-glass {
+    color: #f6f3ec;
+    background: rgb(246 243 236 / 0.1);
+    box-shadow: inset 0 0 0 1px rgb(246 243 236 / 0.35);
+  }
+  .btn-glass:hover {
+    background: rgb(246 243 236 / 0.18);
+  }
+  .sys {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: rgb(246 243 236 / 0.86);
+  }
+  .oss {
+    margin-top: -14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: rgb(246 243 236 / 0.86);
+  }
+  .oss a {
+    color: #f6f3ec;
+    text-underline-offset: 3px;
+  }
+  .print {
+    margin: 0;
+    padding: 12px 12px 10px;
+    background: #f6f3ec;
+    border-radius: 2px;
+    box-shadow: 0 40px 80px -30px rgb(0 0 40 / 0.6);
+    transform: rotate(1.2deg);
+  }
+  .print img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 960 / 1085;
+    display: block;
+  }
+  .print figcaption {
+    margin-top: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: #4a4540;
   }
 
-  /* Apps strip */
+  /* ---------- Showcase: one big window in a painting ---------- */
+  .showcase {
+    padding-top: clamp(56px, 7vw, 96px);
+  }
+  .canvas {
+    padding: clamp(20px, 5vw, 72px);
+    border-radius: 6px;
+    --bg-img: url("/art/painting-cypresses.webp");
+    background: #1f3bff center / cover no-repeat;
+  }
+  .window-wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  /* DS1's real screenshot (docs/brand/screens, 1440x900), framed like a Mac window. The light or dark
+     shot follows the site theme; the hidden one never loads (lazy + display:none). */
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1440 / 900;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow:
+      0 0 0 1px rgb(20 17 15 / 0.14),
+      0 40px 90px -30px rgb(7 7 50 / 0.6),
+      0 10px 24px -10px rgb(7 7 50 / 0.3);
+  }
+  .shot .d {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .shot .l {
+      display: none;
+    }
+    :global(:root:not([data-theme="light"])) .shot .d {
+      display: block;
+    }
+  }
+  :global(:root[data-theme="dark"]) .shot .l {
+    display: none;
+  }
+  :global(:root[data-theme="dark"]) .shot .d {
+    display: block;
+  }
+  .shot figcaption {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: rgb(255 255 255 / 0.92);
+    text-shadow: 0 1px 2px rgb(0 0 40 / 0.6);
+  }
   .apps {
-    border-block: 1px solid var(--line);
-    padding: 28px 0;
-    background: var(--bg-2);
-  }
-  .apps-h {
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0;
-    color: var(--text-2);
-    text-align: center;
-    margin-bottom: 18px;
-  }
-  .apps-row {
     list-style: none;
-    margin: 0;
-    padding: 0;
+    margin: 28px 0 0;
+    padding: 18px 0;
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     justify-content: center;
-    gap: 14px 30px;
+    gap: 10px 24px;
+    border-block: 1px dashed var(--line-2);
+    font-size: 14px;
     color: var(--text-2);
   }
-  .apps-row li {
+  .apps li {
     display: inline-flex;
     align-items: center;
-    gap: 9px;
-    font-size: 14px;
+    gap: 7px;
+  }
+  .apps-k,
+  .apps-more {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+  .apps-k {
+    text-transform: uppercase;
   }
 
-  /* Bento */
-  .bento {
+  /* ---------- Features ---------- */
+  .feat-head {
     display: grid;
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 16px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 32px;
+    align-items: end;
+    margin-bottom: clamp(40px, 6vw, 72px);
+  }
+  .feat-head h2 {
+    font-size: clamp(44px, 6.4vw, 88px);
+  }
+  .feat-head p {
+    color: var(--text-2);
+    font-size: 17px;
+    max-width: 30em;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: clamp(24px, 3vw, 40px);
+    row-gap: 10px;
+  }
+  .feat:nth-child(n + 4) {
+    margin-top: clamp(48px, 6vw, 80px);
+  }
+  /* Each feature spans four rows of the grid (tag, title, copy, tile) via subgrid, so tiles line up. */
+  .feat {
+    display: grid;
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+    row-gap: 10px;
+    align-content: start;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  .feat h3 {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    letter-spacing: var(--heed-display-tracking);
+    font-size: clamp(28px, 2.6vw, 34px);
+    line-height: 1.08;
+  }
+  .copy {
+    color: var(--text-2);
+    font-size: 15.5px;
   }
   .tile {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-    padding: 28px;
-    border-radius: var(--r-4);
-    background: var(--surface);
-    box-shadow: var(--shadow-1), var(--hi);
-    overflow: hidden;
-  }
-  .t-ask {
-    grid-column: span 7;
-  }
-  .t-needs {
-    grid-column: span 5;
-  }
-  .t-brief {
-    grid-column: span 5;
-  }
-  .t-act {
-    grid-column: span 7;
-  }
-  .tile-copy {
+    position: relative;
     display: grid;
-    gap: 8px;
+    grid-template-columns: minmax(0, 1fr);
+    place-items: center;
+    margin-top: 12px;
+    padding: 24px;
+    aspect-ratio: 4 / 4.3;
+    border-radius: 4px;
+    overflow: hidden;
+    background-color: #1f3bff;
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
   }
-  .tile h3 {
-    font-size: 20px;
+  .tile > :global(*) {
+    position: relative;
   }
-  .tile-copy p {
-    color: var(--text-2);
-    font-size: 15px;
-    max-width: 40ch;
+  .art-harvesters {
+    --bg-img: url("/art/painting-harvesters.webp");
   }
-  .ui {
-    margin-top: auto;
-    border-radius: var(--r-3);
-    background: var(--bg);
-    box-shadow: inset 0 0 0 1px var(--line);
+  .art-andes {
+    --bg-img: url("/art/painting-andes.webp");
+  }
+  .art-sky {
+    --bg-img: url("/art/sky-light.webp");
+    background-color: #070798;
+    background-position: 30% 100%;
+    background-size: auto 140%;
+    background-repeat: repeat-x;
+    image-rendering: pixelated;
+  }
+  .art-dither {
+    --bg-img: url("/art/ds-dither.png");
+    background-color: #e9ecff;
+    background-position: 50% 100%;
+    background-size: auto 100%;
+    image-rendering: pixelated;
+  }
+  .art-engr {
+    --bg-img: url("/art/ds-engr.webp");
+    background-color: #f6f3ec;
+    background-position: 50% 100%;
+  }
+  .art-land {
+    --bg-img: url("/art/landscape-light.webp");
+    background-color: #f6f3ec;
+    background-position: 70% 100%;
+    background-size: auto 100%;
+  }
+  .answer {
+    width: 100%;
+    max-width: 340px;
     padding: 16px;
-    font-size: 14.5px;
+    border-radius: var(--heed-radius-l);
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    font-size: 14px;
   }
-  .ask .q {
-    justify-self: end;
+  .answer .q {
     margin-left: auto;
     width: fit-content;
-    max-width: 85%;
-    padding: 9px 13px;
+    max-width: 88%;
+    padding: 8px 12px;
     border-radius: 12px 12px 4px 12px;
     background: var(--surface-2);
-    margin-bottom: 14px;
+    box-shadow: inset 0 0 0 1px var(--line);
+    margin-bottom: 12px;
   }
-  .ask .a p {
-    line-height: 1.75;
+  .answer .a {
+    color: var(--text-2);
+    line-height: 1.7;
   }
-  .cite {
+  .answer b {
+    color: var(--text);
+    font-weight: 560;
+  }
+  .chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 1px 7px 1px 3px;
-    margin: 0 1px;
+    padding: 0 7px 0 3px;
     border-radius: 999px;
-    font-size: 12px;
+    font-size: 11.5px;
+    line-height: 20px;
     color: var(--text-2);
-    background: var(--surface);
-    box-shadow: 0 0 0 0.5px var(--line-2);
-    vertical-align: 0.08em;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    vertical-align: 0.06em;
   }
-  .needs {
-    list-style: none;
-    margin-top: auto;
-    display: grid;
-    gap: 2px;
-    padding: 6px;
+  .steps-wrap {
+    width: 100%;
+    max-width: 340px;
   }
-  .needs li {
-    display: grid;
-    grid-template-columns: 8px 18px 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 10px;
-    border-radius: 9px;
+
+  /* ---------- How ---------- */
+  .how {
+    border-top: 1px dashed var(--line-2);
   }
-  .needs li:first-child {
-    background: var(--accent-soft);
+  .how h2 {
+    font-size: clamp(40px, 5.6vw, 72px);
+    margin-bottom: clamp(36px, 5vw, 64px);
   }
-  .needs .dot {
-    width: 7px;
-    height: 7px;
-  }
-  .needs .dot.dim {
-    background: var(--line-2);
-  }
-  .needs .t {
-    color: var(--text-2);
-    min-width: 0;
-  }
-  .needs .t b {
-    color: var(--text);
-    font-weight: 550;
-  }
-  .needs .age {
-    font-family: var(--mono);
-    font-size: 12px;
-    color: var(--text-3);
-  }
-  .brief .hello {
-    font-weight: 550;
-    margin-bottom: 12px;
-  }
-  .agenda {
+  .flow {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
-    gap: 6px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-  .agenda li {
-    display: flex;
-    gap: 12px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    color: var(--text-2);
-    box-shadow: inset 2px 0 0 var(--line-2);
+  .flow li {
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 20px 24px 8px 0;
+    border-top: 1px solid var(--text);
   }
-  .agenda li.key {
-    color: var(--text);
-    background: var(--surface);
-    box-shadow: inset 2px 0 0 var(--brand), var(--shadow-1);
+  .flow li + li {
+    padding-left: 24px;
+    border-left: 1px dashed var(--line-2);
   }
-  .agenda time {
+  .n {
     font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-3);
+  }
+  .flow b {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .flow p {
+    color: var(--text-2);
+    font-size: 15px;
+  }
+
+  /* ---------- Privacy ---------- */
+  .painting {
+    position: relative;
+    margin: 0 0 clamp(40px, 6vw, 72px);
+  }
+  .painting img {
+    width: 100%;
+    height: clamp(280px, 40vw, 520px);
+    object-fit: cover;
+    object-position: 50% 40%;
+    border-radius: 4px;
+    background: var(--heed-signal-wash);
+    display: block;
+  }
+  .block {
+    position: absolute;
+    left: clamp(16px, 3vw, 40px);
+    bottom: clamp(44px, 5vw, 72px);
+    padding: clamp(18px, 2.4vw, 32px) clamp(20px, 3vw, 36px);
+    background: var(--band);
+    color: var(--on-band);
+    border-radius: 2px;
+    max-width: min(80%, 520px);
+  }
+  .block p {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(28px, 3.8vw, 48px);
+    letter-spacing: var(--heed-display-tracking);
+    line-height: 1.05;
+  }
+  .painting figcaption {
+    margin-top: 10px;
     font-size: 12.5px;
     color: var(--text-3);
-    padding-top: 1px;
   }
-  .agenda em {
-    font-style: normal;
-    font-size: 11px;
-    font-family: var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--accent-ink);
-    margin-left: 6px;
-  }
-  .act {
+  .priv-in {
     display: grid;
-    gap: 12px;
-    max-width: 380px;
-    width: 100%;
-    background: var(--surface);
-    box-shadow: var(--shadow-2);
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: clamp(32px, 6vw, 96px);
   }
-  .act-h {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    color: var(--text-2);
-  }
-  .act p {
-    color: var(--text-2);
-  }
-  .act p b {
-    color: var(--text);
-    font-weight: 550;
-  }
-  .act-b {
-    display: flex;
-    gap: 8px;
-  }
-  .act-b .btn {
-    pointer-events: none;
-  }
-  .act-b kbd {
-    background: rgb(0 0 0 / 0.12);
-    box-shadow: none;
-    color: inherit;
-  }
-
-  /* Steps */
-  .how {
-    background: var(--bg-2);
-    border-block: 1px solid var(--line);
-  }
-  .steps {
-    list-style: none;
-    margin: 0;
-    padding: 0;
+  .priv-in > div {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
-    counter-reset: s;
-  }
-  .steps li {
-    position: relative;
-    display: grid;
-    gap: 10px;
     align-content: start;
-    padding: 28px 24px;
-    border-radius: var(--r-4);
-    background: var(--surface);
-    box-shadow: var(--shadow-1), var(--hi);
   }
-  .steps .n {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    border-radius: 9px;
-    font-family: var(--mono);
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--accent-ink);
-    background: var(--accent-soft);
-    margin-bottom: 8px;
+  .priv-in h2 {
+    font-size: clamp(40px, 5vw, 64px);
   }
-  .steps h3 {
-    font-size: 19px;
-  }
-  .steps p {
-    color: var(--text-2);
-    font-size: 15px;
-  }
-
-  /* Privacy */
   .facts {
+    margin: 0;
+  }
+  .facts div {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1px;
-    border-radius: var(--r-4);
-    overflow: hidden;
-    background: var(--line);
-    box-shadow: 0 0 0 1px var(--line);
+    grid-template-columns: 180px 1fr;
+    gap: 16px;
+    padding: 18px 0;
+    border-bottom: 1px dashed var(--line-2);
   }
-  .fact {
-    display: grid;
-    gap: 8px;
-    align-content: start;
-    padding: 26px 24px;
-    background: var(--bg);
+  .facts div:first-child {
+    border-top: 1px solid var(--text);
   }
-  .fact h3 {
-    font-size: 17px;
-    letter-spacing: -0.015em;
-  }
-  .fact p {
-    font-size: 15px;
+  .facts dt {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     color: var(--text-2);
+    padding-top: 3px;
   }
-  .privacy-more {
-    margin-top: 20px;
-    font-size: 15px;
+  .facts dd {
+    margin: 0;
+    font-size: 16px;
+    line-height: 1.55;
   }
-  .privacy-more a {
+  .more a {
     color: var(--accent-ink);
+    font-size: 18px;
     text-underline-offset: 3px;
   }
 
-  .showcase {
-    padding-bottom: clamp(40px, 6vw, 72px);
+  /* ---------- Get it ---------- */
+  .get {
+    padding: clamp(64px, 9vw, 120px) 0;
+    border-block: 1px dashed var(--line-2);
   }
-  .product {
-    padding-top: clamp(40px, 6vw, 72px);
+  .get-in {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(32px, 6vw, 96px);
+    align-items: center;
   }
-  .section-head.center {
-    margin-inline: auto;
-    text-align: center;
-    justify-items: center;
+  .get h2 {
+    font-size: clamp(44px, 6.4vw, 88px);
+    margin-bottom: 28px;
+  }
+  .get-in > * {
+    min-width: 0;
+  }
+  .install {
+    margin: 24px 0 0;
+    padding: 14px 16px;
+    max-width: 34em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-radius: 4px;
+    background: #0b0b1a;
+    color: #f3f1ec;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .install .c {
+    color: #b9b6c8;
+  }
+  .specs {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 13.5px;
+  }
+  .specs div {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .specs div:first-child {
+    border-top: 1px solid var(--text);
+  }
+  .specs dt {
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 12px;
+    padding-top: 1px;
+  }
+  .specs dd {
+    margin: 0;
+  }
+  .specs a {
+    color: var(--text);
+    text-underline-offset: 3px;
   }
 
-  /* FAQ */
+  /* ---------- FAQ ---------- */
   .faq-in {
     display: grid;
-    align-items: start;
     grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
     gap: 48px;
+    align-items: start;
+  }
+  .faq h2 {
+    font-size: clamp(40px, 5vw, 64px);
   }
   .qs {
-    display: grid;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--text);
   }
   details {
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px dashed var(--line-2);
   }
   summary {
     display: flex;
@@ -669,8 +839,7 @@ const faqLd = {
     cursor: pointer;
     list-style: none;
     font-size: 17px;
-    font-weight: 550;
-    letter-spacing: -0.01em;
+    font-weight: 540;
   }
   summary::-webkit-details-marker {
     display: none;
@@ -691,7 +860,7 @@ const faqLd = {
     height: 1.6px;
     border-radius: 2px;
     background: var(--text-2);
-    transition: transform 0.2s var(--ease);
+    transition: transform var(--t-ui) var(--ease);
   }
   .plus::after {
     transform: rotate(90deg);
@@ -704,59 +873,59 @@ const faqLd = {
     color: var(--text-2);
   }
 
-  /* Final */
-  .final {
-    padding: clamp(80px, 12vw, 140px) 0;
-    border-top: 1px solid var(--line);
-    background: radial-gradient(ellipse 50% 60% at 50% 100%, rgb(255 90 60 / 0.1), transparent);
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1020px) {
+    .grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .feat:nth-child(n + 3) {
+      margin-top: 48px;
+    }
+    .flow {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .flow li:nth-child(3) {
+      padding-left: 0;
+      border-left: 0;
+    }
+    .priv-in,
+    .get-in,
+    .faq-in,
+    .feat-head {
+      grid-template-columns: 1fr;
+    }
   }
-  .final-in {
-    display: grid;
-    justify-items: center;
-    gap: 18px;
-    text-align: center;
-  }
-  .final h2 {
-    font-size: clamp(34px, 5vw, 56px);
-  }
-  .dot.big {
-    width: 16px;
-    height: 16px;
-    margin-bottom: 8px;
-  }
-
-  @media (max-width: 960px) {
+  @media (max-width: 760px) {
     .hero-in {
       grid-template-columns: 1fr;
     }
-    .t-ask,
-    .t-needs,
-    .t-brief,
-    .t-act {
-      grid-column: span 12;
-    }
-    .steps,
-    .facts {
-      grid-template-columns: 1fr 1fr;
-    }
-    .faq-in {
-      grid-template-columns: 1fr;
-      gap: 0;
+    .print {
+      max-width: 360px;
+      justify-self: center;
     }
   }
   @media (max-width: 640px) {
-    .steps,
-    .facts {
+    .grid,
+    .flow {
       grid-template-columns: 1fr;
     }
+    .flow li,
+    .flow li + li {
+      padding-left: 0;
+      border-left: 0;
+    }
     .tile {
-      padding: 22px;
+      aspect-ratio: auto;
+      min-height: 300px;
+      padding: 20px 16px;
     }
-    .apps-row {
-      gap: 12px 20px;
+    .feat:nth-child(n + 2) {
+      margin-top: 40px;
     }
-    .apps-row li span {
-      font-size: 13px;
+    .facts div,
+    .specs div {
+      grid-template-columns: 1fr;
+      gap: 4px;
     }
   }
 </style>

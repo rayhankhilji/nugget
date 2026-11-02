@@ -1,5 +1,13 @@
 ---
+import "../styles/heed/fonts.css";
+import "../styles/heed/tokens.css";
 import "../styles/global.css";
+import tokensCss from "../styles/heed/tokens.css?raw";
+
+// tokens.css follows the system theme (data-theme="light" opts out). The footer switch can also force
+// dark, so reuse tokens.css's own dark block under :root[data-theme="dark"]; no values are duplicated.
+const darkBlock = /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/.exec(tokensCss)?.[1] ?? "";
+const forcedDark = `:root[data-theme="dark"]{${darkBlock}}`;
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 
@@ -10,9 +18,13 @@ interface Props {
   noindex?: boolean;
   /** Pages whose content is centred and short (auth, checkout) get a quieter chrome. */
   minimal?: boolean;
+  /** Show the footer's closing call to action (default true). */
+  footerCta?: boolean;
 }
-const { title, description, noindex = false, minimal = false } = Astro.props;
-const canonical = new URL(Astro.url.pathname, Astro.site);
+const { title, description, noindex = false, minimal = false, footerCta = true } = Astro.props;
+// build.format "file" makes pathnames end in .html; the hosts serve clean URLs, so canonicals drop it.
+const cleanPath = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/";
+const canonical = new URL(cleanPath, Astro.site);
 const fullTitle = title === "Heed" ? "Heed: your always-on chief of staff" : `${title} · Heed`;
 const og = new URL("/og.png", Astro.site);
 ---
@@ -25,11 +37,13 @@ const og = new URL("/og.png", Astro.site);
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     {noindex && <meta name="robots" content="noindex" />}
-    <meta name="theme-color" content="#F7F7F5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#16171B" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0B0B1A" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/fraunces-latin-full-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <style is:inline set:html={forcedDark}></style>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Heed" />
     <meta property="og:title" content={fullTitle} />
@@ -39,6 +53,7 @@ const og = new URL("/og.png", Astro.site);
     <meta name="twitter:card" content="summary_large_image" />
     <script is:inline>
       // Apply the saved theme before first paint so there is no flash.
+      document.documentElement.classList.add("js");
       try {
         const t = localStorage.getItem("heed-theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
@@ -51,6 +66,43 @@ const og = new URL("/og.png", Astro.site);
     <main id="main">
       <slot />
     </main>
-    <Footer minimal={minimal} />
+    <Footer minimal={minimal} cta={footerCta} />
+    <script>
+      // Reveal [data-reveal] elements as they scroll into view (rise and fade; fade only under reduced motion).
+      const lazy = document.querySelectorAll<HTMLElement>("[data-bg]");
+      if ("IntersectionObserver" in window) {
+        const near = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("near");
+                near.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "200px 0px" },
+        );
+        lazy.forEach((el) => near.observe(el));
+      } else {
+        lazy.forEach((el) => el.classList.add("near"));
+      }
+      const els = document.querySelectorAll<HTMLElement>("[data-reveal]");
+      if ("IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("in");
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "0px 0px -8% 0px" },
+        );
+        els.forEach((el) => io.observe(el));
+      } else {
+        els.forEach((el) => el.classList.add("in"));
+      }
+    </script>
   </body>
 </html>
