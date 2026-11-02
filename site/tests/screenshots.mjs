@@ -51,7 +51,8 @@ for (const v of VIEWS) {
         }
         window.scrollTo(0, 0);
       });
-      await page.waitForLoadState("networkidle");
+      // Checkout's API call is held open on purpose (to catch the redirect state), so it never goes idle.
+      if (r !== "/checkout") await page.waitForLoadState("networkidle");
       await page.waitForTimeout(900);
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
