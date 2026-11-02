@@ -540,29 +540,45 @@ impl Ingest {
             .map_err(|e| e.to_string())
     }
 
-    /// One pass of the background scheduler: syncs up to `max` due connections.
+    /// One pass of the background scheduler: claims up to `max` due connections (with a lease,
+    /// so other machines skip them) and syncs them, `SYNC_CONCURRENCY` at a time.
     pub async fn run_due(&self, max: i32) -> usize {
-        let due = match self.db.due_connections(max).await {
+        let due = match self.db.claim_due(max, SYNC_LEASE_SECS).await {
             Ok(d) => d,
             Err(e) => {
-                tracing::warn!(%e, "due_connections failed");
+                tracing::warn!(%e, "claiming due connections failed");
                 return 0;
             }
         };
-        let mut n = 0;
+        let gate = Arc::new(tokio::sync::Semaphore::new(SYNC_CONCURRENCY));
+        let mut tasks = tokio::task::JoinSet::new();
         for (user, conn_id) in due {
-            let Ok(conns) = self.db.connections(user).await else {
-                continue;
-            };
-            if let Some(c) = conns.iter().find(|c| c.id == conn_id) {
-                let r = self.sync(user, c).await;
-                tracing::info!(toolkit = %r.toolkit, added = r.added, updated = r.updated, error = ?r.error, "sync");
+            let this = self.clone();
+            let gate = gate.clone();
+            tasks.spawn(async move {
+                let _permit = gate.acquire_owned().await.ok()?;
+                let conns = this.db.connections(user).await.ok()?;
+                let c = conns.iter().find(|c| c.id == conn_id)?;
+                let r = this.sync(user, c).await;
+                crate::ops::METRICS.sync_run(r.error.is_none());
+                tracing::info!(toolkit = %r.toolkit, added = r.added, updated = r.updated, failed = r.error.is_some(), "sync");
+                Some(())
+            });
+        }
+        let mut n = 0;
+        while let Some(r) = tasks.join_next().await {
+            if matches!(r, Ok(Some(()))) {
                 n += 1;
             }
         }
         n
     }
 }
+
+/// How long a claimed connection is reserved for the claiming pass.
+const SYNC_LEASE_SECS: i32 = 15 * 60;
+/// Connections synced at once per machine (each sync is mostly waiting on Composio).
+const SYNC_CONCURRENCY: usize = 4;
 
 #[cfg(test)]
 mod tests {

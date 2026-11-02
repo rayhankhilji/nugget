@@ -205,6 +205,7 @@ impl Gateway {
         req.model = model.clone();
         let res = llm.complete(&req).await?;
         let cost = cost_micros(&model, res.input_tokens, res.output_tokens);
+        crate::ops::METRICS.gateway_cost(cost);
         db.record_usage(
             user,
             UsageKind::Llm,
@@ -236,6 +237,7 @@ impl Gateway {
                 "embedding count or size mismatch".into(),
             ));
         }
+        crate::ops::METRICS.gateway_cost(cost_micros(e.model(), tokens, 0));
         db.record_usage(
             user,
             UsageKind::Embed,

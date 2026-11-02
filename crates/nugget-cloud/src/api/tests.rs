@@ -13,6 +13,8 @@ use super::*;
 use crate::gateway::{Embedder, Llm};
 use crate::testkit::{FakeComposio, FakeEmbedder, FakeLlm, add_user, fakes, test_db};
 
+mod security;
+
 struct Harness {
     app: Router,
     db: crate::db::Db,
@@ -46,7 +48,9 @@ async fn harness(embeddings: bool) -> Option<Harness> {
         configs,
         Some("whsec".into()),
         "nugget://connections/callback".into(),
-    );
+    )
+    // Functional tests run without rate limits; tests/security.rs covers them.
+    .with_limits(crate::ratelimit::Limits::unlimited());
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),
         json!({"messages": [

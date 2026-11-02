@@ -7,7 +7,9 @@
 //! - [`gateway`]: LLM and embedding calls with our keys, metering and quotas.
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
-//! - [`webhook`]: Composio webhook signature check.
+//! - [`webhook`]: Composio webhook signature check and replay guard.
+//! - [`ratelimit`]: per-IP and per-user token buckets.
+//! - [`ops`]: request ids, request logs, metrics, error reports, shutdown.
 
 pub mod api;
 pub mod ask;
@@ -17,6 +19,8 @@ pub mod config;
 pub mod db;
 pub mod gateway;
 pub mod ingest;
+pub mod ops;
+pub mod ratelimit;
 pub mod webhook;
 
 #[cfg(test)]
