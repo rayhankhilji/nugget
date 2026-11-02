@@ -1073,6 +1073,7 @@ mod tests {
             instruction: None,
             provider: None,
             max_tokens: None,
+            mode: Default::default(),
         }
     }
 

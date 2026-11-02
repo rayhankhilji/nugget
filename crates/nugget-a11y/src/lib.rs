@@ -25,6 +25,7 @@ pub mod clipboard;
 pub mod computer;
 pub mod deny;
 pub mod engine;
+pub mod geometry;
 mod platform;
 pub mod role;
 pub mod sanitize;
@@ -38,6 +39,7 @@ pub use computer::{
 };
 pub use deny::{DenyList, DenyRule};
 pub use engine::{A11yConfig, Backend, InsertStrategy, Platform, PlatformWindow};
+pub use geometry::{CaretGeometry, CaretRead, CaretSource, CaretTracker, Rgba, TextStyle};
 #[cfg(target_os = "linux")]
 pub use platform::linux::AtspiPlatform;
 #[cfg(target_os = "macos")]

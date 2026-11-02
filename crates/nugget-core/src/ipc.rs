@@ -1259,6 +1259,27 @@ pub struct DraftRequest {
     pub provider: Option<ProviderId>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// What to write: a reply (the default) or a short continuation at the caret (ghost text).
+    #[serde(default, skip_serializing_if = "DraftMode::is_reply")]
+    pub mode: DraftMode,
+}
+
+/// What a draft writes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DraftMode {
+    /// The reply (or the text for the field), as long as the field kind calls for.
+    #[default]
+    Reply,
+    /// Ghost text: a few words that continue the text at the caret, or the opening of the reply
+    /// when the field is empty. Same gating, grounding, sensitivity rules and post-checks.
+    Continue,
+}
+
+impl DraftMode {
+    pub fn is_reply(&self) -> bool {
+        *self == Self::Reply
+    }
 }
 
 /// Field kinds, decided by rules from the context (never by the model): `email_body`,
@@ -2231,6 +2252,20 @@ pub struct ReminderView {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn draft_mode_defaults_to_reply_and_is_omitted_on_the_wire() {
+        let json = r#"{"context":{"app":{"name":"Slack"},"field":{"role":"text_area"}}}"#;
+        let r: DraftRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(r.mode, DraftMode::Reply);
+        assert!(!serde_json::to_string(&r).unwrap().contains("mode"));
+        let mut c = r.clone();
+        c.mode = DraftMode::Continue;
+        let wire = serde_json::to_string(&c).unwrap();
+        assert!(wire.contains(r#""mode":"continue""#), "{wire}");
+        assert_eq!(serde_json::from_str::<DraftRequest>(&wire).unwrap(), c);
+    }
+
     use super::*;
 
     #[test]

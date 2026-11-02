@@ -9,10 +9,10 @@ use std::ptr::NonNull;
 
 use objc2_application_services::{AXError, AXUIElement, AXValue, AXValueType};
 use objc2_core_foundation::{
-    CFArray, CFBoolean, CFDictionary, CFIndex, CFRange, CFRetained, CFString, CFType, CGPoint,
-    CGRect, CGSize,
+    CFArray, CFAttributedString, CFBoolean, CFDictionary, CFIndex, CFRange, CFRetained, CFString,
+    CFType, CGPoint, CGRect, CGSize,
 };
-use objc2_core_graphics::CGEvent;
+use objc2_core_graphics::{CGColor, CGColorSpace, CGColorSpaceModel, CGEvent};
 
 pub type Ax = CFRetained<AXUIElement>;
 
@@ -255,6 +255,38 @@ pub fn dict_get(t: &CFType, key: &str) -> Option<CFRetained<CFType>> {
     let typed: &CFDictionary<CFString, CFType> =
         unsafe { &*ptr.cast::<CFDictionary<CFString, CFType>>() };
     typed.get(&CFString::from_str(key))
+}
+
+/// The attributes of the first character of an attributed string value
+/// (`AXAttributedStringForRange`), as a dictionary; `None` for anything else or an empty string.
+pub fn attributes_at_start(t: &CFType) -> Option<CFRetained<CFDictionary>> {
+    let s = t.downcast_ref::<CFAttributedString>()?;
+    if s.length() < 1 {
+        return None;
+    }
+    // SAFETY: location 0 is inside the (non-empty) string; CFAttributedStringGetAttributes
+    // accepts a NULL effective-range pointer.
+    unsafe { s.attributes(0, std::ptr::null_mut()) }
+}
+
+/// The components of a `CGColor` in a monochrome (grey, alpha) or RGB (red, green, blue,
+/// alpha) colour space; `None` for other values and colour spaces (CMYK, Lab, patterns...).
+pub fn color_components(t: &CFType) -> Option<Vec<f64>> {
+    let c = t.downcast_ref::<CGColor>()?;
+    let space = CGColor::color_space(Some(c));
+    let model = CGColorSpace::model(space.as_deref());
+    if model != CGColorSpaceModel::Monochrome && model != CGColorSpaceModel::RGB {
+        return None;
+    }
+    let n = CGColor::number_of_components(Some(c));
+    let p = CGColor::components(Some(c));
+    if p.is_null() || !(2..=4).contains(&n) {
+        return None;
+    }
+    // SAFETY: CGColorGetComponents points at `n` CGFloats owned by `c`, which outlives the
+    // slice (copied out before returning). CGFloat is f64 on every 64-bit macOS target.
+    let comps = unsafe { std::slice::from_raw_parts(p, n) };
+    Some(comps.to_vec())
 }
 
 /// Attach UTF-16 text to a keyboard event (`CGEventKeyboardSetUnicodeString`). The system

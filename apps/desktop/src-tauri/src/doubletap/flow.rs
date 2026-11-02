@@ -541,6 +541,7 @@ pub(super) fn draft_request(
         instruction: None,
         provider: provider.map(ProviderId::new),
         max_tokens: None,
+        mode: Default::default(),
     }
 }
 
@@ -1081,6 +1082,7 @@ mod tests {
             provider: Some(ProviderId::new("local")),
             max_tokens: None,
         }
+        mode: Default::default(),
     }
 
     fn rr(base: &str, kind: Refinement) -> RefineRequest {
