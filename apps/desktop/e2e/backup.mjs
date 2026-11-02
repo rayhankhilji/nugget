@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { addCorpusSource, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
-import { check, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, navTo, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
 
 const BACKUP_TIMEOUT_MS = 120_000;
 const PASSPHRASE = "tidewater lantern quarry";
@@ -159,7 +159,7 @@ export async function backupScenario({ browser, bin }) {
         await daemon.stop({ keep: false });
         expect(!fs.existsSync(oldHome), `${oldHome} still exists after the wipe`);
 
-        // A new computer, as far as Nugget can tell: an empty home, its own new key.
+        // A new computer, as far as Heed can tell: an empty home, its own new key.
         daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "backup-nuggetd-2.out.log") });
         bridge.setSocket(daemon.socket);
         log(`backup: empty home ${daemon.home}`);
@@ -182,7 +182,7 @@ export async function backupScenario({ browser, bin }) {
         const done = tPattern("backup.restore.done");
         // The message ends with its Close button.
         const closeSuffix = new RegExp(`\\s*${escapeRe(t("common.close"))}$`);
-        await until("the page says Nugget is running with the backup", async () => {
+        await until("the page says Heed is running with the backup", async () => {
           const failed = await page.locator('section[aria-labelledby="backup-title"] .note-error, dialog .note-error').allTextContents();
           if (failed.length) throw new Error(`restore failed: ${failed.join(" | ")}`);
           const texts = await section.locator("[aria-live] p").allTextContents();
@@ -202,7 +202,7 @@ export async function backupScenario({ browser, bin }) {
       try {
         const hits = await rpc(daemon.socket, "search", { query: QUERY, limit: 10 });
         expect(Array.isArray(hits) && hits.length > 0, `search "${QUERY}" over IPC returned ${JSON.stringify(hits)}`);
-        await page.getByRole("navigation").getByRole("button", { name: t("app.nav.search"), exact: true }).click();
+        await navTo(page, "search");
         const box = page.getByRole("searchbox", { name: t("search.query") });
         await box.fill(QUERY);
         await box.press("Enter");

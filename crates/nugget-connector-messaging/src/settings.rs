@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 /// Shown (verbatim) when macOS privacy protection blocks reading the Messages database.
-pub const FULL_DISK_ACCESS_MESSAGE: &str = "Nugget needs Full Disk Access to read your Messages. \
-Open System Settings → Privacy & Security → Full Disk Access and turn on Nugget, then try again.";
+pub const FULL_DISK_ACCESS_MESSAGE: &str = "Heed needs Full Disk Access to read your Messages. \
+Open System Settings → Privacy & Security → Full Disk Access and turn on Heed, then try again.";
 
 fn default_true() -> bool {
     true

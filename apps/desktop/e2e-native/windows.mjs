@@ -75,7 +75,7 @@ export const windows = {
   },
 
   async overlayWindows() {
-    return (await helper.call("windows Nugget Double Tap")).windows ?? [];
+    return (await helper.call("windows Heed Double Tap")).windows ?? [];
   },
 
   async screenshot(file, rect) {

@@ -1,14 +1,19 @@
-//! `nugget://` deep links and `.nuggetplugin` file associations.
+//! `heed://` deep links and `.nuggetplugin` file associations.
+//!
+//! `heed://` is the scheme the app builds and registers. `nugget://`, the scheme from before the
+//! rename to Heed, is registered and accepted as an alias for every link below, so links already
+//! shared keep working.
 //!
 //! | Link | Does |
 //! |---|---|
-//! | `nugget://open/<page>` | shows that page (`today`, `chat`, `search`, ...) |
-//! | `nugget://search?q=<text>` | opens Search with the text typed in, not run |
-//! | `nugget://item?source=<id>&key=<key>` | asks to open that item in its own app |
-//! | `nugget://ask?q=<text>` | opens the quick-ask box with the question typed, not sent |
+//! | `heed://open/<page>` | shows that page (`today`, `chat`, `search`, ...) |
+//! | `heed://search?q=<text>` | opens Search with the text typed in, not run |
+//! | `heed://item?source=<id>&key=<key>` | asks to open that item in its own app |
+//! | `heed://ask?q=<text>` | opens the quick-ask box with the question typed, not sent |
 //! | a `.nuggetplugin` file | asks to install it, then the usual approval of what it may do |
-//! | `nugget://auth/callback?code=<c>` (or `?error=..&error_description=..`) | finishes a cloud sign-in started in this app |
-//! | `nugget://connections/callback` | Composio is done: shows Connections, which reloads its list |
+//! | `heed://auth/callback?code=<c>` (or `?error=..&error_description=..`) | finishes a cloud sign-in started in this app |
+//! | `heed://connections/callback` | Composio is done: shows Connections, which reloads its list |
+//! | `heed://billing/done` | Stripe Checkout is done: shows Connections, which reloads the plan |
 //!
 //! The sign-in link is never shown to the page: its code is exchanged in Rust (`cloud.rs`), and
 //! only works while a sign-in this app started is pending (10 minutes, once). The page hears
@@ -26,13 +31,13 @@
 //! - macOS: Apple events, through `tauri-plugin-deep-link`'s `on_open_url` (links and opened
 //!   files alike).
 //!
-//! Registration: the bundles declare the scheme and the file type (`tauri.conf.json`:
+//! Registration: the bundles declare both schemes and the file type (`tauri.conf.json`:
 //! `plugins.deep-link` and `bundle.fileAssociations`; Info.plist on macOS, the registry from the
 //! installers on Windows, the desktop file's `MimeType` on Linux). An AppImage, which installs
-//! nothing, registers the scheme for the current user at launch.
+//! nothing, registers the schemes for the current user at launch.
 //!
 //! The main window takes a link with `deeplink_take` (at startup and on each `nugget:deeplink`
-//! event, which carries no payload), so a link that starts Nugget is not lost before the page has
+//! event, which carries no payload), so a link that starts Heed is not lost before the page has
 //! loaded.
 
 use std::path::{Path, PathBuf};
@@ -41,7 +46,12 @@ use std::sync::{Mutex, PoisonError};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-pub const SCHEME: &str = "nugget";
+/// The scheme Heed registers and builds links with.
+pub const SCHEME: &str = "heed";
+/// The scheme from before the rename, still registered and accepted as an alias of [`SCHEME`].
+pub const LEGACY_SCHEME: &str = "nugget";
+/// Every scheme a link may use.
+pub const SCHEMES: &[&str] = &[SCHEME, LEGACY_SCHEME];
 pub const PLUGIN_EXTENSION: &str = "nuggetplugin";
 /// Emitted to the main window when a link is waiting (no payload; see module docs).
 pub const EVENT: &str = "nugget:deeplink";
@@ -55,6 +65,7 @@ const MAX_PLUGIN_BYTES: u64 = 64 * 1024 * 1024;
 /// Pages a link may open (the frontend's `PageId`s).
 pub const PAGES: &[&str] = &[
     "today",
+    "needs",
     "chat",
     "search",
     "knowledge",
@@ -91,6 +102,8 @@ pub enum Link {
     },
     /// Composio sent the browser back after connecting an app.
     Connections,
+    /// The cloud's page after Stripe Checkout sent the browser back.
+    Billing,
     /// Supabase sent the browser back after sign-in. Handled in Rust, never sent to the page.
     #[serde(skip)]
     AuthCallback(nugget_cloud_client::Callback),
@@ -139,14 +152,14 @@ fn reference(value: &str) -> Result<String, String> {
     Ok(value.to_owned())
 }
 
-/// Parse and validate a `nugget://` URL.
+/// Parse and validate a `heed://` (or legacy `nugget://`) URL.
 pub fn parse_url(raw: &str) -> Result<Link, String> {
     if raw.len() > MAX_URL_LEN {
         return Err("link too long".into());
     }
     let url = tauri::Url::parse(raw).map_err(|e| format!("not a link: {e}"))?;
-    if url.scheme() != SCHEME {
-        return Err("not a nugget:// link".into());
+    if !SCHEMES.contains(&url.scheme()) {
+        return Err("not a heed:// link".into());
     }
     if !url.username().is_empty() || url.password().is_some() || url.port().is_some() {
         return Err("unexpected parts in the link".into());
@@ -226,11 +239,21 @@ pub fn parse_url(raw: &str) -> Result<Link, String> {
                 _ => Err("unknown link".into()),
             }
         }
+        "billing" => {
+            only(&[])?;
+            if url.fragment().is_some() {
+                return Err("unexpected parts in the link".into());
+            }
+            match segments.as_slice() {
+                [p] if p == "done" => Ok(Link::Billing),
+                _ => Err("unknown link".into()),
+            }
+        }
         _ => Err("unknown link".into()),
     }
 }
 
-/// Validate a file the OS asked Nugget to open: an existing `.nuggetplugin` regular file, of a
+/// Validate a file the OS asked Heed to open: an existing `.nuggetplugin` regular file, of a
 /// plausible size, as an absolute canonical path.
 pub fn parse_plugin_path(path: &Path) -> Result<Link, String> {
     let ext_ok = path
@@ -272,8 +295,11 @@ pub fn parse_plugin_path(path: &Path) -> Result<Link, String> {
 /// One argument (Windows/Linux launch, or a URL the OS opened on macOS): a link, a file, or
 /// nothing for us. `Some(Err)` is a link or plugin file that failed validation.
 pub fn parse_arg(arg: &str) -> Option<Result<Link, String>> {
-    let lower = arg.get(..SCHEME.len() + 1).map(str::to_ascii_lowercase);
-    if lower.as_deref() == Some("nugget:") {
+    let is_link = SCHEMES.iter().any(|scheme| {
+        arg.get(..scheme.len() + 1)
+            .is_some_and(|p| p.eq_ignore_ascii_case(&format!("{scheme}:")))
+    });
+    if is_link {
         return Some(parse_url(arg));
     }
     if let Some(rest) = arg.strip_prefix("file://") {
@@ -338,13 +364,17 @@ pub fn dispatch(app: &AppHandle, links: Vec<Result<Link, String>>) {
             }
             Ok(link) => {
                 tracing::info!(kind = kind(&link), "opening a link");
-                let connections = link == Link::Connections;
+                let cloud_event = match link {
+                    Link::Connections => Some(crate::cloud::CONNECTIONS_EVENT),
+                    Link::Billing => Some(crate::cloud::BILLING_EVENT),
+                    _ => None,
+                };
                 if let Some(p) = app.try_state::<Pending>() {
                     *p.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(link);
                 }
                 crate::tray::show_main(app, None);
-                if connections {
-                    let _ = app.emit_to("main", crate::cloud::CONNECTIONS_EVENT, ());
+                if let Some(event) = cloud_event {
+                    let _ = app.emit_to("main", event, ());
                 }
                 let _ = app.emit_to("main", EVENT, ());
             }
@@ -361,6 +391,7 @@ fn kind(link: &Link) -> &'static str {
         Link::Ask { .. } => "ask",
         Link::Plugin { .. } => "plugin",
         Link::Connections => "connections",
+        Link::Billing => "billing",
         Link::AuthCallback(_) => "auth_callback",
     }
 }
@@ -395,10 +426,10 @@ pub fn setup(app: &tauri::App) {
     if std::env::var_os("APPIMAGE").is_some() {
         use tauri_plugin_deep_link::DeepLinkExt;
         if let Err(e) = app.deep_link().register_all() {
-            tracing::warn!(error = %e, "couldn't register nugget:// links");
+            tracing::warn!(error = %e, "couldn't register heed:// links");
         }
     }
-    // The first launch's own arguments (a link or file that started Nugget).
+    // The first launch's own arguments (a link or file that started Heed).
     let links = from_args(&launch_args());
     if !links.is_empty() {
         let h = app.handle().clone();
@@ -414,31 +445,31 @@ mod tests {
     #[test]
     fn pages_search_ask_and_items() {
         assert_eq!(
-            parse_url("nugget://open/today"),
+            parse_url("heed://open/today"),
             Ok(Link::Page {
                 page: "today".into()
             })
         );
         assert_eq!(
-            parse_url("nugget://open/status/"),
+            parse_url("heed://open/status/"),
             Ok(Link::Page {
                 page: "status".into()
             })
         );
         assert_eq!(
-            parse_url("nugget://search?q=quarterly%20report"),
+            parse_url("heed://search?q=quarterly%20report"),
             Ok(Link::Search {
                 query: "quarterly report".into()
             })
         );
         assert_eq!(
-            parse_url("nugget://ask?q=When%20is%20my%20flight%3F"),
+            parse_url("heed://ask?q=When%20is%20my%20flight%3F"),
             Ok(Link::Ask {
                 question: "When is my flight?".into()
             })
         );
         assert_eq!(
-            parse_url("nugget://item?source=notes&key=a%2Fb.md"),
+            parse_url("heed://item?source=notes&key=a%2Fb.md"),
             Ok(Link::Item {
                 source: "notes".into(),
                 key: "a/b.md".into()
@@ -450,26 +481,26 @@ mod tests {
     fn everything_else_is_refused() {
         for bad in [
             "https://open/today",
-            "nugget://open/settings",
-            "nugget://open/today/extra",
-            "nugget://open/today?x=1",
-            "nugget://run?q=rm",
-            "nugget://search",
-            "nugget://search?q=%20%20",
-            "nugget://search/x?q=a",
-            "nugget://search?q=a&q=b",
-            "nugget://search?q=a&then=delete",
-            "nugget://user:pw@search?q=a",
-            "nugget://search:8080?q=a",
-            "nugget://item?source=notes",
-            "nugget://item?source=notes&key=a%00b",
+            "heed://open/settings",
+            "heed://open/today/extra",
+            "heed://open/today?x=1",
+            "heed://run?q=rm",
+            "heed://search",
+            "heed://search?q=%20%20",
+            "heed://search/x?q=a",
+            "heed://search?q=a&q=b",
+            "heed://search?q=a&then=delete",
+            "heed://user:pw@search?q=a",
+            "heed://search:8080?q=a",
+            "heed://item?source=notes",
+            "heed://item?source=notes&key=a%00b",
             "not a url",
         ] {
             assert!(parse_url(bad).is_err(), "{bad}");
         }
-        let long = format!("nugget://search?q={}", "a".repeat(MAX_TEXT_LEN + 1));
+        let long = format!("heed://search?q={}", "a".repeat(MAX_TEXT_LEN + 1));
         assert!(parse_url(&long).is_err());
-        let huge = format!("nugget://search?q={}", "a".repeat(MAX_URL_LEN));
+        let huge = format!("heed://search?q={}", "a".repeat(MAX_URL_LEN));
         assert!(parse_url(&huge).is_err());
     }
 
@@ -477,37 +508,52 @@ mod tests {
     fn cloud_callbacks() {
         use nugget_cloud_client::Callback;
         assert_eq!(
-            parse_url("nugget://auth/callback?code=abc-123"),
+            parse_url("heed://auth/callback?code=abc-123"),
             Ok(Link::AuthCallback(Callback::Code("abc-123".into())))
         );
         assert!(matches!(
-            parse_url("nugget://auth/callback?error=access_denied&error_description=Cancelled"),
+            parse_url("heed://auth/callback?error=access_denied&error_description=Cancelled"),
             Ok(Link::AuthCallback(Callback::Error { .. }))
         ));
         assert_eq!(
-            parse_url("nugget://connections/callback?status=success&connectedAccountId=ca_1"),
+            parse_url("heed://connections/callback?status=success&connectedAccountId=ca_1"),
             Ok(Link::Connections)
         );
         assert_eq!(
-            parse_url("nugget://connections/callback"),
+            parse_url("heed://connections/callback"),
             Ok(Link::Connections)
         );
         for bad in [
-            "nugget://auth/callback",
-            "nugget://auth/callback?code=a&redirect=https://x",
-            "nugget://auth/other?code=a",
-            "nugget://user@auth/callback?code=a",
-            "nugget://connections",
-            "nugget://connections/other",
-            "nugget://connections/callback/x",
-            "nugget://connections/callback#x",
-            "nugget://connections:1/callback",
-            "nugget://connections/callback?a=1&a=2",
+            "heed://auth/callback",
+            "heed://auth/callback?code=a&redirect=https://x",
+            "heed://auth/other?code=a",
+            "heed://user@auth/callback?code=a",
+            "heed://connections",
+            "heed://connections/other",
+            "heed://connections/callback/x",
+            "heed://connections/callback#x",
+            "heed://connections:1/callback",
+            "heed://connections/callback?a=1&a=2",
         ] {
             assert!(parse_url(bad).is_err(), "{bad}");
         }
+        assert_eq!(parse_url("nugget://billing/done"), Ok(Link::Billing));
+        assert_eq!(parse_url("nugget://billing/done/"), Ok(Link::Billing));
+        for bad in [
+            "nugget://billing",
+            "nugget://billing/done?session_id=cs_1",
+            "nugget://billing/done#x",
+            "nugget://billing/other",
+            "nugget://billing/done/x",
+        ] {
+            assert!(parse_url(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            serde_json::to_value(Link::Billing).unwrap(),
+            serde_json::json!({ "kind": "billing" })
+        );
         // The page never receives the sign-in code.
-        let link = parse_url("nugget://auth/callback?code=secret").unwrap();
+        let link = parse_url("heed://auth/callback?code=secret").unwrap();
         assert!(serde_json::to_string(&link).is_err());
         assert_eq!(
             serde_json::to_value(Link::Connections).unwrap(),
@@ -518,13 +564,13 @@ mod tests {
     #[test]
     fn invisible_characters_are_dropped_or_refused() {
         assert_eq!(
-            parse_url("nugget://search?q=in%E2%80%AEvoice%E2%80%8B"),
+            parse_url("heed://search?q=in%E2%80%AEvoice%E2%80%8B"),
             Ok(Link::Search {
                 query: "invoice".into()
             })
         );
-        assert!(parse_url("nugget://item?source=s&key=a%E2%80%AEfdp.exe").is_err());
-        assert!(parse_url("nugget://item?source=s%E2%81%A6&key=a").is_err());
+        assert!(parse_url("heed://item?source=s&key=a%E2%80%AEfdp.exe").is_err());
+        assert!(parse_url("heed://item?source=s%E2%81%A6&key=a").is_err());
     }
 
     #[cfg(unix)]
@@ -553,7 +599,7 @@ mod tests {
     #[test]
     fn text_is_one_clean_line() {
         assert_eq!(
-            parse_url("nugget://search?q=a%0Ab%09c"),
+            parse_url("heed://search?q=a%0Ab%09c"),
             Ok(Link::Search {
                 query: "a b c".into()
             })
@@ -596,7 +642,7 @@ mod tests {
             "nugget-desktop",
             "--minimized",
             file.to_str().unwrap(),
-            "nugget://open/chat",
+            "heed://open/chat",
             "/tmp/readme.md",
         ]
         .iter()
@@ -627,7 +673,7 @@ mod tests {
         let theirs = base.join("theirs");
         std::fs::create_dir_all(&theirs).unwrap();
         std::fs::write(theirs.join("p.nuggetplugin"), b"pkg").unwrap();
-        let argv: Vec<String> = ["nugget-desktop", "p.nuggetplugin", "nugget://open/chat"]
+        let argv: Vec<String> = ["nugget-desktop", "p.nuggetplugin", "heed://open/chat"]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -642,5 +688,37 @@ mod tests {
         // No usable working directory: refused, never resolved against this process's.
         assert!(from_args_in(&argv, "")[0].is_err());
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// Links shared before the rename use `nugget://`: every one still parses as its `heed://`
+    /// twin, as an argument too and in any case; other schemes are still refused.
+    #[test]
+    fn legacy_nugget_links_are_an_alias() {
+        for path in [
+            "open/today",
+            "search?q=quarterly%20report",
+            "ask?q=When%20is%20my%20flight%3F",
+            "item?source=notes&key=a%2Fb.md",
+            "auth/callback?code=abc-123",
+            "auth/callback?error=access_denied&error_description=Cancelled",
+            "connections/callback?status=success",
+        ] {
+            let heed = parse_url(&format!("heed://{path}"));
+            assert!(heed.is_ok(), "{path}: {heed:?}");
+            assert_eq!(parse_url(&format!("nugget://{path}")), heed, "{path}");
+            assert_eq!(parse_arg(&format!("NUGGET://{path}")), Some(heed.clone()));
+            assert_eq!(parse_arg(&format!("Heed://{path}")), Some(heed));
+        }
+        for bad in ["nugget://open/settings", "nugget://auth/other?code=a"] {
+            assert!(parse_url(bad).is_err(), "{bad}");
+        }
+        for other in [
+            "heedx://open/today",
+            "nuggets://open/today",
+            "http://open/today",
+        ] {
+            assert!(parse_url(other).is_err(), "{other}");
+        }
+        assert_eq!(parse_arg("heedx://open/today"), None);
     }
 }

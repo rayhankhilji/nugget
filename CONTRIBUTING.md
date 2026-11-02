@@ -1,13 +1,13 @@
-# Contributing to Nugget
+# Contributing to Heed
 
-Nugget is licensed under [Apache-2.0](LICENSE). More detail: the book's
+Heed is licensed under [Apache-2.0](LICENSE). More detail: the book's
 [contributor pages](docs/book/src/contributing/setup.md).
 
 ## Ground rules
 
 ### Developer Certificate of Origin
 
-Nugget uses the [DCO 1.1](https://developercertificate.org/), not a CLA. Signing off certifies
+Heed uses the [DCO 1.1](https://developercertificate.org/), not a CLA. Signing off certifies
 that you wrote the change or have the right to submit it under the project's license. Sign off
 every commit:
 
@@ -22,7 +22,7 @@ under Apache-2.0 (inbound = outbound, section 5 of the license).
 
 ### Clean room
 
-Nugget competes with Sentient OS, which is AGPL-licensed. To keep Nugget cleanly Apache-2.0:
+Heed competes with Sentient OS, which is AGPL-licensed. To keep Heed cleanly Apache-2.0:
 
 - **Never read, copy, translate or paraphrase Sentient OS source code**, including its prompts,
   schemas, tests and distinctive text, not even to "just look at how they did it".

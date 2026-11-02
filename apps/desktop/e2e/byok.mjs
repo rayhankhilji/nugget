@@ -97,6 +97,9 @@ export async function byokScenario({ browser, bin }) {
         await page.goto(`${bridge.url}index.html`);
         await heading("onboarding.welcome.heading").waitFor();
         await cont();
+        // Connect apps comes before the AI step; continue without a source.
+        await heading("onboarding.source.heading").waitFor();
+        await cont();
         await heading("onboarding.ai.heading").waitFor();
         await page.getByRole("radio", { name: startsWith("onboarding.ai.byok") }).check();
 

@@ -2,7 +2,7 @@
 # the installed app, check that the main window appears and that the app connects to the nuggetd
 # sidecar installed next to it, then close the window the way a user would (WM_CLOSE), stop the
 # daemon gracefully (CTRL_BREAK on its console) and uninstall silently.
-# Usage: pwsh packaging/scripts/smoke-windows.ps1 path\to\Nugget_x.y.z_x64-setup.exe
+# Usage: pwsh packaging/scripts/smoke-windows.ps1 path\to\Heed_x.y.z_x64-setup.exe
 #
 # Needs an interactive desktop session (GitHub's windows-* runners have one) and the WebView2
 # runtime. Everything runs against a throwaway NUGGET_HOME and install directory, never the
@@ -12,7 +12,7 @@
 #   SMOKE_ARTIFACTS          copy the logs (and a screenshot) here, pass or fail
 #   SMOKE_CONNECT_TIMEOUT    seconds to wait for "connected to nuggetd" (default 90)
 #   SMOKE_SPAWN_GRACE        seconds to wait for the app to start nuggetd itself (default 30)
-#   SMOKE_QUIT               the "When you quit Nugget" choice to test (platform.json quit_daemon):
+#   SMOKE_QUIT               the "When you quit Heed" choice to test (platform.json quit_daemon):
 #                            stop (default) - quitting stops the nuggetd the app started, cleanly;
 #                            keep - nuggetd outlives the app and stops cleanly on CTRL_BREAK
 param(
@@ -47,7 +47,7 @@ $env:NUGGET_LOG = 'info'
 $env:NO_COLOR = '1'
 # Keep WebView2's profile in the throwaway directory too (Tauri may set its own folder instead).
 $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $work 'webview2'
-# Answer "When you quit Nugget" up front, so quitting doesn't stop to ask (platform.rs). The app's
+# Answer "When you quit Heed" up front, so quitting doesn't stop to ask (platform.rs). The app's
 # config dir is %APPDATA%\dev.nugget.desktop; an existing platform.json is kept and put back.
 $appConfig = Join-Path $env:APPDATA 'dev.nugget.desktop'
 $platformJson = Join-Path $appConfig 'platform.json'
@@ -144,7 +144,7 @@ function Diagnostics {
         [NuggetSmokeWin32]::Windows($script:app.Id) | ForEach-Object { Write-Host $_ }
     }
     Write-Host '================ processes ================'
-    Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'nugget|Nugget|msedgewebview2' } |
+    Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'nugget|Heed|msedgewebview2' } |
         Format-Table ProcessId, ParentProcessId, Name, ExecutablePath -AutoSize | Out-String -Width 250 | Write-Host
     Write-Host '================ install dir ================'
     if (Test-Path -LiteralPath $installDir) { Get-ChildItem -LiteralPath $installDir -Recurse | Select-Object -First 60 FullName, Length | Format-Table | Out-String -Width 250 | Write-Host }
@@ -176,7 +176,7 @@ function Find-Daemons {
 function Main-Window {
     foreach ($w in [NuggetSmokeWin32]::Windows($script:app.Id)) {
         $parts = $w -split "`t", 3
-        if ($parts[1] -eq '1' -and $parts[2] -eq 'Nugget') { return [long]$parts[0] }
+        if ($parts[1] -eq '1' -and $parts[2] -eq 'Heed') { return [long]$parts[0] }
     }
     return $null
 }
@@ -284,11 +284,11 @@ try {
     Log "launched (pid $($script:app.Id))"
 
     if (-not (Wait-Until $windowTimeout 'the main window' { $null -ne (Main-Window) })) {
-        Fail "no visible top-level window titled 'Nugget' within ${windowTimeout}s"
+        Fail "no visible top-level window titled 'Heed' within ${windowTimeout}s"
     }
     $tWindow = Elapsed $tLaunch
     $hwnd = Main-Window
-    Log "window 'Nugget' is up (hwnd $hwnd) after ${tWindow}s"
+    Log "window 'Heed' is up (hwnd $hwnd) after ${tWindow}s"
 
     # ---- daemon: spawned by the app, connected ---------------------------------------------
 
@@ -406,7 +406,7 @@ try {
 
 PASS: Windows NSIS smoke test ($(Split-Path -Leaf $Installer))
   silent install             ${tInstalled}s
-  window 'Nugget' shown      ${tWindow}s after launch
+  window 'Heed' shown      ${tWindow}s after launch
   connected to nuggetd       ${tConnect}s after launch (daemon started by: $startedBy)
   app exit after WM_CLOSE    ${tExit}s (status 0)
   nuggetd stopped            ${tStop}s $stopHow (quit_daemon=$quitMode)

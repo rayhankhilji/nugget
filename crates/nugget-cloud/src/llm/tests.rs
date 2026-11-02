@@ -17,7 +17,8 @@ use uuid::Uuid;
 
 use super::*;
 use crate::gateway::Gateway;
-use crate::testkit::{FakeAuth, Pg, add_user, test_db};
+use crate::plans::Catalog;
+use crate::testkit::{FakeAuth, Pg, add_user, subscriber, test_db, test_prices};
 
 // ---- provider doubles ---------------------------------------------------------------------
 
@@ -178,15 +179,14 @@ async fn harness_with(openai: bool, limits: Limits) -> Option<H> {
     let auth = Arc::new(FakeAuth {
         deleted: Mutex::new(Vec::new()),
     });
-    let app_state = Arc::new(AppState::new(
-        db,
-        auth,
+    let plans = Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap();
+    let gateway = Gateway::new(
         None,
-        Gateway::new(None, None, String::new(), String::new()),
-        Default::default(),
         None,
-        "nugget://connections/callback".into(),
-    ));
+        "claude-haiku-5-5".into(),
+        "claude-sonnet-5-5".into(),
+    );
+    let app_state = Arc::new(AppState::new(db, auth, gateway, Arc::new(plans)));
     let a = Arc::new(Double::default());
     let o = Arc::new(Double::default());
     let a_url = serve_double(a.clone(), "/v1/messages").await;
@@ -275,7 +275,34 @@ async fn usage(pool: &Pg, user: Uuid, want: usize) -> Vec<(String, String, i32, 
     panic!("expected {want} usage rows");
 }
 
+fn entitled(h: &H, plan: &str) -> Entitlements {
+    Entitlements::for_plan(plan, h.state.app.plans.get(plan).unwrap())
+}
+
+fn last_sent(h: &H) -> Value {
+    h.anthropic
+        .requests
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .unwrap()
+        .1
+}
+
 // ---- tests --------------------------------------------------------------------------------
+
+/// No live subscription: 402 with `subscription_required`, nothing sent upstream (the desktop
+/// falls back to local models).
+#[tokio::test]
+async fn a_subscription_is_required() {
+    let Some(h) = harness().await else { return };
+    let u = add_user(&h.pool).await;
+    let (s, v, _) = send_json(&h.app, Some(u), &body(FAST, true)).await;
+    assert_eq!(s, StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(v["error"]["code"], "subscription_required");
+    assert_eq!(h.anthropic.hits.load(Ordering::SeqCst), 0);
+}
 
 #[tokio::test]
 async fn auth_is_required_and_either_header_works() {
@@ -296,7 +323,7 @@ async fn auth_is_required_and_either_header_works() {
     assert_eq!(h.anthropic.hits.load(Ordering::SeqCst), 0);
 
     // `x-api-key` (what a stock Anthropic client sends) is accepted too.
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Json(json!({
         "id": "m", "type": "message", "content": [{"type": "text", "text": "ok"}],
         "usage": {"input_tokens": 5, "output_tokens": 1}
@@ -335,7 +362,7 @@ async fn auth_is_required_and_either_header_works() {
 #[tokio::test]
 async fn requests_are_checked_and_mapped_by_tier_and_plan() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Json(json!({
         "content": [{"type": "text", "text": "ok"}], "usage": {"input_tokens": 5, "output_tokens": 1}
     })));
@@ -359,47 +386,39 @@ async fn requests_are_checked_and_mapped_by_tier_and_plan() {
         "the user's token stays here"
     );
     assert_eq!(
-        sent["model"], "claude-haiku-5-5",
-        "free plan: smart tier on the fast model"
+        sent["model"], "claude-sonnet-5-5",
+        "within the smart allowance"
     );
-    assert_eq!(sent["max_tokens"], 8_192);
+    assert_eq!(sent["max_tokens"], 8_192, "Heed's smart output cap");
     assert!(sent.get("mcp_servers").is_none() && sent.get("service_tier").is_none());
     assert_eq!(sent["system"][0]["cache_control"]["type"], "ephemeral");
     assert_eq!(sent["metadata"]["user_id"], u.to_string());
+    send_json(&h.app, Some(u), &body(FAST, false)).await;
+    assert_eq!(last_sent(&h)["model"], "claude-haiku-5-5");
 
-    // Pro: the smart model. Fresh entitlements need the cache to expire, so use a new user.
-    let pro = add_user(&h.pool).await;
+    // Past the plan's fair-use budget (below the hard cap), smart is served by the fast model.
+    let spent = subscriber(&h.pool, "heed").await;
+    let budget = entitled(&h, "heed").allowance.budget_micros;
     h.pool
         .execute(
-            "update public.profiles set plan = 'pro' where user_id = $1",
-            &[&pro],
+            "insert into public.usage_events (user_id, kind, model, cost_micros) values ($1, 'llm', 'x', $2)",
+            &[&spent, &budget],
         )
         .await
         .unwrap();
-    // A client's own breakpoints are kept as they are.
+    send_json(&h.app, Some(spent), &body(SMART, false)).await;
+    assert_eq!(last_sent(&h)["model"], "claude-haiku-5-5", "downgraded");
+
+    // Heed Max: a larger output cap. A client's own breakpoints are kept as they are.
+    let max = subscriber(&h.pool, "heed_max").await;
     let mut b = body(SMART, false);
+    b["max_tokens"] = json!(1_000_000);
     b["system"] = json!([{"type": "text", "text": "rules"}, {"type": "text", "text": "voice", "cache_control": {"type": "ephemeral"}}]);
-    send_json(&h.app, Some(pro), &b).await;
-    let (_, sent) = h
-        .anthropic
-        .requests
-        .lock()
-        .unwrap()
-        .last()
-        .cloned()
-        .unwrap();
+    send_json(&h.app, Some(max), &b).await;
+    let sent = last_sent(&h);
     assert_eq!(sent["model"], "claude-sonnet-5-5");
+    assert_eq!(sent["max_tokens"], 32_000);
     assert!(sent["system"][0].get("cache_control").is_none());
-    send_json(&h.app, Some(pro), &body(FAST, false)).await;
-    let (_, sent) = h
-        .anthropic
-        .requests
-        .lock()
-        .unwrap()
-        .last()
-        .cloned()
-        .unwrap();
-    assert_eq!(sent["model"], "claude-haiku-5-5");
 
     // Refused before anything is sent upstream.
     let hits = h.anthropic.hits.load(Ordering::SeqCst);
@@ -445,7 +464,7 @@ async fn oversized_requests_are_refused() {
     let Some(h) = harness_with(false, limits).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let mut b = body(FAST, true);
     b["messages"][0]["content"] = json!("x".repeat(10_000));
     let (s, v, _) = send_json(&h.app, Some(u), &b).await;
@@ -458,7 +477,7 @@ async fn oversized_requests_are_refused() {
 #[tokio::test]
 async fn streams_are_relayed_and_metered() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let chunks = anthropic_stream(&["get", " back", " to you"], 1_000, 4_000, 6);
     let expected: String = chunks.concat();
     *h.anthropic.script.lock().unwrap() = Some(streaming(chunks));
@@ -478,11 +497,11 @@ async fn streams_are_relayed_and_metered() {
 #[tokio::test]
 async fn quota_is_enforced_from_usage_events() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     h.pool
         .execute(
             "insert into public.usage_events (user_id, kind, model, cost_micros) values ($1, 'llm', 'x', $2)",
-            &[&u, &Entitlements::for_plan(crate::gateway::Plan::Free).quota_micros],
+            &[&u, &entitled(&h, "heed").allowance.hard_cap_micros],
         )
         .await
         .unwrap();
@@ -493,8 +512,8 @@ async fn quota_is_enforced_from_usage_events() {
     assert_eq!(h.anthropic.hits.load(Ordering::SeqCst), 0);
 
     // Costs metered within the cache window count at once.
-    let v2 = add_user(&h.pool).await;
-    let quota = Entitlements::for_plan(crate::gateway::Plan::Free).quota_micros;
+    let v2 = subscriber(&h.pool, "heed").await;
+    let quota = entitled(&h, "heed").allowance.hard_cap_micros;
     h.pool
         .execute(
             "insert into public.usage_events (user_id, kind, model, cost_micros) values ($1, 'llm', 'x', $2)",
@@ -513,14 +532,14 @@ async fn quota_is_enforced_from_usage_events() {
 #[tokio::test]
 async fn concurrent_streams_per_user_are_capped() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
         wait: Duration::ZERO,
         chunks: anthropic_stream(&["a"], 10, 0, 1)[..1].to_vec(),
         gap: Duration::ZERO,
         hang: true,
     });
-    let max = Entitlements::for_plan(crate::gateway::Plan::Free).max_concurrent;
+    let max = entitled(&h, "heed").max_concurrent;
     let mut open = Vec::new();
     for _ in 0..max {
         let res = h
@@ -544,7 +563,7 @@ async fn concurrent_streams_per_user_are_capped() {
 #[tokio::test]
 async fn client_disconnect_cancels_upstream_and_meters() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let mut chunks = anthropic_stream(&["one two three"], 500, 0, 99);
     chunks.truncate(3); // start, block start, one delta; then the provider keeps going
     *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
@@ -585,7 +604,7 @@ async fn client_disconnect_cancels_upstream_and_meters() {
 #[tokio::test]
 async fn provider_failures_map_safely() {
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     // Our key refused: a 502, never a 401 that would sign the user out.
     *h.anthropic.script.lock().unwrap() = Some(Script::Status(
         401,
@@ -627,7 +646,7 @@ async fn falls_back_to_openai_translated() {
     let Some(h) = harness_with(true, Limits::default()).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Status(529, json!({})));
     let data = |v: Value| format!("data: {v}\n\n");
     *h.openai.script.lock().unwrap() = Some(streaming(vec![
@@ -674,7 +693,7 @@ async fn timeouts_end_requests() {
     let Some(h) = harness_with(false, limits).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
         wait: Duration::from_secs(5),
         chunks: vec![],
@@ -742,7 +761,7 @@ async fn prompts_are_never_logged() {
     let Some(h) = harness_with(true, Limits::default()).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(Script::Status(
         400,
         json!({"type": "error", "error": {"type": "invalid_request_error", "message": "PROVIDER-ECHO-SECRET"}}),
@@ -780,7 +799,7 @@ async fn desktop_provider_end_to_end_time_to_first_token() {
     use nugget_infer::{ChatEvent, ChatRequest, Message};
 
     let Some(h) = harness().await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     *h.anthropic.script.lock().unwrap() = Some(streaming(anthropic_stream(
         &[" get", " back to you"],
         40,

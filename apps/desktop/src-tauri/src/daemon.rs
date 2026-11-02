@@ -61,13 +61,13 @@ pub struct ConnectionInfo {
 /// Error returned by every command. Serialized as `{ kind, message, code }` for `api.ts`.
 #[derive(Debug, thiserror::Error)]
 pub enum CmdError {
-    #[error("Nugget isn't running: {0}")]
+    #[error("Heed isn't running: {0}")]
     NotRunning(String),
-    #[error("lost the connection to Nugget")]
+    #[error("lost the connection to Heed")]
     Disconnected,
     #[error("{message}")]
     Rpc { code: i64, message: String },
-    #[error("unexpected response from Nugget: {0}")]
+    #[error("unexpected response from Heed: {0}")]
     Protocol(String),
     #[error("{0}")]
     Spawn(String),
@@ -369,7 +369,7 @@ impl Daemon {
         }
         let exe = find_nuggetd().ok_or_else(|| {
             CmdError::Spawn(
-                "Couldn't find nuggetd next to the app or on PATH. Reinstall Nugget, or start nuggetd yourself."
+                "Couldn't find nuggetd next to the app or on PATH. Reinstall Heed, or start nuggetd yourself."
                     .into(),
             )
         })?;

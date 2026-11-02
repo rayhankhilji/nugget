@@ -88,7 +88,7 @@ describe("BackupSettings", () => {
     await click(byText(s, "button", "Restore…"));
     const d = document.querySelector("dialog")!;
     expect(d.querySelector("h2")?.textContent).toBe("Restore this backup?");
-    expect(d.textContent).toContain("Your current data is set aside in Nugget's data folder, not deleted.");
+    expect(d.textContent).toContain("Your current data is set aside in Heed's data folder, not deleted.");
     await type(field(d, "Backup passphrase"), "correct horse battery");
     await click(byText(d, "button", "Restore and restart"));
     await flush(10);
@@ -97,7 +97,7 @@ describe("BackupSettings", () => {
     expect(order.indexOf("backup_restore")).toBeLessThan(order.indexOf("start_daemon"));
     expect(order.filter((c) => c === "start_daemon")).toHaveLength(1);
     expect(document.querySelector("dialog")).toBeNull();
-    expect(s.textContent).toMatch(/Restored\. Nugget is running with the backup from /);
+    expect(s.textContent).toMatch(/Restored\. Heed is running with the backup from /);
   });
 });
 
@@ -120,8 +120,8 @@ describe("RecoveryBanner", () => {
     });
     const { container } = await render(<RecoveryBanner />);
     const alert = container.querySelector('[role="alert"]')!;
-    expect(alert.textContent).toContain("Nugget found its database damaged");
-    expect(alert.textContent).toContain("Nugget has not written to it");
+    expect(alert.textContent).toContain("Heed found its database damaged");
+    expect(alert.textContent).toContain("Heed has not written to it");
     expect(alert.querySelector("code")?.textContent).toBe("/home/me/.nugget/data/nugget.db.damaged-20261030");
     expect(alert.textContent).toContain("database disk image is malformed");
 

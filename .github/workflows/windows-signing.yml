@@ -48,7 +48,7 @@ jobs:
       - name: Throwaway code-signing certificate
         shell: pwsh
         run: |
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Nugget signing test (throwaway)' `
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Heed signing test (throwaway)' `
             -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -KeyAlgorithm RSA -KeyLength 3072 `
             -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
           "NUGGET_TEST_CERT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -134,7 +134,7 @@ jobs:
           $r = Invoke-Sign 'azure dry run, client secret' ($ats + $fakeApp + @{ AZURE_CLIENT_SECRET = $canary; NUGGET_SIGN_DRY_RUN = '1' }) @($exe)
           Check 'azure dry run exits 0' ($r.Code -eq 0)
           $line = ($r.Out -split "`r?`n" | Where-Object { $_ -match 'would run: ' } | Select-Object -First 1)
-          $want = "sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /d Nugget /dlib $dlib /dmdf "
+          $want = "sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /d Heed /dlib $dlib /dmdf "
           Check 'azure command line' ($line -and $line.Contains($want) -and $line.EndsWith($exe) -and $line -match 'signtool\.exe')
           $md = Metadata $r.Out
           Check 'azure metadata fields' ($md -and $md.Endpoint -eq 'https://eus.codesigning.azure.net' -and
@@ -303,7 +303,7 @@ jobs:
       - name: Throwaway code-signing certificate
         shell: pwsh
         run: |
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Nugget signing test (throwaway)' `
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Heed signing test (throwaway)' `
             -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -KeyAlgorithm RSA -KeyLength 3072 `
             -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
           "NUGGET_TEST_CERT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

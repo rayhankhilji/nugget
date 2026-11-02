@@ -1,12 +1,13 @@
 /**
- * Today: the morning brief and the card inbox. Each card says why it is here (top score
+ * Home and Needs you share this file. Home: the ask composer and the morning brief. Needs you:
+ * the card inbox as a list with a reading pane. Each card says why it is here (top score
  * factors, evidence citations) and offers accept / dismiss (with a reason) / snooze, plus
  * actions that run only after a dry-run preview is approved (see `today/ActionDialog`).
  *
  * Everything a card shows comes from indexed mail, calendars and notes: it is rendered as plain
  * text, and links are offered only for `https:` (opened by the OS, never in the webview).
  */
-import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   api,
   DISMISS_REASONS,
@@ -26,12 +27,14 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
+import { requestPage } from "../hooks.nav";
 import { formatDatesInText, formatRelative, formatTime } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
+import { HomeComposer } from "./today/HomeComposer";
 import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
   SNOOZE_CHOICES,
@@ -59,8 +62,23 @@ const ACTION_LABEL: Record<string, MessageKey> = {
   research_note: "today.actionKind.research_note",
 };
 
-export function TodayPage() {
+export function HomePage() {
+  return <TodayPage view="home" />;
+}
+
+export function NeedsPage() {
+  return <TodayPage view="needs" />;
+}
+
+function greetingKey(hour: number): MessageKey {
+  if (hour < 12) return "home.greeting.morning";
+  if (hour < 18) return "home.greeting.afternoon";
+  return "home.greeting.evening";
+}
+
+function TodayPage({ view }: { view: "home" | "needs" }) {
   const t = useT();
+  const now = useNow();
   const cards = useAsync(() => proactiveApi.cardsList({}), []);
   const brief = useAsync(() => proactiveApi.briefGet(), []);
   const metrics = useAsync(() => proactiveApi.metrics(), []);
@@ -101,12 +119,13 @@ export function TodayPage() {
 
   // Mark newly displayed cards as seen, once per card.
   useEffect(() => {
+    if (view !== "needs") return;
     for (const c of cards.data?.cards ?? []) {
       if (c.state !== "new" || seen.current.has(c.id)) continue;
       seen.current.add(c.id);
       proactiveApi.cardsFeedback({ card_id: c.id, feedback: "seen" }).catch(() => {});
     }
-  }, [cards.data]);
+  }, [cards.data, view]);
 
   const refresh = async () => {
     // Busy is aria-disabled, not disabled, so the button keeps keyboard focus while it refreshes.
@@ -155,19 +174,43 @@ export function TodayPage() {
   // Cards in the inbox (shown, or just acted on and hidden until the next list): not repeated in the brief.
   const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden, ...acted]), [list, hidden, acted]);
   const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = visible.find((c) => c.id === selectedId) ?? visible[0];
+  const refreshButton = (
+    <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={disabled} aria-disabled={refreshing || undefined}>
+      {refreshing ? <Spinner label={t("today.refreshing")} /> : t("today.refresh")}
+    </button>
+  );
+
+  if (view === "home")
+    return (
+      <SourcesContext.Provider value={sourceMap}>
+        <div className="page page-home">
+          <PageHeader title={t(greetingKey(new Date(now).getHours()))} description={t("home.description")} actions={refreshButton} />
+          <ErrorNote error={refreshError} />
+          <HomeComposer />
+          {disabled ? (
+            <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
+          ) : (
+            <>
+              {visible.length > 0 && (
+                <p className="home-needs">
+                  <button type="button" className="btn btn-ghost btn-small" onClick={() => requestPage("needs")}>
+                    {t("home.needsYou", { count: visible.length })}
+                  </button>
+                </p>
+              )}
+              <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} inbox={visible.length} />
+            </>
+          )}
+        </div>
+      </SourcesContext.Provider>
+    );
 
   return (
     <SourcesContext.Provider value={sourceMap}>
-    <div className="page">
-      <PageHeader
-        title={t("today.title")}
-        description={t("today.description")}
-        actions={
-          <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={disabled} aria-disabled={refreshing || undefined}>
-            {refreshing ? <Spinner label={t("today.refreshing")} /> : t("today.refresh")}
-          </button>
-        }
-      />
+    <div className="page page-needs">
+      <PageHeader title={t("today.inbox")} description={t("needs.description")} actions={refreshButton} />
       <ErrorNote error={refreshError} />
       <p className="visually-hidden" role="status" aria-live="polite">
         {status}
@@ -177,11 +220,9 @@ export function TodayPage() {
         <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
       ) : (
         <>
-          <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} inbox={visible.length} />
-
-          <h2 id="today-inbox" ref={inboxRef} tabIndex={-1}>
+          <h2 id="today-inbox" className="visually-hidden" ref={inboxRef} tabIndex={-1}>
             {t("today.inbox")}
-            {list && visible.length > 0 && <span className="muted"> · {formatNumber(visible.length)}</span>}
+            {list && visible.length > 0 && <span> · {formatNumber(visible.length)}</span>}
           </h2>
           <ErrorNote error={cards.error} onRetry={cards.reload} />
           {cards.loading && !list && <Loading label={t("today.loading")} lines={3} />}
@@ -193,9 +234,11 @@ export function TodayPage() {
             ) : (
               <EmptyState title={t("today.emptyTitle")}>{t("today.emptyBody")}</EmptyState>
             ))}
-          {visible.length > 0 && (
-            <ul className="today-cards" aria-labelledby="today-inbox">
-              {visible.map((c) => (
+          {visible.length > 0 && selected && (
+            <div className="needs-split">
+              <InboxList cards={visible} selected={selected.id} onSelect={setSelectedId} />
+            <ul className="today-cards needs-pane" aria-labelledby="today-inbox">
+              {[selected].map((c) => (
                 <CardItem
                   key={c.id}
                   card={c}
@@ -212,6 +255,7 @@ export function TodayPage() {
                 />
               ))}
             </ul>
+            </div>
           )}
           {metrics.data &&
             // A rate means something only once a card has been accepted or dismissed.
@@ -249,6 +293,46 @@ export function TodayPage() {
       )}
     </div>
     </SourcesContext.Provider>
+  );
+}
+
+// ---- inbox list ----
+
+/** The cards as a dense list; the selected one opens in the pane beside it. Arrow keys move. */
+function InboxList({ cards, selected, onSelect }: { cards: CardView[]; selected: string; onSelect: (id: string) => void }) {
+  const t = useT();
+  const now = useNow();
+  const onKey = (e: KeyboardEvent<HTMLUListElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    e.preventDefault();
+    const i = cards.findIndex((c) => c.id === selected);
+    const next = cards[(i + (e.key === "ArrowDown" ? 1 : cards.length - 1)) % cards.length];
+    if (!next) return;
+    onSelect(next.id);
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-card="${CSS.escape(next.id)}"]`)?.focus();
+  };
+  return (
+    <ul className="needs-list" aria-label={t("needs.listLabel")} onKeyDown={onKey}>
+      {cards.map((c) => (
+        <li key={c.id}>
+          <button type="button" className="needs-item" data-card={c.id} aria-current={c.id === selected ? "true" : undefined} onClick={() => onSelect(c.id)}>
+            {c.state === "new" && <span className="needs-dot" aria-label={t("today.new")} />}
+            <span className="needs-item-kind">
+              {cardKindLabel(c.kind)}
+              {c.due && <> · {formatRelative(c.due, now)}</>}
+            </span>
+            <span className="needs-item-title" dir="auto">
+              {localText(c.title_text, c.title)}
+            </span>
+            {c.summary && (
+              <span className="needs-item-summary" dir="auto">
+                {c.summary}
+              </span>
+            )}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -1,7 +1,7 @@
 // Search on the indexed home: filters with counts, a saved search run again from the palette,
 // a result's preview, and a person's timeline from Knowledge (search.faceted/.preview/.timeline).
 import { startBridge } from "./bridge.mjs";
-import { check, DIST, expect, newContext, t, until } from "./harness.mjs";
+import { check, DIST, expect, navTo, newContext, t, until } from "./harness.mjs";
 
 const MOD = process.platform === "darwin" ? "Meta" : "Control";
 const QUERY = "budget";
@@ -23,8 +23,7 @@ export async function searchScenario({ browser, socket }) {
 
   // Through the sidebar, like a person would (the app keeps its state; nothing reloads).
   const openPage = async (id) => {
-    await page.locator("nav .nav-item", { hasText: t(`app.nav.${id}`) }).first().click();
-    await page.locator(`main[aria-label="${t(`app.nav.${id}`)}"]`).waitFor();
+    await navTo(page, id);
     await page.locator("main h1").first().waitFor();
   };
 
@@ -37,7 +36,7 @@ export async function searchScenario({ browser, socket }) {
     const box = page.getByRole("searchbox", { name: t("search.query") });
     await box.waitFor();
 
-    await check("search: a nugget://search link types the query in and waits for Enter", async () => {
+    await check("search: a heed://search link types the query in and waits for Enter", async () => {
       bridge.queueDeepLink({ kind: "search", query: QUERY });
       await page.evaluate(() => window.__E2E_EMIT__("nugget:deeplink", null));
       await until("the link's query is typed in", async () => [(await box.inputValue()) === QUERY]);

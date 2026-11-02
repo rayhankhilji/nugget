@@ -1,12 +1,12 @@
-; NSIS installer hooks for Nugget (wired in apps/desktop/src-tauri/tauri.conf.json,
+; NSIS installer hooks for Heed (wired in apps/desktop/src-tauri/tauri.conf.json,
 ; bundle.windows.nsis.installerHooks). Tauri inserts these macros into its installer template.
 ;
 ; The installer never registers anything to run at login on its own: that is the user's choice,
-; made in the app ("Start Nugget at login"), which runs `nuggetd install-service` and creates
+; made in the app ("Start Heed at login"), which runs `nuggetd install-service` and creates
 ; the per-user scheduled task "Nugget Daemon". These hooks only keep that task consistent with
 ; the files on disk.
 ;
-; Uninstalling also offers to remove Nugget's data (models, store, settings, logs, saved keys) and,
+; Uninstalling also offers to remove Heed's data (models, store, settings, logs, saved keys) and,
 ; separately, the vault: see uninstall-data.nsh, which adds that page. Updates never remove data.
 
 !include "${__FILEDIR__}\uninstall-data.nsh"
@@ -31,8 +31,8 @@
   ${If} $UpdateMode <> 1
     nsExec::Exec '"$INSTDIR\nuggetd.exe" uninstall-service'
     Pop $0
-    ; The app's own "Open Nugget in the tray when I log in" entry (autostart.rs). Tauri's
-    ; uninstaller only removes a Run value named after the product, "Nugget".
+    ; The app's own "Open Heed in the tray when I log in" entry (autostart.rs). Tauri's
+    ; uninstaller only removes a Run value named after the product, "Heed".
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "NuggetDesktop"
   ${EndIf}
   nsExec::Exec 'taskkill /F /IM nuggetd.exe'
@@ -46,7 +46,7 @@
   ${ElseIf} $NuggetPageShown <> 1
     Call un.NuggetReadFlags
   ${EndIf}
-  ; Removing Nugget's data includes the app's own dev.nugget.desktop folders, which is what
+  ; Removing Heed's data includes the app's own dev.nugget.desktop folders, which is what
   ; Tauri's "Delete the application data" box removes; turn it on so both agree.
   ${If} $NuggetRemoveData = 1
     StrCpy $DeleteAppDataCheckboxState 1

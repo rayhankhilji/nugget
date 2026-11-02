@@ -10,7 +10,7 @@ Work is grouped into **tiers**, and each provider you configure says which tiers
 | `agentic` | Tool-using agent loops and computer use | Any provider you assign |
 | `embedding` | Vectors for semantic search | **Local or LAN only** unless you opt in |
 
-## Option 1: fully local, managed by Nugget (recommended)
+## Option 1: fully local, managed by Heed (recommended)
 
 On the **Models** page, install the recommended models (all Apache-2.0). They come from a signed
 manifest that pins each file's size and SHA-256, and are verified before install.
@@ -23,7 +23,7 @@ manifest that pins each file's size and SHA-256, and are verified before install
 | `nomic-embed-text-v2-moe-q8` | embedding (multilingual; the pick for new indexes) | 512 MB | 4 GB |
 | `bge-reranker-v2-m3-q4km` | rerank | 438 MB | 4 GB |
 
-Nugget also downloads a verified llama.cpp `llama-server` for your hardware and runs it on
+Heed also downloads a verified llama.cpp `llama-server` for your hardware and runs it on
 `127.0.0.1` as the providers `local-chat` and `local-embedding`. Servers stop after 30 idle minutes
 and restart on demand ([`[runtime]`](../reference/config.md#runtime)); **Status** shows when a model
 is warming up or needs a **Retry** (see
@@ -47,7 +47,7 @@ Optional. Install `bge-reranker-v2-m3-q4km`, then:
 rerank_model = "bge-reranker-v2-m3-q4km"
 ```
 
-Nugget runs a third server, `local-rerank`, and search reranks its top candidates with it. To use a
+Heed runs a third server, `local-rerank`, and search reranks its top candidates with it. To use a
 reranker you run yourself, see [`[retrieve.reranker]`](../reference/config.md#retrievereranker).
 
 ## Option 2: your own local server

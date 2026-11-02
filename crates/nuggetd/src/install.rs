@@ -39,7 +39,7 @@ impl App {
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub app: App,
-    /// Client name shown in Nugget (default: the app's name).
+    /// Client name shown in Heed (default: the app's name).
     pub name: Option<String>,
     /// Config file to merge into instead of the app's default location.
     pub config: Option<PathBuf>,
@@ -209,12 +209,12 @@ pub async fn install(paths: &Paths, opts: InstallOptions) -> Result<String> {
     };
     let plan = match &target {
         Some(p) => format!(
-            "Create a Nugget MCP client for {} and add the `{SERVER_KEY}` server to {} (other servers are kept; a backup is made).",
+            "Create a Heed MCP client for {} and add the `{SERVER_KEY}` server to {} (other servers are kept; a backup is made).",
             app.display(),
             p.display()
         ),
         None => format!(
-            "Create a Nugget MCP client for {} and print the `claude mcp add` command to run.",
+            "Create a Heed MCP client for {} and print the `claude mcp add` command to run.",
             app.display()
         ),
     };
@@ -260,7 +260,7 @@ pub async fn install(paths: &Paths, opts: InstallOptions) -> Result<String> {
 
     let Some(path) = target else {
         return Ok(format!(
-            "Created MCP client {} ({}). Run this command to add Nugget to Claude Code \
+            "Created MCP client {} ({}). Run this command to add Heed to Claude Code \
              (it contains the client's token; keep it private):\n\n{}\n",
             created.client.id, created.client.name, snippet.text
         ));
@@ -299,7 +299,7 @@ pub async fn install(paths: &Paths, opts: InstallOptions) -> Result<String> {
         }
     }
     out.push_str(&format!(
-        "\nRestart {} to connect. Manage access in Nugget under Connected AI apps.\n",
+        "\nRestart {} to connect. Manage access in Heed under Connected AI apps.\n",
         app.display()
     ));
     Ok(out)

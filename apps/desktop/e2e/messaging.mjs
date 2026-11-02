@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { rpc, startDaemon } from "./daemon.mjs";
-import { check, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, KEEP, newContext, OUT, shot, stopDaemon, t, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, navTo, expect, INDEX_TIMEOUT_MS, KEEP, newContext, OUT, shot, stopDaemon, t, until } from "./harness.mjs";
 
 const PHRASE = "periwinkle lighthouse";
 
@@ -82,7 +82,7 @@ export async function messagingScenario({ browser, bin }) {
           const { items } = await whatsappItems();
           return [items >= 1, items];
         }, INDEX_TIMEOUT_MS);
-        await page.getByRole("navigation").getByRole("button", { name: t("app.nav.search"), exact: true }).click();
+        await navTo(page, "search");
         const box = page.getByRole("searchbox", { name: t("search.query") });
         await box.fill(PHRASE);
         await box.press("Enter");

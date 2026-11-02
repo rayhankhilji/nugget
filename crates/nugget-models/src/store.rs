@@ -217,7 +217,7 @@ impl ModelStore {
         entry.validate()?;
         if !entry.compatible_with(&self.app_version) {
             return Err(Error::Unsupported(format!(
-                "model `{}` needs Nugget >= {} (this is {})",
+                "model `{}` needs Heed >= {} (this is {})",
                 entry.id, entry.min_app_version, self.app_version
             )));
         }

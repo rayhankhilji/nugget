@@ -24,7 +24,7 @@ pub mod code {
     pub const DISK_FULL: &str = "disk_full";
     /// A finished scan found nothing this source can index.
     pub const NOTHING_INDEXABLE: &str = "nothing_indexable";
-    /// A folder exists but Nugget is not allowed to open it.
+    /// A folder exists but Heed is not allowed to open it.
     pub const UNREADABLE: &str = "unreadable";
 }
 
@@ -100,7 +100,7 @@ fn reconnect(kind: &str, service: &str) -> Diagnosis {
     (
         code::RECONNECT,
         format!(
-            "{} stopped accepting Nugget's sign-in, so syncing is paused.",
+            "{} stopped accepting Heed's sign-in, so syncing is paused.",
             cap(service)
         ),
         reconnect_fix(kind, service),
@@ -123,7 +123,7 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
         return (
             code::CONFIG,
             format!(
-                "{} rejected the app registration Nugget signs in with.",
+                "{} rejected the app registration Heed signs in with.",
                 cap(service)
             ),
             "Check the client ID (and secret) in the source's settings, and that the API is \
@@ -153,7 +153,7 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
     {
         return (
             code::DISK_FULL,
-            "This computer is out of disk space, so Nugget cannot store more.".into(),
+            "This computer is out of disk space, so Heed cannot store more.".into(),
             "Free up disk space; syncing resumes on its own.".into(),
         );
     }
@@ -168,10 +168,10 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
         return (
             code::RATE_LIMITED,
             format!(
-                "{} asked Nugget to slow down (rate limit or daily quota).",
+                "{} asked Heed to slow down (rate limit or daily quota).",
                 cap(service)
             ),
-            "Nothing to do: Nugget waits and resumes where it stopped.".into(),
+            "Nothing to do: Heed waits and resumes where it stopped.".into(),
         );
     }
     if lower.contains("exceeds") && has(&["bytes", "size"]) {
@@ -179,7 +179,7 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
         // cap on a listing or page, and retrying will not help.
         return (
             code::TOO_LARGE,
-            format!("A response from {service} was larger than Nugget's size limit, so the sync is stuck."),
+            format!("A response from {service} was larger than Heed's size limit, so the sync is stuck."),
             "Please report this (Troubleshooting in the docs); removing the oversized item from the source also unblocks it."
                 .into(),
         );
@@ -197,13 +197,13 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
                     "{} is having trouble right now (server error).",
                     cap(service)
                 ),
-                "Nothing to do: Nugget retries with backoff and resumes where it stopped.".into(),
+                "Nothing to do: Heed retries with backoff and resumes where it stopped.".into(),
             );
         }
         return (
             code::OFFLINE,
-            format!("Nugget could not reach {service}."),
-            "Check your internet connection, VPN or proxy; Nugget retries automatically.".into(),
+            format!("Heed could not reach {service}."),
+            "Check your internet connection, VPN or proxy; Heed retries automatically.".into(),
         );
     }
     if lower.starts_with("not found")
@@ -223,8 +223,8 @@ fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
     ]) {
         return (
             code::CONFIG,
-            "Nugget is not allowed to read part of this source.".into(),
-            "Give Nugget access (on macOS: System Settings → Privacy & Security → Full Disk \
+            "Heed is not allowed to read part of this source.".into(),
+            "Give Heed access (on macOS: System Settings → Privacy & Security → Full Disk \
              Access), or remove that folder from the source."
                 .into(),
         );

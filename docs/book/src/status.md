@@ -1,6 +1,6 @@
 # What works today
 
-Nugget is pre-release. **No release has been cut**: [build from source](guide/install.md#build-from-source)
+Heed is pre-release. **No release has been cut**: [build from source](guide/install.md#build-from-source)
 or use the unsigned installers from a release dry run. This page summarises
 [`docs/PLAN.md`](https://github.com/rayhankhilji/nugget/blob/main/docs/PLAN.md), which lists every
 open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md);
@@ -27,7 +27,7 @@ open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilj
   onboarding, a real-model computer-use run.
 - **Privacy with a cloud provider:** an Ask follow-up can forward earlier answers unscanned; Double Tap
   sent texts are readable by MCP clients and cloud Ask.
-- **MCP:** an HTTP client can send its token to a program that took Nugget's port while `nuggetd` was
+- **MCP:** an HTTP client can send its token to a program that took Heed's port while `nuggetd` was
   down (mitigated, not fixed); the stdio bridge avoids it.
 - **Knowledge:** vault edits can be overwritten by re-extraction.
 - **Wayland:** the Double Tap shortcut is verified via the portal on KDE Plasma 6 and GNOME 50 only.

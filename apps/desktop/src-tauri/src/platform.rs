@@ -71,7 +71,7 @@ impl Default for NotifySettings {
     }
 }
 
-/// what quitting Nugget does to the `nuggetd` this app started (never to one run as a
+/// what quitting Heed does to the `nuggetd` this app started (never to one run as a
 /// login service or started by hand, see `lifecycle`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -142,9 +142,9 @@ pub fn save(path: &Path, settings: &PlatformSettings) -> std::io::Result<()> {
 /// Every string the shell draws itself, with its English default. Keys match the frontend
 /// catalog keys (`shell.*` in `en.json`).
 pub const LABELS: &[(&str, &str)] = &[
-    ("shell.tray.running", "Nugget is running"),
-    ("shell.tray.notRunning", "Nugget isn't running"),
-    ("shell.tray.checking", "Nugget: checking…"),
+    ("shell.tray.running", "Heed is running"),
+    ("shell.tray.notRunning", "Heed isn't running"),
+    ("shell.tray.checking", "Heed: checking…"),
     ("shell.tray.indexing", "Indexing…"),
     ("shell.tray.indexed", "Index up to date"),
     ("shell.tray.indexPaused", "Indexing paused"),
@@ -159,14 +159,14 @@ pub const LABELS: &[(&str, &str)] = &[
     ("shell.tray.resume", "Resume indexing"),
     ("shell.tray.stopAgents", "Stop all agents"),
     ("shell.tray.resumeAgents", "Resume agents"),
-    ("shell.tray.open", "Open Nugget"),
+    ("shell.tray.open", "Open Heed"),
     ("shell.tray.status", "Status"),
     ("shell.tray.updates", "Updates…"),
-    ("shell.tray.quit", "Quit Nugget"),
+    ("shell.tray.quit", "Quit Heed"),
     ("shell.notify.agentTitle", "An agent needs your attention"),
     (
         "shell.notify.agentBody",
-        "Open Nugget to review what it wants to do.",
+        "Open Heed to review what it wants to do.",
     ),
     ("shell.notify.open", "Open"),
 ];
@@ -467,7 +467,7 @@ mod tests {
     fn labels_accept_only_known_keys_on_one_line() {
         let mut l = Labels::default();
         let from: BTreeMap<String, String> = [
-            ("shell.tray.quit", "Nugget beenden"),
+            ("shell.tray.quit", "Heed beenden"),
             ("shell.tray.open", "  Line\nbreak\u{7}  "),
             ("shell.tray.status", "   "),
             ("evil.key", "Click me"),
@@ -476,7 +476,7 @@ mod tests {
         .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect();
         assert_eq!(l.apply(&from), 2);
-        assert_eq!(l.get("shell.tray.quit"), "Nugget beenden");
+        assert_eq!(l.get("shell.tray.quit"), "Heed beenden");
         assert_eq!(l.get("shell.tray.open"), "Line break");
         assert_eq!(
             l.get("shell.tray.status"),

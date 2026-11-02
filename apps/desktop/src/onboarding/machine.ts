@@ -1,12 +1,17 @@
 /**
  * First-run onboarding as a pure state machine, persisted after every change so quitting
  * mid-way resumes where the user left off. Every step can be skipped, and so can the whole flow.
+ *
+ * The flow reads as sign in → connect apps → first answer: `welcome` is the sign-in step (with a
+ * local-first way on without an account), `source` connects cloud apps or adds a local folder,
+ * then the AI, permissions and Double Tap steps, and `done` asks the first question. The ids are
+ * kept from the earlier order so saved progress stays valid.
  */
 
-export const STEPS = ["welcome", "ai", "source", "permissions", "trigger", "done"] as const;
+export const STEPS = ["welcome", "source", "ai", "permissions", "trigger", "done"] as const;
 export type StepId = (typeof STEPS)[number];
 
-/** How the user wants Nugget to think: on this device, with their own API key, or not decided. */
+/** How the user wants Heed to think: on this device, with their own API key, or not decided. */
 export type AiChoice = "local" | "byok" | "later";
 
 export interface OnboardingState {
@@ -26,9 +31,11 @@ export interface OnboardingState {
   sources?: string[];
   /**
    * A source has something searchable (at least one item indexed). Adding a folder that holds
-   * nothing Nugget can read does not finish the source step.
+   * nothing Heed can read does not finish the source step.
    */
   indexed?: boolean;
+  /** Names of the cloud apps connected (Composio, through a Heed account). Absent: none known. */
+  cloudApps?: string[];
   /** The flow is over (finished or skipped as a whole); don't show it on launch. */
   finished: boolean;
 }
@@ -41,6 +48,8 @@ export type Action =
   | { type: "sourcesFound"; names: string[] }
   /** A source has at least one item indexed. */
   | { type: "sourcesIndexed" }
+  /** Cloud apps with an active connection (their display names). */
+  | { type: "appsConnected"; names: string[] }
   | { type: "back" }
   | { type: "skip" }
   | { type: "goto"; step: StepId }
@@ -77,7 +86,8 @@ function advance(step: StepId): StepId {
 /**
  * Whether a step's goal is met, so Continue can mark it done. The AI step needs a model installed
  * (or installing) or a key saved on the chosen path, or the choice to decide later (a decision,
- * not a skipped step); the source step needs a source with something indexed. The other steps
+ * not a skipped step); the source step needs a source with something indexed or a cloud app
+ * connected. The other steps
  * are done once seen.
  */
 export function stepGoalMet(state: OnboardingState, step: StepId = state.step): boolean {
@@ -85,7 +95,7 @@ export function stepGoalMet(state: OnboardingState, step: StepId = state.step): 
     if (state.ai === "later") return true;
     return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
   }
-  if (step === "source") return state.indexed === true || legacyDone(state, "source");
+  if (step === "source") return state.indexed === true || (state.cloudApps?.length ?? 0) > 0 || legacyDone(state, "source");
   return true;
 }
 
@@ -94,7 +104,7 @@ export function stepGoalMet(state: OnboardingState, step: StepId = state.step): 
  * was done, so it still counts.
  */
 export function legacyDone(state: OnboardingState, step: "ai" | "source"): boolean {
-  const recorded = step === "ai" ? state.aiSetup !== undefined : state.sources !== undefined;
+  const recorded = step === "ai" ? state.aiSetup !== undefined : state.sources !== undefined || state.cloudApps !== undefined;
   return !recorded && state.completed.includes(step);
 }
 
@@ -112,6 +122,10 @@ export function reduce(state: OnboardingState, action: Action): OnboardingState 
     }
     case "sourcesIndexed":
       return state.indexed ? state : { ...state, indexed: true };
+    case "appsConnected": {
+      const names = [...new Set([...(state.cloudApps ?? []), ...action.names])];
+      return names.length === (state.cloudApps?.length ?? 0) ? state : { ...state, cloudApps: names };
+    }
     case "next": {
       if (state.step === "done") return { ...state, finished: true, completed: withStep(state.completed, "done") };
       return {
@@ -194,6 +208,10 @@ export function parseState(raw: string | null): OnboardingState | null {
     if (names.length) out.sources = names;
   }
   if (o.indexed === true) out.indexed = true;
+  if (Array.isArray(o.cloudApps)) {
+    const names = o.cloudApps.filter((x): x is string => typeof x === "string");
+    if (names.length) out.cloudApps = names;
+  }
   return out;
 }
 

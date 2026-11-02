@@ -43,7 +43,7 @@ const newChat = channel<void>();
 
 /**
  * Ask the Search page to run `q`, or with `run: false` only to type it in and wait for Enter (a
- * `nugget://search` link never acts by itself). The caller navigates to the page itself.
+ * `heed://search` link never acts by itself). The caller navigates to the page itself.
  */
 export function requestSearch(q: string, run = true): void {
   search.request({ q, run });
@@ -117,4 +117,27 @@ export function requestChatHandover(h: QuickAskHandover): void {
 /** Run `onHandover` for a handover requested before mount and for every later request. */
 export function usePendingChatHandover(onHandover: (h: QuickAskHandover) => void): void {
   chatHandover.usePending(onHandover);
+}
+
+// ---- a question asked from Home, and a saved conversation opened from the sidebar ----
+
+const chatAsk = channel<string>();
+const chatOpen = channel<string>();
+
+/** Ask the Chat page to start a new conversation with `question` and send it. */
+export function requestChatAsk(question: string): void {
+  chatAsk.request(question);
+}
+
+export function usePendingChatAsk(onAsk: (question: string) => void): void {
+  chatAsk.usePending(onAsk);
+}
+
+/** Ask the Chat page to open the saved conversation `id`. */
+export function requestChatOpen(id: string): void {
+  chatOpen.request(id);
+}
+
+export function usePendingChatOpen(onOpen: (id: string) => void): void {
+  chatOpen.usePending(onOpen);
 }

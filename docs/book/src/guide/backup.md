@@ -1,6 +1,6 @@
 # Backup, restore and export
 
-Everything Nugget knows lives in one encrypted database on your computer. Back it up, restore it on
+Everything Heed knows lives in one encrypted database on your computer. Back it up, restore it on
 any computer and OS, or export it in open formats.
 
 ## Backups
@@ -10,7 +10,7 @@ Open **Status → Backup and export** (or use `nuggetd backup`):
 1. **Set a backup passphrase** (at least 8 characters). It locks a copy of the database key inside
    every backup.
 2. **Pick a folder**: an external drive, NAS or cloud-synced folder is fine, since backups are
-   encrypted. Folders inside Nugget's own data, settings or vault folders are refused.
+   encrypted. Folders inside Heed's own data, settings or vault folders are refused.
 3. **Pick a schedule** (manual, daily or weekly) and **how many to keep** (default 7). Only this
    computer's backups are ever deleted, so several computers can share a folder.
 
@@ -41,7 +41,7 @@ set-passphrase` sets the passphrase and `nuggetd backup --to DIR` makes a one-of
 - The backup is fully verified first; a backup that fails any check is not restored.
 - Your current data is **never deleted**: it is kept as `nugget.db.pre-restore-<date and time>` (and
   its key as `store.key.replaced-<date and time>` if different). Delete them when you are happy.
-- Restoring in the app restarts Nugget. An interrupted restore is finished at the next start.
+- Restoring in the app restarts Heed. An interrupted restore is finished at the next start.
 - Across operating systems: re-point file-source folders on the **Sources** page. A vault path that
   isn't valid on the new OS is commented out, and a restored `config.toml` that won't load is kept
   as `config.toml.restored-<date and time>` instead.
@@ -62,8 +62,8 @@ set-passphrase` sets the passphrase and `nuggetd backup --to DIR` makes a one-of
 
 ## If the database is damaged
 
-Nugget checks the database at every start (a full check after an unclean shutdown, otherwise in the
-background once a day). If it is damaged or this computer's key can't open it, Nugget leaves the file
+Heed checks the database at every start (a full check after an unclean shutdown, otherwise in the
+background once a day). If it is damaged or this computer's key can't open it, Heed leaves the file
 untouched, starts with an empty temporary store (no syncing, no vault updates, no backups), and shows
 a banner offering to **restore from your latest backup**. The damaged file is moved aside as
 `nugget.db.corrupt-<date and time>`, never deleted. With no backup, keep it and ask on the issue

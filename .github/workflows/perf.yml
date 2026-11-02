@@ -5,7 +5,7 @@ name: Perf
 # vault render, idle CPU and wakeups, RSS and ingest (see bench/README.md). Too slow for every
 # push: run it by hand, and weekly to catch drift.
 #
-# `energy` and `energy-prefill`: what Nugget costs in energy and battery (`nugget-bench energy`,
+# `energy` and `energy-prefill`: what Heed costs in energy and battery (`nugget-bench energy`,
 # bench/README.md "energy (DD2)"), on Linux and macOS: the idle daemon, indexing, the shell's
 # frontmost-app poll, the desktop shell idle and during scripted focus changes with read-ahead
 # on and off (optionally also for the shell built at `before_ref`, on the same runner), and the

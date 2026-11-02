@@ -618,7 +618,7 @@ impl Config {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                     return Err(Error::Invalid(format!(
-                        "Nugget isn't allowed to open \"{}\". Check the folder's permissions, or pick a different folder.",
+                        "Heed isn't allowed to open \"{}\". Check the folder's permissions, or pick a different folder.",
                         p.display()
                     )));
                 }

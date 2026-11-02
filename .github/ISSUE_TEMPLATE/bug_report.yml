@@ -1,12 +1,12 @@
 name: Bug report
-description: Something in Nugget does not work as expected.
+description: Something in Heed does not work as expected.
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for reporting. Security problems go to a private advisory instead (see SECURITY.md).
-        Please remove personal data from logs: Nugget indexes your mail, notes and files.
+        Please remove personal data from logs: Heed indexes your mail, notes and files.
   - type: textarea
     id: what-happened
     attributes:
@@ -27,7 +27,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Nugget version or commit
+      label: Heed version or commit
       placeholder: 0.0.1 or a commit SHA
     validations:
       required: true

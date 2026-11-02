@@ -26,7 +26,7 @@ if (!window.__nuggetAgent) {
   const agent = new PageAgent(document);
   const overlay = createOverlay(document, () => {
     agent.halt();
-    overlay.show("Nugget stopped");
+    overlay.show("Heed stopped");
     void chrome.runtime.sendMessage({ nugget: "user_stop", reason: "overlay stop button" });
   });
 
@@ -44,7 +44,7 @@ if (!window.__nuggetAgent) {
         return {};
       case "halt":
         agent.halt();
-        overlay.show("Nugget stopped");
+        overlay.show("Heed stopped");
         return {};
       case "resume":
         agent.resume();

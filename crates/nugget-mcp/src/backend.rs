@@ -228,7 +228,7 @@ pub struct RecentChanges {
     pub items: Vec<ItemSummaryRecord>,
 }
 
-/// Read-only access to Nugget's knowledge for the MCP server.
+/// Read-only access to Heed's knowledge for the MCP server.
 ///
 /// Implementations return `Ok(None)` / empty results for unknown ids, and reserve `Err` for
 /// failures. They must never return content from outside the store (no network fetches).

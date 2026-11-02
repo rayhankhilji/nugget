@@ -1,4 +1,4 @@
-# Nugget plugins
+# Heed plugins
 
 First-party plugins built with the plugin SDK (`crates/nugget-plugin/sdk`), and the template to
 start your own. The author guide is [`docs/plugins.md`](../docs/plugins.md).

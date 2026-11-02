@@ -100,6 +100,10 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     cloud_sync: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_ask: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_model_status: () => ({ active: false, api_host: null, expires_at: null, providers: [] }),
+    cloud_me: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    cloud_billing_plans: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    cloud_billing_checkout: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    cloud_billing_portal: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
     pick_plugin_file: () => null,
     notify: () => null,
@@ -369,7 +373,7 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
       msg = await daemon.call(method, paramsFor(cmd, args));
     } catch (e) {
       calls.push({ cmd, via: "daemon", ok: false, message: e.message });
-      return { err: { kind: "disconnected", message: "lost the connection to Nugget" } };
+      return { err: { kind: "disconnected", message: "lost the connection to Heed" } };
     }
     if (msg.error) {
       const { code, message } = msg.error;

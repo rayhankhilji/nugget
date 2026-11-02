@@ -1,8 +1,8 @@
-# Nugget Cloud architecture
+# Heed Cloud architecture
 
 Status: design plus M1 build in progress, on branch `ar/cloud`. Date: 2026-11-02.
 
-Nugget moves from local-first to **cloud-first SaaS**:
+Heed moves from local-first to **cloud-first SaaS**:
 - Users have accounts.
 - Their mail, events and docs are indexed in our cloud.
 - The AI runs server-side with our provider keys.
@@ -22,16 +22,17 @@ The desktop app stays the only client. Everything that needs the local OS stays 
               │ browser sign-in          └──┬──────────┬───────────┬─────┘
               ▼                             │ SQL      │ HTTPS     │ HTTPS
  Supabase Auth (magic link,  ◀──────────────┤          ▼           ▼
- Google) → nugget://auth/callback           │     Composio     Anthropic /
+ Google) → heed://auth/callback             │     Composio     Anthropic /
                                             ▼     (OAuth,      OpenAI
                                    Supabase Postgres  tools,    (LLM, embeddings)
                                    + pgvector + Storage triggers)
 ```
 
 ### Supabase (Pro plan)
-- **Auth:** email magic link and Google sign-in in M1. Apple sign-in waits until M4, because it needs an Apple Developer account ($99/yr). The desktop app uses the PKCE flow through the system browser, and the redirect URL is `nugget://auth/callback` (allow-listed in Auth → URL Configuration). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
+- **Auth:** email magic link and Google sign-in in M1. Apple sign-in waits until M4, because it needs an Apple Developer account ($99/yr). The desktop app uses the PKCE flow through the system browser, and the redirect URL is `heed://auth/callback`. In the Supabase dashboard, add it under Auth → URL Configuration → Redirect URLs (the app still accepts `nugget://auth/callback` from before the rename to Heed, but new setups only need `heed://auth/callback`). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
 - **Postgres + pgvector.** The schema is in `supabase/migrations/`. Every table has a `user_id` column and Row-Level Security enabled:
-  - `profiles`: plan (`free` or `pro`), created by a trigger on `auth.users`.
+  - `profiles`: created by a trigger on `auth.users`. It records when the user was last active.
+  - `billing_customers`, `subscriptions` and `devices` are described in [Plans and billing](#6-plans-and-billing).
   - `connections`: one row per Composio connected account (toolkit, status, sync cursor).
   - `items`: one email, event or doc (source, external id, title, author, time, body, metadata, content hash). Unique on `(user_id, source, external_id)`, so ingest is idempotent.
   - `chunks`: text, a generated `tsvector` (the `simple` config, so it works in any language), and `embedding vector(1536)`, which can be null. It has a GIN index on the `tsvector` and an HNSW cosine index on the embedding.
@@ -68,56 +69,36 @@ These run inside `nugget-cloud`, as a tokio task per process:
 ## 2. Composio
 - **Identity.** The Composio `user_id` is the Supabase user UUID. One Composio project serves all users, and the API key lives only in the server environment (`COMPOSIO_API_KEY`). The REST base URL is `https://backend.composio.dev/api/v3.1`, with the header `x-api-key`. `v3` is frozen but still supported.
 - **Auth configs.** These are created once per toolkit in the Composio dashboard, using Composio-managed OAuth for Gmail and Google Calendar. Their ids go in `COMPOSIO_AUTH_CONFIGS`, for example `gmail=ac_…,googlecalendar=ac_…`.
-- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = nugget://connections/callback` → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
+- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = heed://connections/callback` (`NUGGET_CONNECT_CALLBACK` overrides it; the app also accepts the pre-rename `nugget://connections/callback`) → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
 - **Triggers or polling.** Composio's Gmail and Calendar triggers are themselves polling-based, with a 2–15 minute floor. They cost **$0.003 per event** on the paid tier, ten times the price of a tool call ($0.0003). A user receiving 1,000 emails a month would cost $3 in trigger events alone. **M1 therefore polls with tool calls**, adaptively as described above, which costs about 1,500–3,000 calls per active user per month. `POST /v1/webhooks/composio` is implemented: it verifies the signature, and for an event it only marks that connection due (it does not ingest the payload). This lets us switch triggers on per toolkit later, for example for low-volume apps, without a second ingest path.
 - **Actions** (M3) are sending mail and creating events. The agent proposes a tool call, and `nugget-policy` assesses it: Send-class actions are always `Confirm`. The proposal is stored as a `pending_actions` row (added in M3) with a preview. The desktop shows the existing confirmation UI, and only `POST /v1/actions/{id}/approve` executes `tools/execute`. Each step is written to the hash-chained action log. Composio never acts without that approval.
 - **Pricing** (composio.dev/pricing, for signups after 2026-08-15):
   - Hobby: $0, with 100k tool calls and 50k trigger events a month. Usage *pauses* at the cap.
   - Pro: $29/month, with the same allowance as a credit, then $0.0003 per call and $0.003 per trigger event.
-  - **The decision: start on Hobby** (confirmed by the founder). It covers about 30–60 active users. Move to Pro before the cap, because a pause stops ingest for everyone.
+  - **The decision: start on Hobby** (confirmed by the founder). With paid plans' sync cadence it covers development and roughly the first 10–15 subscribers. Move to Pro before the cap, because a pause stops ingest for everyone.
 
 ## 3. AI gateway
 All model calls go through `nugget-cloud`'s gateway module. No provider key is ever sent to a client.
 - **Interface:** `Llm::complete(user, tier, messages) -> (text, usage)` and `Embedder::embed(texts)`.
   - Anthropic Messages is the default, when `ANTHROPIC_API_KEY` is set. OpenAI Chat is the fallback, when only `OPENAI_API_KEY` is set.
   - Embeddings use OpenAI `text-embedding-3-small`, 1536 dimensions, at $0.02 per million tokens. Embeddings are on only when `OPENAI_API_KEY` is set. With only an Anthropic key, retrieval is full-text only, which is still useful, and the doc and the `/v1/me` endpoint say so.
-- **Metering:** every call writes a row to `usage_events` (tokens and cost from a price table in code). Before each Ask, the gateway checks the user's month-to-date cost against their plan's quota and returns `429 quota_exceeded` when it is spent.
-- **Models per tier** (prices per million tokens from the official Anthropic page, 2026-11):
-
-| Tier | Ask / answer model | Extraction, cards | Monthly AI quota |
-|---|---|---|---|
-| Free | Claude Haiku 5.5 ($0.10 in / $0.50 out) | Haiku 5.5 | $0.75 of usage |
-| Pro | Claude Sonnet 5.5 ($2 / $10) | Haiku 5.5 | $8 of usage |
-
-Model ids are configuration (`NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`), not code. Note that prompts over 100k tokens are billed at 5× on Haiku 5.5. The gateway caps the context it packs at 24k tokens, so that tier is never reached.
-
-**Cost per active user per month.** Assumptions: 1,000 new emails and events a month, 10 asks a day, a 6k-token context and 400 output tokens per answer. The Claude 4.7+ tokenizer counts about 30% more tokens for the same text, and that is included below.
-
-| Line | Free (Haiku) | Pro (Sonnet asks) |
-|---|---|---|
-| Embeddings (about 2M tokens) | $0.04 | $0.04 |
-| Extraction (M2: 1,000 × 2.6k in / 400 out) | $0.46 | $0.46 |
-| Asks (300 × 7.8k in / 520 out) | $0.31 | $6.24 |
-| Composio tool calls (about 3k, Pro tier) | $0.90 | $0.90 |
-| **Total** | **about $1.70 (£1.30)** | **about $7.60 (£5.80)** |
-
-The first month adds about $0.5 for backfilling 90 days of history. Fixed costs:
-- Supabase Pro: $25. Its $10 of compute credit covers the default Micro instance.
-- Fly.io: about $3.
-- Composio: $0 on Hobby, $29 on Pro.
-
-That is **about $28 a month (£21) before users**, or $57 (£43) on Composio Pro. At £1.30 per active free user:
-- The **£39 budget supports about 13 active free users** on Composio Hobby.
-- **£99 supports about 40 users on Composio Pro, or 60 on Hobby.**
-
-Asks are the variable that matters. Prompt caching and the 24k cap keep them bounded, and Pro pricing has to recover Sonnet's cost.
+- **Metering:** every call writes a row to `usage_events`, with tokens and cost taken from a price table in code.
+- **Model choice:** before each Ask, `Gateway::choose` picks the model from the user's plan. The rules are in [Plans and billing](#6-plans-and-billing):
+  - Ask uses the plan's default model, or the one the request names.
+  - A smart request falls back to the fast model once the smart allowance or the fair-use budget is used up, and the response says `downgraded: true`.
+  - Past the hard cap, Ask returns `429 quota_exceeded`.
+  - Tool-call costs are ours to absorb and do not count against the cap.
+- **Models.** Prices per million tokens are from the official Anthropic page, 2026-11. Model ids are configuration (`NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`), not code.
+  - The fast model is Claude Haiku 5.5, at $0.10 in and $0.50 out. One Ask, at 7.8k tokens in and 520 out (the 4.7+ tokenizer's +30% included), costs $0.00104.
+  - The smart model is Claude Sonnet 5.5, at $2 in and $10 out. The same Ask costs $0.0208.
+  - Prompts over 100k tokens are billed at 5× on Haiku 5.5. The gateway packs at most 24k tokens of context, so that rate is never reached.
 
 ### Streaming model endpoint for the desktop (`/llm/v1`)
 The desktop's AI features (ghost-text autocomplete, Double Tap, quick ask, chat and the agent) run in nuggetd, through `nugget-infer`. When the user is signed in they use Heed's own model endpoint, `crates/nugget-cloud/src/llm`:
 - **Shape: Anthropic-Messages-compatible**, `POST /llm/v1/messages` (streaming or not, tools, images, `cache_control`) and `GET /llm/v1/models`. We chose it over an OpenAI-compatible endpoint because Anthropic is the primary provider. The primary path forwards the checked body and relays the provider's bytes unchanged. That means no translation on the latency-critical path, and prompt caching (breakpoints, `max_tokens: 0` prefix warming), tool use and images keep their exact semantics. `nugget-infer` already speaks this API. Only the OpenAI fallback is translated (`llm/openai.rs`), and it is used when Anthropic is unset, or fails or times out before the first byte.
 - **Auth:** the user's Supabase access token, as `Authorization: Bearer` (or `x-api-key`, so a stock Anthropic client works with base URL `{api}/llm`). It is checked like every `/v1` route. If our own provider key is refused, the client gets a 502, never a 401, because a 401 would sign the user out.
-- **Tiers, not models:** `model` is `heed-fast` (ghost text, triage, light work) or `heed-smart` (drafting, asks, the agent). The service picks the real model from the tier and the user's entitlements (Free: smart is served by the fast model). Entitlements are read through one function, `llm::entitlements()`, which billing replaces.
-- **Metering and quotas:** each call writes one `usage_events` row (`kind = 'llm'`, `route` such as `heed-fast:anthropic`, input, output and prompt-cache tokens). The cost charges cache reads at 0.1× and cache writes at 1.25× input. Before sending, the month-to-date cost is checked against the quota (`429`, `code: quota_exceeded`). Entitlements and usage are cached per user for 15 s, and costs metered in that window are added locally. A keystroke's request therefore makes no database round trip, and the quota can be overshot only by requests already in flight (at most `max_concurrent` per user: 4 on Free, 8 on Pro).
+- **Tiers, not models:** `model` is `heed-fast` (ghost text, triage, light work) or `heed-smart` (drafting, asks, the agent). The service picks the real model from the tier and the user's entitlements, read through one function, `llm::entitlements()`. That function is a view of billing's `plans::entitlement`. Without a live subscription the answer is `402` (`code: subscription_required`). `heed-smart` follows the gateway's rule (`Allowance::choose`, shared with Ask): it falls back to the fast model once the plan's fair-use budget or smart allowance is used up.
+- **Metering and quotas:** each call writes one `usage_events` row (`kind = 'llm'`, `route` such as `heed-fast:anthropic`, input, output and prompt-cache tokens). The cost charges cache reads at 0.1× and cache writes at 1.25× input. Before sending, the month-to-date cost is checked against the plan's hard cap (`429`, `code: quota_exceeded`). Entitlements, month-to-date cost and smart calls are cached per user for 15 s, and requests metered in that window are added locally. A keystroke's request therefore makes no database round trip, and a limit can be overshot only by requests already in flight (at most `max_concurrent` per user: 4 per device seat of the plan).
 - **Limits:** the body is capped at 8 MB (413), with at most 4,000 messages. `max_tokens` is capped per tier and plan. Only known fields are forwarded: server tools, MCP servers, containers, service tiers and betas are dropped or refused. Timeouts are 60 s to the provider's headers, 90 s of silence mid-stream (the stream then ends with an `error` event) and 15 min overall.
 - **Cancellation:** a client that disconnects drops the provider request at once, so generation stops. What was relayed is metered: output tokens are estimated from the relayed text when the provider never reported them.
 - **Prompt caching:** client breakpoints pass through. A request with none gets one on its system prompt, so the stable prefix (rules, voice) is cached across a user's keystrokes. OpenAI gets a `prompt_cache_key` per user and tier.
@@ -151,7 +132,7 @@ What keeps the warm path short:
 ## 4. Desktop app changes
 - **Sign-in:**
   1. A new crate, `crates/nugget-cloud-client`, builds the PKCE `authorize` URL (for Google; Apple is added in M4) or sends the magic-link request (`POST /auth/v1/otp` with a code challenge). The system browser opens it.
-  2. Supabase redirects to `nugget://auth/callback?code=…`.
+  2. Supabase redirects to `heed://auth/callback?code=…`.
   3. `deeplink.rs` validates the link and hands the code over, and the client exchanges it with `grant_type=pkce`. The verifier lives only in memory and is valid for 10 minutes.
   4. The **refresh token** is stored in the OS keychain (entry `nugget/cloud-session`, using the same `keyring` backends as `nugget-store`). The access token is kept only in memory and refreshed 60 seconds before it expires. Signing out revokes the session (`POST /auth/v1/logout`) and deletes the keychain entry.
 - **Cloud API client:** the same crate provides a typed client for `/v1/*`. The Tauri commands are `cloud_sign_in`, `cloud_session`, `cloud_sign_out`, `cloud_connections_list`, `cloud_connect`, `cloud_sync` and `cloud_ask`.
@@ -180,7 +161,7 @@ What keeps the warm path short:
 
 ## Security
 - **Isolation:** RLS on every table, with the `nugget_service` role subject to RLS too (see above). `supabase/tests/rls.sql` checks that user A cannot read, write or delete user B's rows, both as `authenticated` and as `nugget_service`.
-- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`.
+- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HEED_MONTHLY`, `STRIPE_PRICE_HEED_ANNUAL`, `STRIPE_PRICE_HEED_MAX_MONTHLY`, `STRIPE_PRICE_HEED_MAX_ANNUAL` and `NUGGET_PUBLIC_URL`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`, `NUGGET_PLANS_FILE`, `NUGGET_APP_SCHEME` (`heed` after the rename) and `NUGGET_SITE_ORIGINS`. That last one lists the website origins, comma-separated, for CORS and billing return URLs; when it is unset, CORS is off.
 - **Secrets** live only in the cloud environment's settings (Fly secrets for the service, and Composio's and Supabase's dashboards). They are never committed and never sent to clients. The desktop ships only `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public by design and protected by RLS) and the API base URL. `SUPABASE_SERVICE_ROLE_KEY` is used only by the service, for the admin user deletion call.
 - **Tokens at rest:**
   - Google OAuth tokens are held by Composio, encrypted by them. We never see them.
@@ -195,6 +176,65 @@ What keeps the warm path short:
   - Data processors to list in the privacy policy and DPAs: Supabase, Fly.io, Composio, Anthropic and OpenAI.
   - The Supabase region should be eu-west-2 (London) and the Fly region `lhr`.
 
+## 6. Plans and billing
+**No free plan.** The service grants an entitlement only while a subscription is `active`, `trialing` or `past_due`. `past_due` keeps access while Stripe retries the payment. `canceled`, `unpaid` and `incomplete` give none. Without an entitlement, a signed-in user gets `402 subscription_required` from connect, sync and Ask, and sync stops.
+
+**Plans live in config.** `crates/nugget-cloud/plans.toml` is embedded at build time, and `NUGGET_PLANS_FILE` can point at an edited copy. The founder changes prices, limits and features there without touching code. The file is validated at startup, so unknown keys, impossible caps and duplicate Stripe prices are refused. Stripe price ids come from the environment.
+
+| | **Heed**, £39/mo or £390/yr | **Heed Max**, £99/mo or £990/yr |
+|---|---|---|
+| Answer model | fast (Haiku 5.5), plus 300 smart asks/mo | smart (Sonnet 5.5) by default, 900 smart asks/mo |
+| Fair-use AI budget, then hard cap | $8, then $12 | $18, then $25 |
+| Connected apps | 10 | unlimited |
+| Sync while active | every 30 min | every 5 min for mail and calendar, 15 min for other apps |
+| History | 12 months, pruned on sync | all, with a 3-year first backfill |
+| Devices | 1 | 3 |
+| Ghost text, Needs-you inbox, daily brief, actions with approval | yes | yes |
+| Multi-step agent tasks, computer use, priority support | no | yes |
+
+- **Trial and annual:** both plans have a 14-day trial with a card required (Checkout uses `payment_method_collection=always`), one trial per user. Annual is 10× monthly.
+- **Idle users:** someone who has not used Heed for 12 hours syncs once a day, whatever their plan.
+- **Feature flags:** these are returned in `/v1/me` as `entitlements`. The server enforces models, quotas, connections, devices, sync and history now. Agent tasks, computer use and the inbox are gated on the desktop until they move server-side in M2 and M3.
+
+**Stripe.**
+- `POST /v1/billing/checkout {plan, interval}`:
+  - creates the customer once, with an idempotency key, and records it in `billing_customers`;
+  - opens a subscription Checkout with the trial;
+  - returns `{url}`. The desktop opens it in the browser.
+- `POST /v1/billing/portal` returns the customer-portal URL, for upgrades, downgrades, cancellation, invoices and cards.
+- Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`. The website can instead pass `return_url`, which must be on an origin in `NUGGET_SITE_ORIGINS`; anything else gets `400 bad_return_url`, so the endpoints cannot be used as an open redirect. The API sends CORS headers for those origins only, and allows no credentials, since auth is a bearer token.
+- `POST /v1/webhooks/stripe`:
+  - Verification: `Stripe-Signature` must be HMAC-SHA256 over `t.body`, within 5 minutes.
+  - Events handled: `checkout.session.completed`, `customer.subscription.created`, `.updated` and `.deleted`, and `invoice.payment_failed` and `invoice.paid`.
+  - Every handled event makes the service **fetch the subscription from Stripe** and store it, so duplicates and out-of-order delivery converge on Stripe's current state.
+  - Event ids are recorded in `nugget_private.stripe_events`, and a repeat is acknowledged without work.
+  - A failure leaves the event unrecorded, and Stripe retries. Causes include an unknown price id, or a customer we cannot tie to a user through our own metadata.
+- `subscriptions` and `billing_customers` are readable by their owner under RLS and written only by the service.
+
+**Devices.** The desktop sends a random `X-Heed-Device` id. A new device beyond the plan's limit gets `403 device_limit_reached`. Requests without the header, such as from the website or API tools, never take a seat. Only devices seen in the last 30 days count, and a user can delete their own device rows. The ids are client-generated, so this is a fair-use limit, not DRM.
+
+**Cost and margin per user per month.** Assumptions:
+- The app is active about 10 hours a day. Composio tool calls cost $0.0003.
+- Ghost text is 1.5k tokens in and 40 out on Haiku. The daily brief is 20k in and 800 out. One agent task is 10 Sonnet steps of 15k in and 500 out, about $0.35.
+- Extraction and embedding cost $0.0005 per item.
+- Net revenue is the price less 20% VAT, less Stripe's 1.5% + 20p.
+- Light user: 1,000 items, 3 apps, 5 asks a day, 50 ghost completions a day, and on Max 8 agent tasks a month.
+- Heavy user: 5,000 items, 10 apps (15 on Max), 30 asks a day, 300 ghost completions a day, and on Max 60 agent tasks a month.
+
+| User | AI (model) | Composio calls | Cost (£) | Net revenue | Gross margin |
+|---|---|---|---|---|---|
+| Heed light | $1.61 | 1,820 ($0.55) | £1.63 | £31.71 | 95% |
+| Heed heavy | $10.97 | 6,100 ($1.83) | £9.69 | £31.71 | 69% |
+| Max light | $6.75 | 8,420 ($2.53) | £7.02 | £80.81 | 91% |
+| Max heavy | $43.82 uncapped, so it hits the $25 cap | 22,900 ($6.87) | £24.14 | £80.81 | **70%** |
+
+The hard caps bound the worst case. That is £10.45 for Heed (67%) and £24.12 for Max (70%), which is how the Max caps were sized. A heavy Max user hitting the cap still gets fast answers until the $25 hard cap.
+
+**Fixed costs and break-even:**
+- Supabase Pro is $25 and Fly about $4.
+- Composio Pro is $29. It is needed once paying users exist: a heavy Max user alone makes about 23k calls a month, and Hobby stops at 100k.
+- That totals about £44 a month, which **two Heed subscriptions cover**. The founder's £99/month infrastructure ceiling holds until about 40–50 active subscribers. From there, Supabase compute and Composio overage grow with users and are paid by revenue.
+
 ## Migration plan
 - **M1: cloud Ask over mail and calendar.** This is "sign in, connect Gmail and Google Calendar via Composio, ask a question and get a cited answer from cloud-indexed mail". It includes:
   - The schema and RLS, the auth and cloud clients, Sign-in, the Connections page, Gmail and Calendar sync, and `/v1/ask` with citations, metering and quotas.
@@ -207,8 +247,9 @@ What keeps the warm path short:
   - Cards generated in the cloud, and server-side drafts.
   - Composio actions (send mail, create event) behind `pending_actions` and the desktop confirmation UI.
   - More toolkits: Slack, Notion and Drive.
+- **M1b: billing (now, before launch).** Paid plans only, set in `plans.toml`. Stripe Checkout with a 14-day trial, the customer portal and webhooks. Plan entitlements gate model choice, quotas, sync cadence, history, connections and devices. Built against test doubles; see section 6.
 - **M4: hardening and scale.**
-  - Billing (Stripe) tied to `profiles.plan`, and triggers for low-volume toolkits.
+  - Triggers for low-volume toolkits.
   - Sign in with Apple. This needs an Apple Developer account, a Services ID and a key, and the provider enabled in Supabase.
   - Local files uploaded as chunks, MCP backed by the cloud, and application-level encryption review.
   - An offline-mode decision, and load tests.

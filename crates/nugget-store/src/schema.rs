@@ -665,7 +665,7 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
     if current > LATEST_VERSION {
         return Err(Error::Unsupported(format!(
             "store schema version {current} is newer than this build supports ({LATEST_VERSION}); \
-             upgrade Nugget"
+             upgrade Heed"
         )));
     }
     if current == LATEST_VERSION {

@@ -1,6 +1,6 @@
 # Security policy
 
-Nugget indexes your mail, messages, notes and files, holds credentials for your accounts, and can
+Heed indexes your mail, messages, notes and files, holds credentials for your accounts, and can
 operate your computer. We treat security bugs as the most serious class of bug.
 
 ## Reporting a vulnerability
@@ -16,7 +16,7 @@ and the impact as you understand it.
   prefer not.
 - Please give us a reasonable chance to fix it first, and test only your own installation and data.
 
-Nugget is pre-1.0: only the latest release and `main` receive fixes.
+Heed is pre-1.0: only the latest release and `main` receive fixes.
 
 ## Scope
 
@@ -31,7 +31,7 @@ Everything in this repository that runs on a user's machine or ships in a releas
 - **Egress**: requests without a ledger entry, locality misclassification, cross-host redirects,
   sensitive items reaching a cloud model.
 - **Models**: the signed manifest, verified downloads and unpacking, loopback `llama-server`.
-- **Agent and computer use**: any way to make Nugget take a Send, Destroy, Spend or Security action
+- **Agent and computer use**: any way to make Heed take a Send, Destroy, Spend or Security action
   without the required confirmation, including by prompt injection, is high severity.
 - **Browser control** (`nugget-browser-host`, `extensions/browser`, per-site consent), **plugins**
   (capability checks, resource limits, signatures, sandbox escapes), **Double Tap** (secure fields,
@@ -39,7 +39,7 @@ Everything in this repository that runs on a user's machine or ships in a releas
   and updates** (Tauri commands, webview permissions, signed payloads and feeds, installers).
 
 **Out of scope**: attacks needing root/administrator or an unlocked session; malware already
-running as the same user; bugs in a provider's own service unless Nugget worsens them; content a
+running as the same user; bugs in a provider's own service unless Heed worsens them; content a
 user deliberately sends to a cloud provider they configured (recorded in the ledger, not a leak).
 
 ## Threat model

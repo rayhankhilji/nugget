@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api, doubletapApi, events, needsFullDiskAccess, type ConnectorKind, type DoubleTapStatus, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { formatList, Trans, useT, type MessageKey } from "../i18n";
@@ -15,12 +15,27 @@ import { loadTrigger, readTrigger } from "./trigger";
 import { detectAiSetup } from "./detect";
 import { DesktopOptIns } from "../platform/DesktopOptIns";
 import { MacPermissionRecovery, missingPanes, useNeedsFullDiskAccess, useRecheckOnReturn } from "../platform/MacPermissions";
+import { cloudApi, type SignInProvider } from "../cloud";
+import { ErrorNote, Spinner } from "../components/ui";
+import { ConnectApps, type CloudState } from "./ConnectApps";
 
 export interface StepProps {
   state: OnboardingState;
   dispatch: Dispatch<Action>;
   connected: boolean;
   headingRef: RefObject<HTMLHeadingElement | null>;
+  /** The Heed account: signed in, signed out, or no cloud in this build (`session.configured`). */
+  cloud?: CloudState;
+}
+
+/** Signed in to a Heed account (cloud app connections work). */
+export function signedIn(cloud: CloudState | undefined): boolean {
+  return cloud?.session?.configured === true && cloud.session.signed_in;
+}
+
+/** A Heed account is offered but not signed in to: the first step asks to sign in. */
+export function signInOffered(cloud: CloudState | undefined): boolean {
+  return cloud?.session?.configured === true && !cloud.session.signed_in;
 }
 
 export function StepHeading({ headingRef, children }: { headingRef: StepProps["headingRef"]; children: ReactNode }) {
@@ -42,10 +57,37 @@ export function OfflineNote() {
 
 const STRONG = { strong: (c: ReactNode) => <strong>{c}</strong> };
 
-// ---- 1. welcome ----
+// ---- 1. sign in ----
 
-export function WelcomeStep({ headingRef }: StepProps) {
+/**
+ * The first step. With a Heed account on offer it is the sign-in (Google in the browser or an
+ * emailed link, as on the Connections page); the footer then offers "Continue without an
+ * account", the local-first way. Without cloud in this build it welcomes and says what stays on
+ * this device. Signed in, it greets the account.
+ */
+export function WelcomeStep({ headingRef, cloud }: StepProps) {
   const t = useT();
+  if (signInOffered(cloud)) return <SignInPanel headingRef={headingRef} failure={cloud?.failure ?? null} />;
+  if (signedIn(cloud)) {
+    const email = cloud?.session?.email;
+    return (
+      <>
+        <StepHeading headingRef={headingRef}>{t("onboarding.welcome.heading")}</StepHeading>
+        <p className="ob-lead" role="status">
+          {email ? t("cloud.signedInAs", { email }) : t("cloud.signedIn")}
+        </p>
+      </>
+    );
+  }
+  if (cloud?.session === null) {
+    // Checking for an account: don't flash the local welcome before the sign-in.
+    return (
+      <>
+        <StepHeading headingRef={headingRef}>{t("onboarding.welcome.heading")}</StepHeading>
+        <Spinner label={t("cloud.loading")} />
+      </>
+    );
+  }
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.welcome.heading")}</StepHeading>
@@ -75,14 +117,97 @@ export function WelcomeStep({ headingRef }: StepProps) {
   );
 }
 
-// ---- 3. first source ----
+type Waiting = { kind: "browser" } | { kind: "email"; email: string } | null;
+
+/**
+ * Sign in to Heed, the Connections page's sign-in (`pages/SignIn.tsx`) laid out as a setup step:
+ * the step's own heading, one primary button. The sign-in finishes when the link comes back to
+ * Heed; onboarding then moves on by itself.
+ */
+function SignInPanel({ headingRef, failure }: { headingRef: StepProps["headingRef"]; failure: string | null }) {
+  const t = useT();
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState<SignInProvider | "email" | null>(null);
+  const [waiting, setWaiting] = useState<Waiting>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const run = async (what: SignInProvider | "email", start: () => Promise<void>, then: Waiting) => {
+    setBusy(what);
+    setError(null);
+    setWaiting(null);
+    try {
+      await start();
+      setWaiting(then);
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const sendLink = (e: FormEvent) => {
+    e.preventDefault();
+    const address = email.trim();
+    if (!address) return;
+    void run("email", () => cloudApi.signInEmail(address), {
+      kind: "email",
+      email: address,
+    });
+  };
+
+  return (
+    <>
+      <StepHeading headingRef={headingRef}>{t("cloud.signIn.title")}</StepHeading>
+      <p className="ob-lead">{t("cloud.signIn.description")}</p>
+      {failure && (
+        <p className="note note-error" role="alert">
+          {t("cloud.signIn.failed", { error: failure })}
+        </p>
+      )}
+      <ErrorNote error={error} />
+      <div className="ob-signin">
+        <button
+          type="button"
+          className="btn btn-primary ob-signin-google"
+          disabled={busy !== null}
+          onClick={() =>
+            void run("google", () => cloudApi.signInWith("google"), {
+              kind: "browser",
+            })
+          }
+        >
+          {busy === "google" ? <Spinner /> : t("cloud.signIn.google")}
+        </button>
+        <form className="ob-signin-email" onSubmit={sendLink}>
+          <label htmlFor="ob-email">{t("cloud.signIn.email")}</label>
+          <div className="ob-signin-row">
+            <input id="ob-email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy !== null} />
+            <button type="submit" className="btn" disabled={busy !== null || !email.trim()}>
+              {busy === "email" ? <Spinner /> : t("cloud.signIn.sendLink")}
+            </button>
+          </div>
+        </form>
+        <div role="status">
+          {waiting && <p className="note">{waiting.kind === "email" ? t("cloud.signIn.checkEmail", { email: waiting.email }) : t("cloud.signIn.inBrowser")}</p>}
+        </div>
+      </div>
+      <p className="muted small ob-signin-local">{t("onboarding.signin.localNote")}</p>
+    </>
+  );
+}
+
+// ---- 2. connect apps (or a first local source) ----
 
 /** How often the source step re-reads `sources.list` while a new source indexes. */
 export const INDEX_POLL_MS = 1000;
 
 export { indexPhase, type IndexPhase };
 
-export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
+/**
+ * Signed in: a grid of one-click cloud app connections, and below it the local folder and other
+ * sources ("Or add a folder on this computer"). Without an account: the local sources, with a
+ * way back to sign in when an account is on offer.
+ */
+export function SourceStep({ headingRef, connected, dispatch, cloud }: StepProps) {
   const t = useT();
   const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
   // Every source there is, not only those added on this visit: going Back, quitting and reopening,
@@ -112,25 +237,38 @@ export function SourceStep({ headingRef, connected, dispatch }: StepProps) {
     };
   }, [connected, dispatch]);
 
+  const apps = signedIn(cloud);
   return (
     <>
-      <StepHeading headingRef={headingRef}>{t("onboarding.source.heading")}</StepHeading>
-      <p className="ob-lead">{t("onboarding.source.lead")}</p>
-      {connected ? (
-        <div className="row ob-row-start">
-          {/* A folder is the quickest first source: open its form directly, skipping the kind picker. */}
-          <button type="button" className={added.length ? "btn" : "btn btn-primary"} onClick={() => setOpen("files")}>
-            {added.length ? t("onboarding.source.addAnother") : t("onboarding.source.addFolder")}
-          </button>
-          <button type="button" className="btn btn-ghost" onClick={() => setOpen("pick")}>
-            {t("onboarding.source.addOther")}
+      <StepHeading headingRef={headingRef}>{t(apps ? "onboarding.connect.heading" : "onboarding.source.heading")}</StepHeading>
+      <p className="ob-lead">{t(apps ? "onboarding.connect.lead" : "onboarding.source.lead")}</p>
+      {apps && <ConnectApps dispatch={dispatch} announce={announce} />}
+      {signInOffered(cloud) && (
+        <div className="ob-signin-first">
+          <p>{t("onboarding.connect.signInFirst")}</p>
+          <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: "welcome" })}>
+            {t("sources.signIn")}
           </button>
         </div>
-      ) : (
-        <OfflineNote />
       )}
-      {added.length > 0 && <IndexProgress added={added} fresh={fresh} announce={announce} dispatch={dispatch} />}
-      <p className="muted">{t("onboarding.source.later")}</p>
+      <div className="ob-source-local">
+        {apps && <h2 className="ob-local-heading">{t("onboarding.connect.local")}</h2>}
+        {connected ? (
+          <div className="row ob-row-start">
+            {/* A folder is the quickest first source: open its form directly, skipping the kind picker. */}
+            <button type="button" className={added.length || apps ? "btn" : "btn btn-primary"} onClick={() => setOpen("files")}>
+              {added.length ? t("onboarding.source.addAnother") : t("onboarding.source.addFolder")}
+            </button>
+            <button type="button" className="btn btn-ghost" onClick={() => setOpen("pick")}>
+              {t("onboarding.source.addOther")}
+            </button>
+          </div>
+        ) : (
+          <OfflineNote />
+        )}
+        {added.length > 0 && <IndexProgress added={added} fresh={fresh} announce={announce} dispatch={dispatch} />}
+        <p className="muted">{t("onboarding.source.later")}</p>
+      </div>
       <Announce message={announcement} />
       {open && (
         <AddSourceWizard
@@ -403,7 +541,7 @@ function OtherHeading({ id, level, children }: { id: string; level: 2 | 3; child
   return level === 2 ? <h2 id={id}>{children}</h2> : <h3 id={id}>{children}</h3>;
 }
 
-// ---- 6. done ----
+// ---- 6. first answer ----
 
 export const STEP_TITLE: Record<StepId, MessageKey> = {
   welcome: "onboarding.step.welcome",
@@ -414,7 +552,71 @@ export const STEP_TITLE: Record<StepId, MessageKey> = {
   done: "onboarding.step.done",
 };
 
-export function DoneStep({ headingRef, state, dispatch, connected, searchable = 0 }: StepProps & { searchable?: number }) {
+const SUGGESTIONS = ["onboarding.answer.suggestion1", "onboarding.answer.suggestion2", "onboarding.answer.suggestion3"] as const;
+
+/**
+ * The first question: a composer that hands the question to Chat (as quick ask's "Open in Chat"
+ * does), with a few to try. Below it, what setup did and what is left.
+ */
+function FirstAnswer({ onAsk }: { onAsk: (question: string) => void }) {
+  const t = useT();
+  const [question, setQuestion] = useState("");
+  const input = useRef<HTMLTextAreaElement>(null);
+  const submit = (e?: FormEvent) => {
+    e?.preventDefault();
+    const q = question.trim();
+    if (q) onAsk(q);
+  };
+  return (
+    <>
+      <form className="ob-ask" onSubmit={submit}>
+        <label htmlFor="ob-question" className="visually-hidden">
+          {t("quickAsk.inputLabel")}
+        </label>
+        <textarea
+          id="ob-question"
+          ref={input}
+          rows={2}
+          value={question}
+          placeholder={t("quickAsk.placeholder")}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
+          }}
+          dir="auto"
+        />
+        <button type="submit" className="btn btn-primary ob-ask-send" disabled={!question.trim()}>
+          {t("quickAsk.ask")}
+        </button>
+      </form>
+      <ul className="ob-suggestions" aria-label={t("onboarding.answer.suggestionsLabel")}>
+        {SUGGESTIONS.map((k) => (
+          <li key={k}>
+            <button
+              type="button"
+              className="ob-suggestion"
+              onClick={() => {
+                setQuestion(t(k));
+                input.current?.focus();
+              }}
+            >
+              {t(k)}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+export function DoneStep({
+  headingRef,
+  state,
+  dispatch,
+  connected,
+  searchable = 0,
+  onAsk,
+}: StepProps & { searchable?: number; onAsk: (question: string) => void }) {
   const t = useT();
   const pending = pendingSteps(state);
   const withAi = state.ai === "local" || state.ai === "byok";
@@ -462,11 +664,13 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
   const aiReady = withAi && aiSetup?.ai === state.ai ? aiSetup : null;
   // Progress saved before setups were recorded: the step was completed, so it was set up.
   const aiLegacy = withAi && !aiReady && legacyDone(state, "ai");
-  const sources = state.sources ?? [];
+  const cloudApps = state.cloudApps ?? [];
+  const sources = [...cloudApps, ...(state.sources ?? [])];
   const sourcesLegacy = sources.length === 0 && legacyDone(state, "source");
   // Sources were added but none has anything searchable (an empty folder, only unsupported,
-  // unreadable or too-large files): say so, and don't claim search works or every step is done.
-  const nothingIndexed = sources.length > 0 && !indexed && searchable === 0;
+  // unreadable or too-large files) and no cloud app is connected: say so, and don't claim search
+  // works or every step is done.
+  const nothingIndexed = sources.length > 0 && cloudApps.length === 0 && !indexed && searchable === 0;
   const pendingShown = nothingIndexed ? pending.filter((s) => s !== "source") : pending;
   const ai = aiReady
     ? aiReady.ai === "local"
@@ -480,70 +684,71 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
   const aiSet = aiReady !== null || aiLegacy;
   return (
     <>
-      <StepHeading headingRef={headingRef}>
-        {t(nothingIndexed ? "onboarding.done.headingNothingIndexed" : "onboarding.done.heading")}
-      </StepHeading>
-      <p className="ob-lead">
-        {t(nothingIndexed ? "onboarding.done.leadNothingIndexed" : aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}
-      </p>
-      {nothingIndexed && (
-        <p>
-          <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: "source" })}>
-            {t("onboarding.source.addAnother")}
-          </button>
-        </p>
-      )}
-      {searchable > 0 && (
-        <p className="note ob-index-ready" role="status">
-          {t("onboarding.done.searchable", { count: searchable })}
-        </p>
-      )}
-      <dl className="ob-summary">
-        <div className={aiSet ? "ob-summary-set" : "ob-summary-unset"}>
-          <dt>{t("onboarding.done.summary.ai")}</dt>
-          <dd>{ai}</dd>
-        </div>
-        <div className={(sources.length && !nothingIndexed) || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
-          <dt>{t("onboarding.done.summary.sources")}</dt>
-          <dd>
-            {sources.length ? (
-              <>
-                <bdi>{formatList(sources)}</bdi>
-                {nothingIndexed && <span className="muted"> · {t("onboarding.done.summary.nothingIndexed")}</span>}
-              </>
-            ) : sourcesLegacy ? (
-              t("onboarding.done.summary.sourcesAdded")
-            ) : (
-              t("onboarding.done.summary.sourcesNone")
-            )}
-          </dd>
-        </div>
-        <div className="ob-summary-set">
-          <dt>{t("onboarding.done.summary.trigger")}</dt>
-          <dd>
-            <TriggerKeys pref={trigger} os={os} />
-          </dd>
-        </div>
-      </dl>
-      <DesktopOptIns />
-      {pendingShown.length > 0 ? (
-        <>
-          <p>{t("onboarding.done.pending", { count: pendingShown.length })}</p>
-          <ul className="ob-pending">
-            {pendingShown.map((s) => (
-              <li key={s}>
-                <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: s })}>
-                  {t(STEP_TITLE[s])}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        !nothingIndexed && <p>{t("onboarding.done.allDone")}</p>
-      )}
-      <UpdateQuestion />
-      <p className="muted">{t("onboarding.done.again")}</p>
+      <StepHeading headingRef={headingRef}>{t("onboarding.answer.heading")}</StepHeading>
+      <p className="ob-lead">{t("onboarding.answer.lead")}</p>
+      <FirstAnswer onAsk={onAsk} />
+      <section className="ob-setup" aria-labelledby="ob-setup-heading">
+        <h2 id="ob-setup-heading">{t(nothingIndexed ? "onboarding.done.headingNothingIndexed" : "onboarding.done.heading")}</h2>
+        <p>{t(nothingIndexed ? "onboarding.done.leadNothingIndexed" : aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
+        {nothingIndexed && (
+          <p>
+            <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: "source" })}>
+              {t("onboarding.source.addAnother")}
+            </button>
+          </p>
+        )}
+        {searchable > 0 && (
+          <p className="note ob-index-ready" role="status">
+            {t("onboarding.done.searchable", { count: searchable })}
+          </p>
+        )}
+        <dl className="ob-summary">
+          <div className={aiSet ? "ob-summary-set" : "ob-summary-unset"}>
+            <dt>{t("onboarding.done.summary.ai")}</dt>
+            <dd>{ai}</dd>
+          </div>
+          <div className={(sources.length && !nothingIndexed) || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
+            <dt>{t("onboarding.done.summary.sources")}</dt>
+            <dd>
+              {sources.length ? (
+                <>
+                  <bdi>{formatList(sources)}</bdi>
+                  {nothingIndexed && <span className="muted"> · {t("onboarding.done.summary.nothingIndexed")}</span>}
+                </>
+              ) : sourcesLegacy ? (
+                t("onboarding.done.summary.sourcesAdded")
+              ) : (
+                t("onboarding.done.summary.sourcesNone")
+              )}
+            </dd>
+          </div>
+          <div className="ob-summary-set">
+            <dt>{t("onboarding.done.summary.trigger")}</dt>
+            <dd>
+              <TriggerKeys pref={trigger} os={os} />
+            </dd>
+          </div>
+        </dl>
+        <DesktopOptIns />
+        {pendingShown.length > 0 ? (
+          <>
+            <p>{t("onboarding.done.pending", { count: pendingShown.length })}</p>
+            <ul className="ob-pending">
+              {pendingShown.map((s) => (
+                <li key={s}>
+                  <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: s })}>
+                    {t(STEP_TITLE[s])}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          !nothingIndexed && <p>{t("onboarding.done.allDone")}</p>
+        )}
+        <UpdateQuestion />
+        <p className="muted">{t("onboarding.done.again")}</p>
+      </section>
     </>
   );
 }

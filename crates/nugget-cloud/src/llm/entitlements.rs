@@ -1,22 +1,19 @@
-//! What a user may do with the model endpoint, read through ONE function ([`entitlements`]).
-//!
-//! Billing (plans, trials, add-ons) is being added separately; when it lands, only the body of
-//! [`entitlements`] (and [`Entitlements::for_plan`]) changes. The endpoint never looks at
-//! `profiles.plan` or a quota itself.
+//! What a user may do with the model endpoint, read through ONE function ([`entitlements`]),
+//! itself a view of billing's single lookup ([`crate::plans::entitlement`]). The endpoint never
+//! reads subscriptions or `plans.toml` itself.
 
 use uuid::Uuid;
 
 use crate::db::{Db, DbError};
-use crate::gateway::Plan;
+use crate::gateway::Allowance;
+use crate::plans::{Catalog, ModelTier, Plan};
 
-/// Limits and model access for one user.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Limits and model access for one user with a live subscription.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Entitlements {
-    pub plan: Plan,
-    /// Monthly AI budget in micro-USD (LLM and embeddings).
-    pub quota_micros: i64,
-    /// Whether `heed-smart` gets the smart model; otherwise it is served by the fast model.
-    pub smart_model: bool,
+    pub plan_id: String,
+    /// Fair-use budget, hard cap, smart allowance and default model (as the gateway's).
+    pub allowance: Allowance,
     /// Largest `max_tokens` honoured per request, by tier (larger values are lowered).
     pub max_output_fast: u32,
     pub max_output_smart: u32,
@@ -25,32 +22,28 @@ pub struct Entitlements {
 }
 
 impl Entitlements {
-    pub fn for_plan(plan: Plan) -> Self {
-        match plan {
-            Plan::Free => Self {
-                plan,
-                quota_micros: plan.quota_micros(),
-                smart_model: false,
-                max_output_fast: 4_096,
-                max_output_smart: 8_192,
-                max_concurrent: 4,
-            },
-            Plan::Pro => Self {
-                plan,
-                quota_micros: plan.quota_micros(),
-                smart_model: true,
-                max_output_fast: 4_096,
-                max_output_smart: 32_000,
-                max_concurrent: 8,
-            },
+    pub fn for_plan(plan_id: &str, plan: &Plan) -> Self {
+        let smart_first = plan.default_model == ModelTier::Smart;
+        Self {
+            plan_id: plan_id.to_owned(),
+            allowance: Allowance::from(plan),
+            max_output_fast: 4_096,
+            max_output_smart: if smart_first { 32_000 } else { 8_192 },
+            // A few streams per device (ghost text cancels its own; asks and the agent overlap).
+            max_concurrent: 4 * plan.devices.max(1) as usize,
         }
     }
 }
 
-/// The user's entitlements. Also marks them active (as every authenticated route does).
-pub async fn entitlements(db: &Db, user: Uuid) -> Result<Entitlements, DbError> {
-    let plan = Plan::parse(&db.touch_profile(user).await?);
-    Ok(Entitlements::for_plan(plan))
+/// The user's entitlements; `None` without a live subscription (the endpoint answers 402).
+pub async fn entitlements(
+    db: &Db,
+    catalog: &Catalog,
+    user: Uuid,
+) -> Result<Option<Entitlements>, DbError> {
+    Ok(crate::plans::entitlement(db, catalog, user)
+        .await?
+        .map(|e| Entitlements::for_plan(&e.plan_id, &e.plan)))
 }
 
 #[cfg(test)]
@@ -59,10 +52,13 @@ mod tests {
 
     #[test]
     fn plans_differ_where_it_matters() {
-        let free = Entitlements::for_plan(Plan::Free);
-        let pro = Entitlements::for_plan(Plan::Pro);
-        assert!(!free.smart_model && pro.smart_model);
-        assert!(pro.quota_micros > free.quota_micros);
-        assert_eq!(free.quota_micros, Plan::Free.quota_micros());
+        let c = Catalog::parse(crate::plans::DEFAULT_TOML, crate::testkit::test_prices).unwrap();
+        let heed = Entitlements::for_plan("heed", c.get("heed").unwrap());
+        let max = Entitlements::for_plan("heed_max", c.get("heed_max").unwrap());
+        assert_eq!(heed.allowance.default_model, ModelTier::Fast);
+        assert_eq!(max.allowance.default_model, ModelTier::Smart);
+        assert!(max.allowance.hard_cap_micros > heed.allowance.hard_cap_micros);
+        assert!(max.max_concurrent > heed.max_concurrent);
+        assert!(max.max_output_smart > heed.max_output_smart);
     }
 }

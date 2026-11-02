@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the data file behind the benchmark dashboard in the Nugget book.
+"""Build the data file behind the benchmark dashboard in the Heed book.
 
 Reads the nightly history (one `YYYY-MM-DD.json` results file per day, in the format the nightly
 workflow writes) and the headline metrics listed in `scripts/bench-runs.json`, and writes

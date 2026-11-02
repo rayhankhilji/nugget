@@ -14,9 +14,13 @@ use nuggetd::{Daemon, DaemonOptions, Startup, backup_cli, cli, logging, service}
 const RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Parser)]
-#[command(name = "nuggetd", version, about = "Nugget background daemon")]
+#[command(
+    name = "nuggetd",
+    version = concat!(env!("CARGO_PKG_VERSION"), " (Heed)"),
+    about = "Heed background daemon"
+)]
 struct Args {
-    /// Keep all Nugget data, config and cache under DIR (overrides NUGGET_HOME).
+    /// Keep all Heed data, config and cache under DIR (overrides NUGGET_HOME).
     #[arg(long, global = true, value_name = "DIR")]
     home: Option<PathBuf>,
 
@@ -85,12 +89,12 @@ enum BackupAction {
 
 #[derive(Debug, Subcommand)]
 enum McpAction {
-    /// Create an MCP client and add Nugget to an app's MCP configuration.
+    /// Create an MCP client and add Heed to an app's MCP configuration.
     Install {
         /// The app to set up.
         #[arg(long, value_enum)]
         client: App,
-        /// Name of the client in Nugget (default: the app's name).
+        /// Name of the client in Heed (default: the app's name).
         #[arg(long)]
         name: Option<String>,
         /// Config file to merge into (default: the app's usual location).

@@ -54,7 +54,7 @@ export function validateAction(
       const el = element(latest, action.element);
       usable(el);
       if (el.sensitive) {
-        throw new ProtocolError("sensitive_field", `element ${el.id} is a ${el.sensitive} field; Nugget never types into those`);
+        throw new ProtocolError("sensitive_field", `element ${el.id} is a ${el.sensitive} field; Heed never types into those`);
       }
       if (!el.editable) throw new ProtocolError("not_editable", `element ${el.id} is not editable`);
       if (action.text.length > LIMITS.maxTypeChars) {
@@ -66,7 +66,7 @@ export function validateAction(
       const el = element(latest, action.element);
       usable(el);
       if (el.sensitive) {
-        throw new ProtocolError("sensitive_field", `element ${el.id} is a ${el.sensitive} field; Nugget never fills those`);
+        throw new ProtocolError("sensitive_field", `element ${el.id} is a ${el.sensitive} field; Heed never fills those`);
       }
       if (!el.options) throw new ProtocolError("not_editable", `element ${el.id} is not a select`);
       if (!el.options.some((o) => o.value === action.value || o.label === action.value)) {
@@ -106,7 +106,7 @@ function live(registry: ElementRegistry, id: string): Element {
  * the snapshot (attributes changed, or a swap that kept the element). */
 function notSensitiveNow(registry: ElementRegistry, el: Element): void {
   const kind = registry.noteSensitive(el, sensitivity(el));
-  if (kind) throw new ProtocolError("sensitive_field", `the target is now a ${kind} field; Nugget never fills those`);
+  if (kind) throw new ProtocolError("sensitive_field", `the target is now a ${kind} field; Heed never fills those`);
 }
 
 function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string): void {

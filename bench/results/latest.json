@@ -2,7 +2,7 @@
  "format": 1,
  "date": "2026-10-29",
  "git_commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8",
- "machine": "a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed; the two computer-use runs were re-run at 4b5a8ac with the Nugget agent (--cua-agent nugget) instead of the harness reference agent",
+ "machine": "a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed; the two computer-use runs were re-run at 4b5a8ac with the Heed agent (--cua-agent nugget) instead of the harness reference agent",
  "generated_at": "2026-10-29T06:42:41Z",
  "runs": [
   {

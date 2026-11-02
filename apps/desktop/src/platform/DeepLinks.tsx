@@ -1,5 +1,5 @@
 /**
- * Acts on `nugget://` links and opened `.nuggetplugin` files, already validated by the shell
+ * Acts on `heed://` links and opened `.nuggetplugin` files, already validated by the shell
  * (`src-tauri/src/deeplink.rs`). Takes the waiting link at mount and on each `nugget:deeplink`
  * event. A page just navigates and a search is only typed in (Enter runs it); opening an item or
  * installing a plugin asks first.
@@ -50,7 +50,8 @@ export function DeepLinks({ pages, go }: { pages: readonly PageId[]; go: (page: 
           // The shell sends questions to the quick-ask box itself.
           return;
         case "connections":
-          // The page reloads its list on `nugget:cloud-connections`.
+        case "billing":
+          // The page reloads on `nugget:cloud-connections` / `nugget:cloud-billing`.
           if (pages.includes("connections")) go("connections");
           return;
       }

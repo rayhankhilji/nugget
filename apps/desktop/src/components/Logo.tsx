@@ -1,18 +1,14 @@
-export function Logo({ size = 22 }: { size?: number }) {
+/**
+ * The Heed mark: an attention dot above a line, on a graphite tile. With `pulse` the dot breathes
+ * gently (something needs you); reduced motion keeps it still.
+ */
+export function Logo({ size = 22, pulse = false }: { size?: number; pulse?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-      <path
-        d="M32 6c12 0 24 9 26 23 2 15-9 29-26 29S4 44 6 29C8 15 20 6 32 6Z"
-        fill="var(--accent)"
-      />
-      <path
-        d="M22 24c3-5 8-7 13-6"
-        fill="none"
-        stroke="var(--accent-contrast)"
-        strokeWidth="4"
-        strokeLinecap="round"
-        opacity="0.75"
-      />
+    <svg className={pulse ? "mark mark-pulse" : "mark"} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+      <rect width="64" height="64" rx="15" className="mark-tile" />
+      <circle cx="32" cy="25" r="12" className="mark-halo" />
+      <circle cx="32" cy="25" r="7.5" className="mark-dot" />
+      <rect x="19" y="39" width="26" height="5.5" rx="2.75" className="mark-line" />
     </svg>
   );
 }

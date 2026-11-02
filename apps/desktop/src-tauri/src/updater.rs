@@ -9,7 +9,7 @@
 //!   settings panel, with the release notes). Nothing is downloaded until the user clicks
 //!   Install, and Install names the exact version whose notes were shown.
 //! - Auto-install is opt-in: the update is downloaded and verified in the background and installed
-//!   when Nugget quits, and the panel shows its notes in the meantime.
+//!   when Heed quits, and the panel shows its notes in the meantime.
 //! - Every package is verified against the minisign public key compiled into this build
 //!   (`NUGGET_UPDATER_PUBKEY`, set by the release workflow). Builds without a key (dev builds,
 //!   self-built packages) have no updater at all.
@@ -74,7 +74,7 @@ pub struct UpdateStatus {
     pub configured: bool,
     pub settings: Settings,
     pub available: Option<AvailableUpdate>,
-    /// Downloaded and verified; installs when Nugget quits (auto-install only).
+    /// Downloaded and verified; installs when Heed quits (auto-install only).
     pub staged: bool,
     /// A check, download or install is running.
     pub busy: bool,
@@ -188,12 +188,12 @@ impl Updates {
         self.lock().settings.clone()
     }
 
-    /// The user's answer to "start Nugget at login?" (the per-user `nuggetd` service).
+    /// The user's answer to "start Heed at login?" (the per-user `nuggetd` service).
     pub fn start_at_login(&self) -> Option<bool> {
         self.lock().settings.start_at_login
     }
 
-    /// An update is downloaded and will install as Nugget quits (`install_staged`).
+    /// An update is downloaded and will install as Heed quits (`install_staged`).
     pub fn has_staged(&self) -> bool {
         let s = self.lock();
         s.settings.auto_install && s.pending.is_some() && s.staged.is_some()
@@ -584,7 +584,7 @@ pub async fn updates_install(
     updates.install(&app, &version).await
 }
 
-/// Answer "start Nugget at login?". Yes registers the per-user service; no after a yes removes
+/// Answer "start Heed at login?". Yes registers the per-user service; no after a yes removes
 /// it; no otherwise just records the answer so the app stops asking.
 #[tauri::command]
 pub async fn login_set(

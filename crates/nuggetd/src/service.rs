@@ -10,7 +10,7 @@ pub const SYSTEMD_UNIT: &str = "nuggetd.service";
 /// Task Scheduler task name (root folder, which standard users may write).
 pub const WINDOWS_TASK: &str = "Nugget Daemon";
 
-const DESCRIPTION: &str = "Nugget background daemon (nuggetd)";
+const DESCRIPTION: &str = "Heed background daemon (nuggetd)";
 const DOCS_URL: &str = "https://github.com/rayhankhilji/nugget";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -578,9 +578,9 @@ mod tests {
 
     fn spec(home: Option<&str>) -> ServiceSpec {
         ServiceSpec {
-            exe: PathBuf::from("/opt/Nugget & Co/bin/nuggetd"),
+            exe: PathBuf::from("/opt/Heed & Co/bin/nuggetd"),
             home: home.map(PathBuf::from),
-            log_dir: PathBuf::from("/Users/me/Library/Application Support/Nugget/logs"),
+            log_dir: PathBuf::from("/Users/me/Library/Application Support/Heed/logs"),
         }
     }
 
@@ -588,7 +588,7 @@ mod tests {
     fn launchd_plist_escapes_args_and_restarts_on_crash() {
         let p = launchd_plist(&spec(Some("/tmp/n<1>")));
         assert!(p.contains(
-            "    <array>\n        <string>/opt/Nugget &amp; Co/bin/nuggetd</string>\n        <string>--home</string>\n        <string>/tmp/n&lt;1&gt;</string>\n    </array>"
+            "    <array>\n        <string>/opt/Heed &amp; Co/bin/nuggetd</string>\n        <string>--home</string>\n        <string>/tmp/n&lt;1&gt;</string>\n    </array>"
         ));
         assert!(p.contains("<key>SuccessfulExit</key>\n        <false/>"));
         assert!(!p.contains("UserName"));
@@ -599,7 +599,7 @@ mod tests {
     fn systemd_unit_is_a_user_unit_with_quoted_exec() {
         let u = systemd_unit(&spec(Some("/home/me/100%$HOME")));
         assert!(u.contains(
-            "\nExecStart=\"/opt/Nugget & Co/bin/nuggetd\" \"--home\" \"/home/me/100%%$$HOME\"\n"
+            "\nExecStart=\"/opt/Heed & Co/bin/nuggetd\" \"--home\" \"/home/me/100%%$$HOME\"\n"
         ));
         assert!(!u.contains("User="));
     }
@@ -607,15 +607,15 @@ mod tests {
     #[test]
     fn windows_task_is_a_least_privilege_logon_task() {
         let s = ServiceSpec {
-            exe: PathBuf::from(r"C:\Program Files\Nugget\nuggetd.exe"),
-            home: Some(PathBuf::from(r"D:\Nugget Data\")),
+            exe: PathBuf::from(r"C:\Program Files\Heed\nuggetd.exe"),
+            home: Some(PathBuf::from(r"D:\Heed Data\")),
             log_dir: PathBuf::from(r"C:\logs"),
         };
         let x = windows_task_xml(&s, r"WORK\R&D");
         assert!(x.contains("<UserId>WORK\\R&amp;D</UserId>"));
         assert!(x.contains("<RunLevel>LeastPrivilege</RunLevel>"));
         // Trailing backslash doubled so it does not escape the closing quote.
-        assert!(x.contains(r#"<Arguments>--home &quot;D:\Nugget Data\\&quot;</Arguments>"#));
+        assert!(x.contains(r#"<Arguments>--home &quot;D:\Heed Data\\&quot;</Arguments>"#));
         assert_eq!(windows_quote(r#"say "hi""#), r#""say \"hi\"""#);
         assert_eq!(windows_quote(""), "\"\"");
         assert_eq!(utf16le_with_bom("A<"), vec![0xFF, 0xFE, b'A', 0, b'<', 0]);

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
-import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
+import { api, chatHistory, events, errorMessage, proactiveApi, proactiveEvents, type ConnectionInfo, type PageId, type StoredConversation } from "./api";
 import { useEvent } from "./hooks";
-import { requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
+import { requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
+import { Icon, type IconName } from "./components/Icon";
+import { cloudApi } from "./cloud";
 import { Offline } from "./components/Offline";
 import { RecoveryBanner } from "./components/BackupSettings";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -22,7 +24,7 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
-import { TodayPage } from "./pages/Today";
+import { HomePage, NeedsPage } from "./pages/Today";
 import { startProactiveNotifications } from "./proactiveNotifications";
 import { DoubleTapPage } from "./pages/DoubleTap";
 import { CloudPage } from "./pages/Cloud";
@@ -44,41 +46,40 @@ export interface PageDef {
   keywords?: MessageKey;
   /** A ⌘/Ctrl+<key> shortcut besides the automatic ⌘/Ctrl+1…9 by position. */
   shortcut?: string;
-  /** Works without the local background service (Nugget Cloud). */
+  /** Works without the local background service (Heed Cloud). */
   standalone?: boolean;
+  /** Where the sidebar lists it: the four main surfaces, Settings, or nowhere (Chat). */
+  place: "main" | "settings" | "hidden";
+  icon?: IconName;
 }
 
 /**
- * Every page of the app, in nav order. The nav, ⌘/Ctrl+1…9, the command palette and page
- * restore all come from this list. To add a page: add its id to `PageId` in api.ts, import the
- * component above and add ONE line here (a label key under `app.nav.*` in en.json, optionally
- * `keywords` under `app.keywords.*`).
+ * Every page of the app. The nav, ⌘/Ctrl+1…9 (by position), the command palette and page restore
+ * all come from this list. The sidebar shows the four main surfaces and recent chats; the
+ * Settings pages show in its place when one of them is open (⌘, or the account button).
  */
 export const PAGES: readonly PageDef[] = [
-  { id: "today", label: "app.nav.today", Component: TodayPage },
-  { id: "chat", label: "app.nav.chat", Component: ChatPage, keywords: "app.keywords.chat" },
-  { id: "search", label: "app.nav.search", Component: SearchPage, keywords: "app.keywords.search" },
-  { id: "knowledge", label: "app.nav.knowledge", Component: KnowledgePage, keywords: "app.keywords.knowledge" },
-  { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources" },
-  { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps" },
-  { id: "plugins", label: "app.nav.plugins", Component: PluginsPage },
-  { id: "agent", label: "app.nav.agent", Component: AgentPage },
-  { id: "safety", label: "app.nav.safety", Component: SafetyPage },
-  { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models" },
-  { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
-  { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
-  { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
-  { id: "connections", label: "app.nav.connections", Component: CloudPage, standalone: true },
+  { id: "today", label: "app.nav.today", Component: HomePage, place: "main", icon: "home", keywords: "app.keywords.today" },
+  { id: "needs", label: "app.nav.needs", Component: NeedsPage, place: "main", icon: "inbox", keywords: "app.keywords.needs" },
+  { id: "search", label: "app.nav.search", Component: SearchPage, keywords: "app.keywords.search", place: "main", icon: "search" },
+  { id: "connections", label: "app.nav.connections", Component: CloudPage, standalone: true, place: "main", icon: "plug" },
+  { id: "chat", label: "app.nav.chat", Component: ChatPage, keywords: "app.keywords.chat", place: "hidden", icon: "chat" },
+  { id: "knowledge", label: "app.nav.knowledge", Component: KnowledgePage, keywords: "app.keywords.knowledge", place: "settings" },
+  { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources", place: "settings" },
+  { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps", place: "settings" },
+  { id: "plugins", label: "app.nav.plugins", Component: PluginsPage, place: "settings" },
+  { id: "agent", label: "app.nav.agent", Component: AgentPage, place: "settings" },
+  { id: "safety", label: "app.nav.safety", Component: SafetyPage, place: "settings" },
+  { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models", place: "settings" },
+  { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage, place: "settings" },
+  { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy", place: "settings" },
+  { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: ",", place: "settings" },
 ];
 
-/**
- * The nav shows the pages in two groups: the user's own stuff (Today … Sources) and, from this
- * page on, setup and settings. Order, ids and shortcuts don't change.
- */
-const FIRST_SETTINGS_PAGE: PageId = "apps";
 const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
 
 const PAGE_KEY = "nugget.page";
+const RECENT_CHATS = 5;
 const PALETTE: Combo = { mod: true, key: "K" };
 
 function initialPage(): PageId {
@@ -115,8 +116,13 @@ export function App() {
   // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
   const focusMain = useRef(false);
   const saved = useSavedSearches();
+  const recents = useRecentChats(page);
+  const needsCount = useNeedsCount(conn?.connected === true, page);
+  /** The main page to go back to from Settings. */
+  const lastMain = useRef<PageId>("today");
 
   const go = useCallback((id: PageId) => {
+    if (PAGES.find((p) => p.id === id)?.place !== "settings") lastMain.current = id;
     setPage(id);
     try {
       localStorage.setItem(PAGE_KEY, id);
@@ -312,7 +318,8 @@ export function App() {
     next?.focus();
   };
 
-  const navItem = (p: PageDef, i: number) => {
+  const navItem = (p: PageDef) => {
+    const i = PAGES.indexOf(p);
     const combo = pageCombo(p, i);
     const label = t(p.label);
     return (
@@ -325,12 +332,14 @@ export function App() {
           title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
           onClick={() => go(p.id)}
         >
+          {p.icon && <Icon name={p.icon} />}
           {label}
+          {p.id === "needs" && needsCount > 0 && <span className="nav-count">{formatCount(needsCount)}</span>}
         </button>
       </li>
     );
   };
-  const split = Math.max(0, PAGES.findIndex((p) => p.id === FIRST_SETTINGS_PAGE));
+  const inSettings = PAGES.find((p) => p.id === page)?.place === "settings";
 
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
   const Current = current.Component;
@@ -350,43 +359,97 @@ export function App() {
       </a>
       <aside className="sidebar" aria-label={t("app.sidebarLabel")}>
         <div className="brand">
-          <Logo />
-          <span>{t("app.name")}</span>
+          <Logo pulse={needsCount > 0} />
+          <span className="wordmark">{t("app.name").toLowerCase()}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
+          <Icon name="search" size={14} />
           <span className="palette-trigger-label">{t("app.openPalette")}</span>
           <kbd aria-hidden="true" dir="ltr">
             {comboLabel(PALETTE)}
           </kbd>
         </button>
-        <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
-          <ul>{PAGES.slice(0, split).map((p, i) => navItem(p, i))}</ul>
-          <div>
+        {inSettings ? (
+          <nav aria-label={t("app.navGroup.settings")} onKeyDown={onNavKey} className="nav-settings">
+            <button type="button" className="nav-item nav-back" onClick={() => go(lastMain.current)}>
+              <span className="flip-rtl">
+                <Icon name="back" />
+              </span>
+              {t("app.backToApp")}
+            </button>
             <p className="nav-group-label" id="nav-group-settings">
               {t("app.navGroup.settings")}
             </p>
-            <ul aria-labelledby="nav-group-settings">{PAGES.slice(split).map((p, i) => navItem(p, split + i))}</ul>
-          </div>
-        </nav>
-        <SavedSearchNav onRun={runSaved} />
+            <ul aria-labelledby="nav-group-settings">{PAGES.filter((p) => p.place === "settings").map(navItem)}</ul>
+            <SidebarSettings onSetup={() => setOnboarding(true)} />
+          </nav>
+        ) : (
+          <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
+            <ul>{PAGES.filter((p) => p.place === "main").map(navItem)}</ul>
+            <div>
+              <div className="nav-group-head">
+                <p className="nav-group-label" id="nav-group-recent">
+                  {t("app.recentChats")}
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon nav-new-chat"
+                  aria-label={t("palette.action.newChat")}
+                  title={t("palette.action.newChat")}
+                  onClick={() => {
+                    requestNewChat();
+                    go("chat");
+                  }}
+                >
+                  <Icon name="plus" size={14} />
+                </button>
+              </div>
+              <ul aria-labelledby="nav-group-recent">
+                {recents.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      className="nav-item"
+                      onClick={() => {
+                        requestChatOpen(c.id);
+                        go("chat");
+                      }}
+                    >
+                      <bdi className="nav-recent">{conversationTitle(c)}</bdi>
+                    </button>
+                  </li>
+                ))}
+                <li>
+                  <button type="button" className="nav-item" aria-current={page === "chat" ? "page" : undefined} onClick={() => go("chat")}>
+                    <Icon name="chat" />
+                    {t("app.nav.chat")}
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <SavedSearchNav onRun={runSaved} />
+          </nav>
+        )}
         <div className="sidebar-foot">
+          <AccountButton active={inSettings} onOpen={() => go(inSettings ? page : "status")} />
           <ConnectionPill conn={conn} />
-          <SidebarSettings onSetup={() => setOnboarding(true)} />
         </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
-        {current.standalone ? (
-          <Current />
-        ) : conn === null ? (
-          <div className="center muted">{t("app.connecting")}</div>
-        ) : !conn.connected ? (
-          <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
-        ) : (
-          <>
-            <RecoveryBanner />
+        <div key={page} className="page-enter">
+          {current.standalone ? (
             <Current />
-          </>
-        )}
+          ) : conn === null ? (
+            <div className="center muted">{t("app.connecting")}</div>
+          ) : !conn.connected ? (
+            <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
+          ) : (
+            <>
+              <RecoveryBanner />
+              <Current />
+            </>
+          )}
+        </div>
       </main>
       <DeepLinks pages={PAGE_IDS} go={jump} />
       <QuitPrompt />
@@ -405,5 +468,87 @@ function ConnectionPill({ conn }: { conn: Connection }) {
       <span className="dot" aria-hidden="true" />
       {label}
     </div>
+  );
+}
+
+function formatCount(n: number): string {
+  return n > 99 ? "99+" : String(n);
+}
+
+/** A saved conversation's title: its first question, on one line. */
+function conversationTitle(c: StoredConversation): string {
+  const first = c.title || c.messages.find((m) => m.role === "user")?.text || "";
+  return first.replace(/\s+/g, " ").trim();
+}
+
+/** The newest saved conversations, reloaded whenever the page changes (Chat saves as it goes). */
+function useRecentChats(page: PageId): StoredConversation[] {
+  const [list, setList] = useState<StoredConversation[]>([]);
+  useEffect(() => {
+    let alive = true;
+    chatHistory
+      .load()
+      .then((l) => alive && setList(l.filter((c) => conversationTitle(c)).slice(0, RECENT_CHATS)))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [page]);
+  return list;
+}
+
+/** How many cards wait in Needs you (0 while unknown or offline). */
+function useNeedsCount(connected: boolean, page: PageId): number {
+  const [n, setN] = useState(0);
+  const [tick, setTick] = useState(0);
+  useEvent(proactiveEvents.onCardsChanged, () => setTick((x) => x + 1));
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    proactiveApi
+      .cardsList({})
+      .then((l) => alive && setN(l.enabled ? l.cards.length : 0))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [connected, page, tick]);
+  return n;
+}
+
+/** The account and settings entry at the foot of the sidebar (⌘,). */
+function AccountButton({ active, onOpen }: { active: boolean; onOpen: () => void }) {
+  const t = useT();
+  const [email, setEmail] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    cloudApi
+      .session()
+      .then((s) => alive && setEmail(s.signed_in ? s.email : null))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const combo: Combo = { mod: true, key: "," };
+  return (
+    <button
+      type="button"
+      className="nav-item account"
+      aria-current={active ? "page" : undefined}
+      aria-keyshortcuts={comboAria(combo)}
+      onClick={onOpen}
+    >
+      <span className="avatar" aria-hidden="true">
+        {email ? email[0]!.toUpperCase() : <Icon name="settings" size={14} />}
+      </span>
+      <span className="account-text">
+        <span>{t("app.navGroup.settings")}</span>
+        {email && <bdi className="account-email">{email}</bdi>}
+      </span>
+      <kbd aria-hidden="true" dir="ltr">
+        {comboLabel(combo)}
+      </kbd>
+    </button>
   );
 }

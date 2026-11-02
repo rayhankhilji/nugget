@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-/// JSON-RPC 2.0 error codes used by Nugget.
+/// JSON-RPC 2.0 error codes used by Heed.
 ///
 /// `-32700..=-32600` are the codes reserved by the JSON-RPC 2.0 spec. `-32000..=-32099` is the
-/// spec's "implementation-defined server error" range; Nugget maps each [`nugget_core::Error`]
+/// spec's "implementation-defined server error" range; Heed maps each [`nugget_core::Error`]
 /// variant to one code in it.
 pub mod code {
     /// Invalid JSON was received.

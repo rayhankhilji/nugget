@@ -60,7 +60,7 @@ pub(crate) fn add_route(hotkey: &HotKey, chord: &Chord, fire: Fire) -> Result<Ro
         .map_err(|_| Error::Other("hotkey routes poisoned".into()))?;
     if routes.contains_key(&hotkey.id()) {
         return Err(Error::Invalid(format!(
-            "chord {chord} is already used by another Nugget listener"
+            "chord {chord} is already used by another Heed listener"
         )));
     }
     routes.insert(hotkey.id(), fire);

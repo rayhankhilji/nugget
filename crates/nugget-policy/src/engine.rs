@@ -377,7 +377,7 @@ impl PolicyEngine {
             rule: None,
         };
         if self.kill.halted() {
-            out.decision = Decision::Deny("Nugget is halted (kill switch engaged)".into());
+            out.decision = Decision::Deny("Heed is halted (kill switch engaged)".into());
             out.rule = Some("kill-switch".into());
             return out;
         }
@@ -414,7 +414,7 @@ impl PolicyEngine {
                 .map(String::as_str)
                 .unwrap_or(&action.target_app);
             out.decision = Decision::Deny(format!(
-                "Blocked: {what} ({target}) are off limits to Nugget [rule {}]",
+                "Blocked: {what} ({target}) are off limits to Heed [rule {}]",
                 rule.id
             ));
             out.rule = Some(rule.id.clone());
@@ -905,7 +905,7 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
         RiskClass::Spend => "spend money or commit you to something",
         RiskClass::Security => "change security or system settings",
     };
-    let mut s = format!("Nugget is about to {what} in {}: {}", r.target_app, r.verb);
+    let mut s = format!("Heed is about to {what} in {}: {}", r.target_app, r.verb);
     if let Some(label) = &r.target_label {
         s.push_str(&format!(" “{label}”"));
     }

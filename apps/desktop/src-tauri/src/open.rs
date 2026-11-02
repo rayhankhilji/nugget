@@ -57,7 +57,7 @@ pub fn classify(raw: &str) -> Result<Target, String> {
         "obsidian" => Ok(Target::Obsidian(url)),
         "file" => file_target(&url).map(Target::File),
         other => Err(format!(
-            "Nugget only opens https, obsidian and file links, not “{other}:”."
+            "Heed only opens https, obsidian and file links, not “{other}:”."
         )),
     }
 }
@@ -88,13 +88,13 @@ fn file_target(url: &Url) -> Result<PathBuf, String> {
         .host_str()
         .is_some_and(|h| !h.is_empty() && h != "localhost")
     {
-        return Err("Nugget only opens files on this device.".into());
+        return Err("Heed only opens files on this device.".into());
     }
     let path = url
         .to_file_path()
         .map_err(|()| "That file link doesn't name a local file.".to_string())?;
     if !path.is_absolute() || is_unc(&path) {
-        return Err("Nugget only opens files on this device.".into());
+        return Err("Heed only opens files on this device.".into());
     }
     Ok(path)
 }

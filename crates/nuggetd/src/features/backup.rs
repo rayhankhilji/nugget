@@ -536,7 +536,7 @@ impl Inner {
     fn refuse_in_recovery(&self, what: &str) -> Result<()> {
         if self.recovery.is_some() {
             return Err(Error::Unsupported(format!(
-                "the database is damaged and Nugget is running on an empty temporary store, so it does not {what}; restore from a backup first"
+                "the database is damaged and Heed is running on an empty temporary store, so it does not {what}; restore from a backup first"
             )));
         }
         Ok(())
@@ -789,7 +789,7 @@ impl Inner {
             Some(OffsetDateTime::now_utc());
     }
 
-    /// Refuse `folder` inside (or containing) Nugget's data, config or vault directory.
+    /// Refuse `folder` inside (or containing) Heed's data, config or vault directory.
     fn check_outside(&self, folder: &Path) -> Result<()> {
         let paths = self.paths();
         let vault = self.live_vault().or_else(|| self.vault_root.clone());

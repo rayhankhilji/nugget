@@ -91,7 +91,7 @@ pub fn definitions() -> Vec<Tool> {
             SEARCH,
             describe(
                 "Search the user's personal knowledge (files, mail, calendar, notes indexed by \
-                 Nugget) by keywords or a natural-language question. Returns the best-matching \
+                 Heed) by keywords or a natural-language question. Returns the best-matching \
                  passage of each item with its source, item key and relevance score, best first. \
                  Use get_item to read a whole item, or get_context for a citable bundle of \
                  passages to answer from.",
@@ -274,7 +274,7 @@ impl ToolFailure {
         tracing::warn!(error = %e, "mcp backend error");
         Self {
             outcome: Outcome::Error,
-            message: "Nugget could not complete the request; try again later.".into(),
+            message: "Heed could not complete the request; try again later.".into(),
         }
     }
 }

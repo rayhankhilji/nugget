@@ -197,3 +197,21 @@ export async function stopDaemon(daemon, name) {
   await daemon.stop({ keep: KEEP });
   if (KEEP) log(`kept the ${name} daemon home: ${daemon.home}`);
 }
+
+/**
+ * Open a page through the sidebar, as a person would. The sidebar lists the main pages (and
+ * Chat) or, on a Settings page, the Settings pages: it goes Back or into Settings first when the
+ * page is listed in the other mode.
+ */
+export async function navTo(page, id) {
+  const label = t(`app.nav.${id}`);
+  const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const item = page.locator("aside.sidebar nav .nav-item").filter({ hasText: new RegExp(`^\\s*${esc}\\s*(\\d+\\+?)?\\s*$`) }).first();
+  if (!(await item.isVisible())) {
+    const back = page.locator("aside.sidebar .nav-back");
+    if (await back.isVisible()) await back.click();
+    else await page.locator("aside.sidebar .account").click();
+  }
+  await item.click();
+  await page.locator(`main[aria-label="${label}"]`).waitFor();
+}

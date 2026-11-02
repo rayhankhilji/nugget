@@ -32,7 +32,7 @@ describe("Ask on Search with no AI (GG6-14)", () => {
     mockDaemon({ providers_list: [], retrieve_context: ctx });
     const { container } = await render(<SearchPage />);
     await openAskWithContext(container);
-    expect(container.textContent).toContain("No AI is set up yet, so Nugget can't write an answer.");
+    expect(container.textContent).toContain("No AI is set up yet, so Heed can't write an answer.");
     expect(byText(container, "button", "Set up AI")).toBeDefined();
     expect(byText(container, "button", "Ask with this context")).toBeUndefined();
   });

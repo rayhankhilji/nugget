@@ -463,7 +463,7 @@ impl ReadOnlyDb {
         match db.first_read() {
             Ok(()) => Ok(db),
             Err(e) if is_not_a_database(&e) => Err(Error::Integrity(format!(
-                "cannot decrypt {}: wrong key or not a Nugget database",
+                "cannot decrypt {}: wrong key or not a Heed database",
                 path.display()
             ))),
             Err(e) if is_transient(&e) => {

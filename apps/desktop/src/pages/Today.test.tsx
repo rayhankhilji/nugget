@@ -1,7 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BriefView, CardsList, CardView } from "../api";
-import { TodayPage } from "./Today";
+import { HomePage, NeedsPage } from "./Today";
+
+/** Home (brief) and Needs you (cards) together, as these tests check both. */
+function TodayPage() {
+  return (
+    <>
+      <HomePage />
+      <NeedsPage />
+    </>
+  );
+}
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { loadLocale } from "../i18n";
 
@@ -176,7 +186,7 @@ describe("Today page", () => {
       await click(container.querySelector<HTMLElement>(".today-proposed button")!);
       await flush();
       await click(byText(document.querySelector("dialog")!, "button", "Freigeben"));
-      expect(document.querySelector("dialog")!.textContent).toContain("Nugget sendet gleich etwas in Ihrem Namen.");
+      expect(document.querySelector("dialog")!.textContent).toContain("Heed sendet gleich etwas in Ihrem Namen.");
     } finally {
       await loadLocale("en");
     }

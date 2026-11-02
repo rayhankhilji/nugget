@@ -33,7 +33,7 @@ impl Confirmer for DeclineAll {
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BrowserError {
-    #[error("the kill switch is engaged; Nugget has stopped")]
+    #[error("the kill switch is engaged; Heed has stopped")]
     Halted,
     #[error("blocked by policy: {0}")]
     Denied(String),
@@ -41,7 +41,7 @@ pub enum BrowserError {
     Declined(String),
     #[error("invalid action: {0}")]
     Invalid(#[from] ValidationError),
-    #[error("Nugget has no access to this site; the user can allow it from the toolbar button")]
+    #[error("Heed has no access to this site; the user can allow it from the toolbar button")]
     PermissionRequired,
     #[error("the page changed since the last snapshot; take a new snapshot")]
     StaleSnapshot,
@@ -291,7 +291,7 @@ impl BrowserController {
     }
 
     /// The daemon's kill switch changed. Engaged: tell the extension to halt (it stops acting,
-    /// refuses reads and swaps "Nugget is acting" for "stopped"), and forget the overlay so the
+    /// refuses reads and swaps "Heed is acting" for "stopped"), and forget the overlay so the
     /// next task shows it again. Lifted: tell the extension the user resumed. Best effort: the
     /// controller refuses every action while halted whatever the extension says.
     pub async fn kill_changed(&self, halted: bool) {

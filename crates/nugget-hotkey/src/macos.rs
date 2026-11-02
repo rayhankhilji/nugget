@@ -5,7 +5,7 @@
 //! permission. Global key-down events (used only to cancel a tap, and for the Escape kill
 //! switch) are delivered only once the app has Accessibility permission; without it a shortcut
 //! typed into another app cannot cancel a tap, but the hold limit still rules out most shortcut
-//! use. The local monitor covers events sent to Nugget's own windows, which global monitors
+//! use. The local monitor covers events sent to Heed's own windows, which global monitors
 //! never see.
 //!
 //! Monitors run on the main thread and are delivered by the main run loop, so the host app must

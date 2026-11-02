@@ -239,9 +239,72 @@ body.overlay-body.ghost-body {
 .ghost {
   margin: 0;
   padding: 0;
+  /* The field's own UI font: ghost text should look like the user's text, not like Heed. */
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: normal;
   background: transparent;
+}
+
+/* The streaming tail: the newest words fade from ghost grey into the brand coral and out. */
+.ghost-tail {
+  background: linear-gradient(90deg, currentColor 0%, var(--brand) 55%, transparent 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  opacity: 0.8;
+  animation: ghost-shimmer 1.2s linear infinite;
+}
+
+@keyframes ghost-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* One tiny hint at the end of the suggestion: the brand dot and the key(s) that accept it. */
+.ghost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: 6px;
+  padding: 0 4px 0 5px;
+  height: 1.35em;
+  max-height: 20px;
+  border-radius: 6px;
+  vertical-align: 0.05em;
+  text-indent: 0;
+  font: 500 10px/1 var(--font);
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow);
+  animation: fade-in var(--dur-1) var(--ease-out) 80ms backwards;
+}
+
+.ghost-chip i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.ghost-chip kbd {
+  min-width: 0;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost-tail {
+    animation: none;
+    background: none;
+    color: inherit;
+    opacity: 0.45;
+  }
 }

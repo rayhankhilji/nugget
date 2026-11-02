@@ -15,7 +15,7 @@
 //!   (XEmbed-only trays).
 //!
 //! `NUGGET_TRAY=off` skips the tray on every platform (the installer smoke tests use it). Without
-//! a tray, closing the window quits Nugget the way Quit Nugget does (`lifecycle`), and the Status
+//! a tray, closing the window quits Heed the way Quit Heed does (`lifecycle`), and the Status
 //! page offers the tray's actions instead.
 //!
 //! The status lines are refreshed from the daemon (`ingest.status`, `status`, `agent.list`) when
@@ -166,7 +166,7 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// Create the tray, or log once why there is none. The app works either way (see module docs).
 pub fn init(app: &tauri::App) {
     if let Some(why) = skip_reason() {
-        tracing::info!(reason = %why, "no tray icon; closing the window quits Nugget");
+        tracing::info!(reason = %why, "no tray icon; closing the window quits Heed");
         return;
     }
     // libappindicator-sys panics (rather than erroring) when neither library can be loaded; the
@@ -174,10 +174,10 @@ pub fn init(app: &tauri::App) {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(app))) {
         Ok(Ok(())) => follow_daemon(app.handle()),
         Ok(Err(e)) => {
-            tracing::warn!(error = %e, "tray icon unavailable; closing the window quits Nugget")
+            tracing::warn!(error = %e, "tray icon unavailable; closing the window quits Heed")
         }
         Err(_) => tracing::warn!(
-            "tray icon unavailable (no AppIndicator library); closing the window quits Nugget"
+            "tray icon unavailable (no AppIndicator library); closing the window quits Heed"
         ),
     }
 }
@@ -222,7 +222,7 @@ fn build(app: &tauri::App) -> tauri::Result<()> {
     )?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("Nugget")
+        .tooltip("Heed")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| on_menu(app, e.id().as_ref()))

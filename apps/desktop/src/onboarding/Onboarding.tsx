@@ -1,17 +1,30 @@
-import { useEffect, useReducer, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from "react";
 import { api, type PageId } from "../api";
-import { useT } from "../i18n";
+import { requestChatAsk } from "../hooks.nav";
+import { useT, type MessageKey } from "../i18n";
 import { LanguagePicker } from "../i18n/LanguagePicker";
 import { Logo } from "../components/Logo";
-import { loadState, reduce, saveState, stepGoalMet, STEPS, stepIndex, type OnboardingState } from "./machine";
+import { loadState, reduce, saveState, stepGoalMet, STEPS, stepIndex, type OnboardingState, type StepId } from "./machine";
 import { AiStep } from "./AiStep";
 import { TriggerStep } from "./TriggerStep";
-import { DoneStep, PermissionsStep, SourceStep, STEP_TITLE, WelcomeStep } from "./steps";
+import { DoneStep, PermissionsStep, signInOffered, SourceStep, WelcomeStep } from "./steps";
+import { useCloudSession } from "./ConnectApps";
 import "./onboarding.css";
 
+/** The three stages the progress bar shows: sign in, connect apps (and the setup after it), first answer. */
+const SEGMENTS: { label: MessageKey; steps: StepId[] }[] = [
+  { label: "onboarding.progress.signin", steps: ["welcome"] },
+  {
+    label: "onboarding.progress.connect",
+    steps: ["source", "ai", "permissions", "trigger"],
+  },
+  { label: "onboarding.progress.answer", steps: ["done"] },
+];
+
 /**
- * First-run setup. Shown full-window until finished or skipped; works without the daemon (steps
- * that need it say so and can be skipped). Progress is saved after every change.
+ * First-run setup: sign in → connect apps → first answer. Shown full-window until finished or
+ * skipped; works without the daemon (steps that need it say so and can be skipped) and without an
+ * account (the local-first way). Progress is saved after every change.
  */
 export function Onboarding({
   connected,
@@ -21,8 +34,8 @@ export function Onboarding({
   /** Whether the background service is reachable (steps that need it adapt). */
   connected: boolean;
   /**
-   * Called once the flow is finished or skipped, with the page to open: Search when the user
-   * finished with a searchable source, else the app's default.
+   * Called once the flow is finished or skipped, with the page to open: Chat when the user asked
+   * a first question, Search when they finished with a searchable source, else the app's default.
    */
   onExit: (page?: PageId) => void;
   /** Starting state (tests); defaults to the saved state. */
@@ -37,6 +50,14 @@ export function Onboarding({
   const mainRef = useRef<HTMLElement>(null);
   const footRef = useRef<HTMLElement>(null);
   const stuck = useContentUnder(mainRef, footRef);
+  const stepRef = useRef(state.step);
+  stepRef.current = state.step;
+  // A sign-in that finishes while the sign-in step is open moves on to connecting apps.
+  const cloud = useCloudSession(
+    useCallback(() => {
+      if (stepRef.current === "welcome") dispatch({ type: "next" });
+    }, []),
+  );
 
   useEffect(() => {
     saveState(state);
@@ -54,11 +75,20 @@ export function Onboarding({
 
   const i = stepIndex(state.step);
   const isLast = state.step === "done";
-  const stepProps = { state, dispatch, connected, headingRef };
+  const stepProps = { state, dispatch, connected, headingRef, cloud };
   // Finishing with something indexed goes straight to Search: the first useful thing to do.
   const toSearch = isLast && searchable > 0;
   // Continue on a step that set nothing up counts as skipping it; say so next to the button.
   const unmet = !isLast && !stepGoalMet(state);
+  // One primary action per step: the step's own (sign in, add a folder, ask) until it is done.
+  const withoutAccount = state.step === "welcome" && signInOffered(cloud);
+  const primary = !withoutAccount && !isLast && !(state.step === "source" && unmet);
+  const seg = SEGMENTS.findIndex((g) => g.steps.includes(state.step));
+  const ask = (question: string) => {
+    requestChatAsk(question);
+    exitTo.current = "chat";
+    dispatch({ type: "finish" });
+  };
 
   return (
     <div className="onboarding">
@@ -82,22 +112,16 @@ export function Onboarding({
 
       <nav className="ob-progress" aria-label={t("onboarding.progressLabel")}>
         <ol>
-          {STEPS.map((s, n) => {
-            const status = s === state.step ? "current" : state.completed.includes(s) ? "done" : state.skipped.includes(s) ? "skipped" : "todo";
+          {SEGMENTS.map((g, n) => {
+            const status = n === seg ? "current" : n < seg || g.steps.every((s) => state.completed.includes(s)) ? "done" : "todo";
             return (
-              <li key={s} className={`ob-step ob-step-${status}`}>
-                <button
-                  type="button"
-                  aria-current={s === state.step ? "step" : undefined}
-                  onClick={() => dispatch({ type: "goto", step: s })}
-                >
-                  <span className="ob-step-num" aria-hidden="true">
-                    {status === "done" ? <StepGlyph kind="done" /> : status === "skipped" ? <StepGlyph kind="skipped" /> : n + 1}
+              <li key={g.label} className={`ob-seg ob-seg-${status}`}>
+                <button type="button" aria-current={n === seg ? "step" : undefined} onClick={() => n !== seg && dispatch({ type: "goto", step: g.steps[0]! })}>
+                  <span className="ob-seg-bar" aria-hidden="true" />
+                  <span className="visually-hidden">
+                    {t(g.label)}
+                    {status !== "todo" && ` (${t(`onboarding.stepStatus.${status}`)})`}
                   </span>
-                  <span>{t(STEP_TITLE[s])}</span>
-                  {status !== "todo" && (
-                    <span className="visually-hidden"> ({t(`onboarding.stepStatus.${status}`)})</span>
-                  )}
                 </button>
               </li>
             );
@@ -113,7 +137,7 @@ export function Onboarding({
           {state.step === "source" && <SourceStep {...stepProps} />}
           {state.step === "permissions" && <PermissionsStep {...stepProps} />}
           {state.step === "trigger" && <TriggerStep {...stepProps} />}
-          {state.step === "done" && <DoneStep {...stepProps} searchable={searchable} />}
+          {state.step === "done" && <DoneStep {...stepProps} searchable={searchable} onAsk={ask} />}
         </div>
       </main>
 
@@ -136,14 +160,20 @@ export function Onboarding({
         )}
         <button
           type="button"
-          className="btn btn-primary"
+          className={primary ? "btn btn-primary" : "btn"}
           aria-describedby={unmet ? "ob-continue-hint" : undefined}
           onClick={() => {
             exitTo.current = toSearch ? "search" : undefined;
             dispatch({ type: "continue" });
           }}
         >
-          {toSearch ? t("onboarding.done.search") : isLast ? t("onboarding.done.start") : t("onboarding.continue")}
+          {toSearch
+            ? t("onboarding.done.search")
+            : isLast
+              ? t("onboarding.done.start")
+              : withoutAccount
+                ? t("onboarding.signin.withoutAccount")
+                : t("onboarding.continue")}
         </button>
       </footer>
     </div>
@@ -180,15 +210,6 @@ function useContentUnder(main: RefObject<HTMLElement | null>, foot: RefObject<HT
     };
   }, [main, foot]);
   return under;
-}
-
-/** A check for a done step, a dash for a skipped one (the step's number otherwise). */
-function StepGlyph({ kind }: { kind: "done" | "skipped" }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      {kind === "done" ? <path d="M2.5 6.5 5 9l4.5-5.5" /> : <path d="M3 6h6" />}
-    </svg>
-  );
 }
 
 /** Items indexed across all sources (0 until known, or while `active` is false). */

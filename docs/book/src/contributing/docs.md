@@ -1,7 +1,7 @@
 # Working on these docs
 
 The book lives in `docs/book/` and is built with [mdBook](https://rust-lang.github.io/mdBook/)
-(MPL-2.0, a build tool only, never linked into Nugget). CI builds and checks it; it is not hosted yet.
+(MPL-2.0, a build tool only, never linked into Heed). CI builds and checks it; it is not hosted yet.
 
 Install with `cargo install mdbook --version 0.4.52 --locked`, preview with `mdbook serve docs/book`,
 and run the drift check with `python3 docs/book/check-refs.py`.

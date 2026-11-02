@@ -1,118 +1,7 @@
-/* Nugget desktop. System fonts only (works offline); light/dark follow the OS. Logical properties
-   (inline-start/end) throughout, so right-to-left locales mirror the layout. */
+/* Heed desktop. Tokens live in tokens.css. Logical properties (inline-start/end) throughout, so
+   right-to-left locales mirror the layout. */
 
-:root {
-  color-scheme: light dark;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial,
-    sans-serif;
-  --mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
-
-  --bg: #fbfaf7;
-  --surface: #ffffff;
-  --sidebar: #f3f1ec;
-  --border: #e4e0d8;
-  --text: #1f1d1a;
-  --muted: #6b665d;
-  /* Contrast (WCAG AA) is checked for both themes: text pairs >= 4.5:1, UI parts >= 3:1. */
-  --accent: #9c6600;
-  --accent-strong: #7f5200;
-  --accent-soft: #fbf0d8;
-  --accent-contrast: #fffaf0;
-  --good: #1f7a4d;
-  --good-soft: #e3f3ea;
-  --warn: #8a5a00;
-  --warn-soft: #fbefd6;
-  --bad: #b3261e;
-  --bad-soft: #fbe5e3;
-  --focus: #1a66d9;
-  --link: #1a5cc4;
-  /* Borders that alone identify a control (inputs) need 3:1; --border is for dividers. */
-  --control-border: #8a8478;
-  --backdrop: rgb(0 0 0 / 0.35);
-  --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
-  --user-bubble: #f1ece1;
-
-  /* Button outline: 3:1 against --surface and --bg in both themes (follows --control-border). */
-  --btn-border: var(--control-border);
-  /* Destructive button fill and its text (>= 4.5:1). */
-  --danger-bg: var(--bad);
-  --danger-text: #ffffff;
-  /* Outline of dialogs and popovers. */
-  --dialog-border: var(--border);
-
-  --radius: 10px;
-  --radius-small: 6px;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.05);
-
-  /* Shared scale. Spacing 4/8/12/16/24/32; type: h1 = xl, h2 = lg, h3 = md semibold. */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-md: 14px;
-  --fs-lg: 16px;
-  --fs-xl: 20px;
-  /* Controls on one row share a height: buttons, inputs, selects, segmented. */
-  --control-h: 34px;
-  --control-h-small: 26px;
-
-  /* Knowledge graph: one colour per entity kind (also used by the canvas). */
-  /* Hues spread round the wheel (blue, violet, magenta, red, orange, olive, green, cyan) and kept
-     away from the amber accent; each is >= 3:1 on --surface. */
-  --kind-person: #1f5fd6;
-  --kind-organization: #7d3fc8;
-  --kind-project: #6b7f00;
-  --kind-commitment: #d12b2b;
-  --kind-preference: #008b9a;
-  --kind-event: #e06a00;
-  --kind-place: #1e8e3e;
-  --kind-topic: #c0308f;
-  --graph-edge: rgb(80 72 60 / 0.28);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161513;
-    --surface: #1e1d1a;
-    --sidebar: #11100e;
-    --border: #2f2d29;
-    --text: #ece8e1;
-    --muted: #a39d92;
-    --accent: #e8a72a;
-    --accent-strong: #f4bf55;
-    --accent-soft: #3a2c10;
-    --accent-contrast: #1a1406;
-    --good: #6fd19c;
-    --good-soft: #15301f;
-    --warn: #f0c062;
-    --warn-soft: #362812;
-    --bad: #ff8a80;
-    --bad-soft: #3b1a17;
-    --focus: #7cb0ff;
-    --link: #8cb8ff;
-    --control-border: #787266;
-    --danger-bg: #cf4436;
-    --dialog-border: #45423c;
-    --backdrop: rgb(0 0 0 / 0.6);
-    --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
-    --user-bubble: #2a2722;
-    --shadow: none;
-
-    --kind-person: #7aa7ff;
-    --kind-organization: #b48cf0;
-    --kind-project: #c2d14a;
-    --kind-commitment: #ff7a7a;
-    --kind-preference: #4fd0dd;
-    --kind-event: #ffa04d;
-    --kind-place: #6fd27a;
-    --kind-topic: #f08ac8;
-    --graph-edge: rgb(236 232 225 / 0.22);
-  }
-}
+@import "./tokens.css";
 
 * {
   box-sizing: border-box;
@@ -126,7 +15,9 @@ body,
 }
 
 body {
-  font: var(--fs-md)/1.5 var(--font);
+  font: var(--fs-md)/var(--lh) var(--font);
+  letter-spacing: -0.003em;
+  font-feature-settings: "cv11";
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
@@ -136,14 +27,16 @@ body {
 
 h1 {
   font-size: var(--fs-xl);
-  font-weight: 650;
+  font-weight: 600;
+  line-height: 1.2;
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.018em;
 }
 
 h2 {
   font-size: var(--fs-lg);
   font-weight: 600;
+  letter-spacing: -0.01em;
   margin: var(--space-5) 0 var(--space-2);
 }
 
@@ -215,12 +108,12 @@ kbd {
   display: inline-block;
   min-width: 1.6em;
   padding: 0 5px;
-  border: 1px solid var(--border);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  background: var(--surface);
+  border: 0;
+  border-radius: 5px;
+  background: var(--btn-face);
+  box-shadow: 0 0 0 0.5px var(--hairline), 0 1px 0 var(--hairline), var(--highlight);
   color: var(--muted);
-  font: var(--fs-xs)/18px var(--font);
+  font: 500 11px/18px var(--font);
   text-align: center;
   white-space: nowrap;
 }
@@ -229,7 +122,7 @@ kbd {
 
 .shell {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   /* One viewport tall: the sidebar's nav and <main> scroll on their own; the window never does. */
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
@@ -258,9 +151,9 @@ kbd {
   flex-direction: column;
   gap: var(--space-3);
   min-height: 0;
-  padding: var(--space-4) var(--space-2) var(--space-3);
+  padding: var(--space-4) var(--space-2) var(--space-2);
   background: var(--sidebar);
-  border-inline-end: 1px solid var(--border);
+  border-inline-end: 0.5px solid var(--border);
 }
 
 .brand {
@@ -268,8 +161,12 @@ kbd {
   align-items: center;
   gap: var(--space-2);
   padding: 2px var(--space-2);
-  font-weight: 700;
-  font-size: var(--fs-lg);
+}
+
+/* The wordmark: lowercase "heed" in Geist, never translated. */
+.wordmark {
+  font: 600 19px/1 var(--font-brand);
+  letter-spacing: -0.04em;
 }
 
 /* The nav takes the room left between the brand and the footer and scrolls inside it. */
@@ -301,15 +198,41 @@ kbd {
 
 .nav-item {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   width: 100%;
+  min-height: 28px;
   text-align: start;
-  padding: 5px var(--space-3);
+  padding: 4px var(--space-2);
   border: 0;
   border-radius: var(--radius-small);
   background: transparent;
   color: var(--text);
   font: inherit;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+
+.nav-item .icon {
+  color: var(--muted);
+}
+
+.nav-count {
+  margin-inline-start: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.nav-recent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  color: var(--muted);
+  font-weight: 400;
 }
 
 /* Inside the scrolling nav an outer ring would be clipped at its edges. */
@@ -318,32 +241,24 @@ kbd {
 }
 
 .nav-item:hover {
-  background: color-mix(in srgb, var(--text) 9%, transparent);
+  background: var(--hover);
 }
 
-/* Selected: a stronger fill plus an inline-start bar, so it doesn't rely on a faint tint. */
+/* Selected: a fill, a heavier label and the icon in the accent, so it never relies on tint alone. */
 .nav-item[aria-current="page"] {
-  background: color-mix(in srgb, var(--accent) 16%, var(--sidebar));
+  background: var(--selected);
   color: var(--text);
   font-weight: 600;
 }
 
-.nav-item[aria-current="page"]::before {
-  content: "";
-  position: absolute;
-  inset-block: 6px;
-  inset-inline-start: 0;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--accent);
+.nav-item[aria-current="page"] .icon {
+  color: var(--accent);
 }
 
 /* Pinned under the nav: connection status, then language and setup. */
 .sidebar-foot {
   display: grid;
-  gap: var(--space-2);
-  padding-block-start: var(--space-2);
-  border-block-start: 1px solid var(--border);
+  gap: var(--space-1);
 }
 
 .conn {
@@ -476,20 +391,29 @@ main {
   justify-content: center;
   gap: 6px;
   min-height: var(--control-h);
-  padding: 4px 14px;
-  border: 1px solid var(--btn-border);
+  padding: 4px 12px;
+  border: 1px solid color-mix(in srgb, var(--btn-border) 40%, transparent);
   border-radius: var(--radius-small);
-  background: var(--surface);
+  background: var(--btn-face);
   color: var(--text);
   font: inherit;
   font-weight: 500;
   line-height: 1.3;
   cursor: pointer;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow), var(--highlight);
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    transform var(--dur-1) var(--ease-out),
+    filter var(--dur-1) var(--ease-out);
 }
 
 .btn:hover:where(:not(:disabled):not([aria-disabled="true"])) {
-  background: color-mix(in srgb, var(--text) 5%, var(--surface));
+  filter: brightness(0.97);
+}
+
+.btn:active:where(:not(:disabled):not([aria-disabled="true"])) {
+  transform: scale(0.97);
+  filter: brightness(0.92);
 }
 
 /* Disabled: a neutral, flat look for every variant (a faded amber primary read as broken). */
@@ -514,19 +438,26 @@ main {
 /* ---- end keyboard focus ---- */
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: linear-gradient(color-mix(in srgb, var(--accent) 88%, white), var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 80%, black);
   color: var(--accent-contrast);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18), inset 0 1px 0 rgb(255 255 255 / 0.2);
 }
 
 .btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
   background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  filter: none;
 }
 
 .btn-ghost {
   background: transparent;
+  border-color: transparent;
   box-shadow: none;
+}
+
+.btn-ghost:hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--hover);
+  filter: none;
 }
 
 .btn-ghost:disabled,
@@ -591,11 +522,11 @@ textarea:focus-visible {
 .badge {
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: 5px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 18px;
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: var(--selected);
   color: var(--text);
   white-space: nowrap;
 }
@@ -873,9 +804,9 @@ textarea:focus-visible {
 .card {
   padding: 14px 16px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border: 0;
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-2), var(--highlight);
   display: grid;
   gap: 6px;
   align-content: start;
@@ -1010,10 +941,39 @@ tbody tr:last-child > * {
   overflow: auto;
   padding: 0;
   border: 1px solid var(--dialog-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-large);
   background: var(--surface);
   color: var(--text);
   box-shadow: var(--overlay-shadow);
+}
+
+/* Dialogs scale in; the backdrop fades. Input is never held back (no pointer-events games). */
+.dialog[open] {
+  animation: dialog-in var(--dur-2) var(--ease-out);
+}
+
+.dialog[open]::backdrop {
+  animation: fade-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise)) scale(0.98);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
 }
 
 /* A fixed title bar, a body that scrolls, and (inside the body) a footer that stays in view:
@@ -1364,9 +1324,9 @@ fieldset {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  border: 0;
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-2), var(--highlight);
 }
 
 .source-icon-wrap {
@@ -1721,8 +1681,8 @@ h4.ask-sub {
   gap: 6px;
   min-height: var(--control-h-small);
   padding: 2px 10px;
-  border: 1px solid var(--control-border);
-  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--control-border) 50%, transparent);
+  border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -2440,9 +2400,10 @@ h3.token-heading:focus {
   min-height: var(--control-h);
   padding-block: 4px;
   padding-inline: var(--space-3) var(--space-2);
-  border: 1px solid var(--control-border);
+  border: 0;
   border-radius: var(--radius-small);
-  background: var(--surface);
+  background: var(--hover);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
   color: var(--muted);
   font: inherit;
   font-size: var(--fs-sm);
@@ -2457,6 +2418,7 @@ h3.token-heading:focus {
 /* The label is kept short so it fits on one line; a long translation still wraps rather than
    being cut. The shortcut hint never shrinks below its text. */
 .palette-trigger > span {
+  flex: 1;
   min-width: 0;
   overflow-wrap: break-word;
 }
@@ -2467,13 +2429,16 @@ h3.token-heading:focus {
 
 /* Clear of the page title and the sidebar trigger at 900x600. */
 .palette {
-  width: min(560px, calc(100vw - 32px));
-  margin-top: max(14vh, 100px);
+  width: min(640px, calc(100vw - 32px));
+  margin-top: max(12vh, 84px);
   padding: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  max-height: min(480px, calc(100vh - 24vh));
+  max-height: min(500px, calc(100vh - 24vh));
+  border: 0;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-3), var(--highlight);
 }
 
 .palette:not([open]) {
@@ -2483,9 +2448,10 @@ h3.token-heading:focus {
 .palette-input {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-3);
+  min-height: 54px;
+  padding: 0 var(--space-4);
+  border-bottom: 0.5px solid var(--border);
   color: var(--muted);
 }
 
@@ -2500,7 +2466,7 @@ h3.token-heading:focus {
 
 /* The dialog is the visible boundary; the input's own ring would sit flush against it. */
 .palette-input:focus-within {
-  box-shadow: inset 0 -2px 0 var(--focus);
+  box-shadow: inset 0 -1.5px 0 var(--focus);
 }
 
 .palette-input input:focus-visible {
@@ -2519,14 +2485,15 @@ h3.token-heading:focus {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 7px var(--space-3);
-  border-radius: var(--radius-small);
+  min-height: 38px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
 .palette-option[aria-selected="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  background: var(--selected);
+  color: var(--text);
   /* A second cue besides colour (forced-colors and low-vision users). */
   box-shadow: inset 3px 0 0 var(--accent);
 }
@@ -2576,8 +2543,9 @@ h3.token-heading:focus {
 
 .palette-footer {
   margin: 0;
-  padding: 6px 14px;
-  border-top: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
+  border-top: 0.5px solid var(--border);
+  background: var(--hover);
 }
 
 .shortcut-list {
@@ -3162,4 +3130,340 @@ tr[aria-current="true"] {
 .triage-line {
   display: block;
   margin-block-start: 2px;
+}
+
+/* ---- brand mark ---- */
+
+.mark-tile {
+  fill: var(--mark-tile);
+}
+
+.mark-dot {
+  fill: var(--brand);
+}
+
+.mark-halo {
+  fill: var(--brand);
+  opacity: 0;
+}
+
+.mark-line {
+  fill: var(--mark-line);
+}
+
+.mark-pulse .mark-halo {
+  transform-origin: 32px 25px;
+  animation: mark-pulse 2.4s var(--ease-out) infinite;
+}
+
+@keyframes mark-pulse {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.6);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mark-pulse .mark-halo {
+    animation: none;
+  }
+}
+
+/* ---- icons ---- */
+
+.icon {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.flip-rtl {
+  display: inline-flex;
+}
+
+/* ---- sidebar: recents, settings mode, account ---- */
+
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline-end: var(--space-1);
+}
+
+.nav-group-head .nav-group-label {
+  margin: 0;
+}
+
+.nav-new-chat {
+  color: var(--muted);
+}
+
+.nav-back {
+  color: var(--muted);
+  margin-block-end: var(--space-2);
+}
+
+.nav-settings .sidebar-settings {
+  margin-block-start: var(--space-4);
+}
+
+.account {
+  min-height: 40px;
+}
+
+.account .avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.account-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.25;
+}
+
+.account-email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.account kbd {
+  flex: none;
+}
+
+/* ---- page transitions and list enter ---- */
+
+.page-enter {
+  animation: rise-in var(--dur-2) var(--ease-out);
+}
+
+.needs-list > li,
+.today-brief-list > li,
+.source-list > li,
+.results > li {
+  animation: rise-in var(--dur-2) var(--ease-out) backwards;
+}
+
+.needs-list > li:nth-child(2),
+.today-brief-list > li:nth-child(2),
+.source-list > li:nth-child(2),
+.results > li:nth-child(2) {
+  animation-delay: 30ms;
+}
+
+.needs-list > li:nth-child(3),
+.today-brief-list > li:nth-child(3),
+.source-list > li:nth-child(3),
+.results > li:nth-child(3) {
+  animation-delay: 60ms;
+}
+
+/* ---- home ---- */
+
+.page-home {
+  max-width: 720px;
+  margin-inline: auto;
+  padding-block-start: var(--space-7);
+}
+
+.page-home .page-header h1 {
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.022em;
+}
+
+.home-composer {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-2), var(--highlight);
+  transition: box-shadow var(--dur-1) var(--ease-out);
+}
+
+.home-composer:focus-within {
+  box-shadow: 0 0 0 1px var(--focus), 0 0 0 4px color-mix(in srgb, var(--focus) 25%, transparent), var(--shadow-2);
+}
+
+.home-composer textarea {
+  width: 100%;
+  min-height: 48px;
+  resize: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-lg);
+  letter-spacing: -0.01em;
+}
+
+/* The box itself shows focus (above), so the field's own ring is not doubled. */
+.home-composer textarea:focus-visible {
+  outline: none;
+}
+
+.home-composer textarea::placeholder {
+  color: var(--muted);
+}
+
+.home-composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.home-send {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2), inset 0 1px 0 rgb(255 255 255 / 0.25);
+  cursor: pointer;
+  transition:
+    transform var(--dur-1) var(--ease-out),
+    background-color var(--dur-1) var(--ease-out);
+}
+
+.home-send:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+/* The send micro-interaction: a quick lift as the question leaves. */
+.home-send.is-sent {
+  animation: send-lift var(--dur-3) var(--ease-out);
+}
+
+@keyframes send-lift {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.home-send:disabled {
+  background: var(--raised);
+  color: var(--muted);
+  box-shadow: none;
+  cursor: default;
+}
+
+.home-needs {
+  margin: var(--space-4) 0 0;
+}
+
+.page-home .today-brief {
+  margin-block-start: var(--space-5);
+}
+
+/* ---- needs you: list + reading pane ---- */
+
+.needs-split {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.needs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.needs-item {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out);
+}
+
+.needs-item:hover {
+  background: var(--hover);
+}
+
+.needs-item[aria-current="true"] {
+  background: var(--selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+[dir="rtl"] .needs-item[aria-current="true"] {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.needs-item-kind {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.needs-item-title {
+  font-weight: 600;
+}
+
+.needs-item-summary {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-dot {
+  position: absolute;
+  inset-inline-start: 2px;
+  top: 16px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.needs-pane {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .needs-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Each page rises in as it opens. Chat fills <main> (its log scrolls inside); other pages grow. */
+.page-enter:has(> .page-chat) {
+  height: 100%;
 }

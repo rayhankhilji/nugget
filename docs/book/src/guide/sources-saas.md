@@ -1,6 +1,6 @@
 # Slack, Notion, GitHub and Linear
 
-Each connector reads the service's official API with **your own token**. No Nugget server or model
+Each connector reads the service's official API with **your own token**. No Heed server or model
 sits in between, so sync works with any AI setup or none.
 
 | Source | What is indexed | Token | Sync |
@@ -29,7 +29,7 @@ instead). A missing or rejected token shows **Needs sign-in**: paste a new one o
    invited to.
 5. On **Sources**, choose **Add source → Slack** and paste it.
 
-Nugget indexes up to 100 conversations (`max_conversations`) from the last 90 days (`window_days`),
+Heed indexes up to 100 conversations (`max_conversations`) from the last 90 days (`window_days`),
 or only those listed in `conversations`. Archived conversations are skipped. Files appear as
 `[file: <name>]`, not their content. An edit or deletion in an older message shows up at the next
 6-hourly re-read.
@@ -41,7 +41,7 @@ or only those listed in `conversations`. Archived conversations are skipped. Fil
 2. Under **Capabilities**, keep only **Read content** (plus, optionally, **Read user information
    without email addresses**). Copy the **Internal Integration Secret**.
 3. Share each top-level page or database with it (**… → Connections → Add connections**). Child pages
-   are included; nothing else is visible to Nugget.
+   are included; nothing else is visible to Heed.
 4. On **Sources**, choose **Add source → Notion** and paste the secret.
 
 Each page becomes one Markdown document (title, database properties, blocks down to `max_depth`, 6 by
@@ -61,7 +61,7 @@ works but also grants write access.)
 and callback URLs are unused), enable **Device Flow**, and put its client ID in `client_id`.
 **Connect** shows a user code and opens [github.com/login/device](https://github.com/login/device);
 approve within 5 minutes. GitHub has no read-only scope for OAuth Apps, so this asks for `repo` and
-`read:discussion`; Nugget still only reads. A GitHub App's user tokens expire after 8 hours and Nugget can't refresh them yet, so prefer a
+`read:discussion`; Heed still only reads. A GitHub App's user tokens expire after 8 hours and Heed can't refresh them yet, so prefer a
 token or an OAuth App.
 
 **What is indexed.** With `repos` unset: every issue, pull request and discussion that involves you,

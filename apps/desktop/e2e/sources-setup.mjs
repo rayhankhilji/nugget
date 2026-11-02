@@ -22,7 +22,7 @@ export async function sourcesSetupScenario({ browser, bin }) {
   const notes = path.join(scratch, "Notes");
   fs.mkdirSync(pics);
   fs.mkdirSync(notes);
-  // Types Nugget doesn't read (images are read, so none here).
+  // Types Heed doesn't read (images are read, so none here).
   fs.writeFileSync(path.join(pics, "song.mp3"), Buffer.alloc(64));
   fs.writeFileSync(path.join(pics, "clip.mp4"), Buffer.alloc(64));
   fs.writeFileSync(path.join(notes, "saffron.md"), "# Saffron rice\n\nToast the saffron, then steep it in warm stock for ten minutes.\n");
@@ -59,20 +59,11 @@ export async function sourcesSetupScenario({ browser, bin }) {
       try {
         await page.goto(`${bridge.url}index.html`);
         await heading("onboarding.welcome.heading").waitFor();
+        await page.locator(".ob-main .ob-lead").waitFor();
         const welcome = (await page.locator(".ob-main").textContent()) ?? "";
         expect(!/two minutes/i.test(welcome), "Welcome still promises a fixed setup time");
         await cont();
-
-        // AI: the recommended option is preselected; "Decide later" counts as a decision.
-        await heading("onboarding.ai.heading").waitFor();
-        const local = page.getByRole("radio", { name: startsWith("onboarding.ai.local") });
-        await until("the recommended AI option starts selected", async () => [await local.isChecked(), null]);
-        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
-        expect((await page.locator("#ob-continue-hint").count()) === 0, "Decide later is announced as skipping the step");
-        await cont();
         await heading("onboarding.source.heading").waitFor();
-        const s1 = await saved();
-        expect(s1.completed.includes("ai") && !s1.skipped.includes("ai"), `AI step recorded as ${JSON.stringify(s1)}`);
 
         // A folder with only a video and a song settles within seconds and says why.
         const dialog = await addFolder(pics);
@@ -114,20 +105,30 @@ export async function sourcesSetupScenario({ browser, bin }) {
 
         // Back and forward: the step still lists both folders.
         await footer.getByRole("button", { name: exactName("onboarding.back") }).click();
-        await heading("onboarding.ai.heading").waitFor();
+        await heading("onboarding.welcome.heading").waitFor();
         await cont();
         await heading("onboarding.source.heading").waitFor();
         await until("the source step remembers both folders after Back", async () => {
           const rows = await page.locator(".ob-index > li").allTextContents();
           return [rows.length === 2, rows];
         });
+        await cont();
 
+        // AI: the recommended option is preselected; "Decide later" counts as a decision.
+        await heading("onboarding.ai.heading").waitFor();
+        const local = page.getByRole("radio", { name: startsWith("onboarding.ai.local") });
+        await until("the recommended AI option starts selected", async () => [await local.isChecked(), null]);
+        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
+        expect((await page.locator("#ob-continue-hint").count()) === 0, "Decide later is announced as skipping the step");
         await cont();
         await heading("onboarding.perm.heading").waitFor();
+        const s1 = await saved();
+        expect(s1.completed.includes("ai") && !s1.skipped.includes("ai"), `AI step recorded as ${JSON.stringify(s1)}`);
+
         await cont();
         await heading("onboarding.trigger.heading").waitFor();
         await cont();
-        await heading("onboarding.done.heading").waitFor();
+        await page.getByRole("heading", { level: 2, name: t("onboarding.done.heading"), exact: true }).waitFor();
         const done = (await page.locator(".ob-main").textContent()) ?? "";
         expect(done.includes(t("onboarding.done.allDone")), `Done lists a pending step: ${done}`);
         await footer.getByRole("button", { name: exactName("onboarding.done.search") }).click();

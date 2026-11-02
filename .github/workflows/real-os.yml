@@ -1,6 +1,6 @@
 name: Real OS
 
-# Runs Nugget for real on macOS and Windows runners, which have a desktop session, and in
+# Runs Heed for real on macOS and Windows runners, which have a desktop session, and in
 # headless Wayland and Xvfb sessions on Linux: installer smoke tests (dmg, NSIS), accessibility
 # against native test apps (AX, UIA), the Double Tap hotkey-and-insert path, the Wayland paths
 # (GlobalShortcuts portal, AT-SPI on GTK 4, Double Tap insert), the Double Tap overlay in the real
@@ -28,7 +28,7 @@ env:
 jobs:
   # ---- installer smoke tests ----
   # Build the dmg / NSIS installer the way release.yml does, then install and launch it: the
-  # `Nugget` window must appear, the app must start and connect to the bundled nuggetd, closing
+  # `Heed` window must appear, the app must start and connect to the bundled nuggetd, closing
   # the window must quit the app (status 0), and the daemon must stop cleanly.
   # See packaging/scripts/smoke-macos.sh and smoke-windows.ps1.
   smoke-macos:
@@ -975,7 +975,7 @@ jobs:
           $id = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).identifier
           $key = "HKCU:\Software\Classes\AppUserModelId\$id"
           New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name DisplayName -Value 'Nugget' -Force | Out-Null
+          New-ItemProperty -Path $key -Name DisplayName -Value 'Heed' -Force | Out-Null
           "NOTIFY_APP_ID=$id" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       # Windows PowerShell: UI Automation (.NET Framework) and the WinRT toast history.
       - name: Real toast, clicked on screen
@@ -985,7 +985,7 @@ jobs:
           NUGGET_NOTIFY_CLICK_TIMEOUT: "150"
         run: |
           $ErrorActionPreference = 'Stop'
-          $title = 'Nugget notification click test'
+          $title = 'Heed notification click test'
           $rec = $env:NOTIFY_RECORD
           New-Item -ItemType Directory -Force -Path $rec | Out-Null
           Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing

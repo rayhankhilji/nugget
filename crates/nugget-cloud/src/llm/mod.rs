@@ -49,7 +49,8 @@ use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::config::Config;
 use crate::db::DbError;
-use crate::gateway::price_per_mtok;
+use crate::gateway::{GatewayError, price_per_mtok};
+use crate::plans::ModelTier;
 pub use entitlements::{Entitlements, entitlements};
 
 /// The `model` value for the fast tier.
@@ -107,10 +108,10 @@ impl std::fmt::Debug for Upstream {
 }
 
 impl Upstream {
-    fn model(&self, tier: LlmTier, ent: &Entitlements) -> &str {
+    fn model(&self, tier: ModelTier) -> &str {
         match tier {
-            LlmTier::Smart if ent.smart_model => &self.smart,
-            _ => &self.fast,
+            ModelTier::Smart => &self.smart,
+            ModelTier::Fast => &self.fast,
         }
     }
 }
@@ -215,8 +216,18 @@ pub fn upstream_client() -> reqwest::Result<reqwest::Client> {
 
 struct CachedUsage {
     at: Instant,
-    ent: Entitlements,
+    ent: Option<Entitlements>,
     month_cost: i64,
+    smart_used: i64,
+}
+
+/// What [`LlmState::usage`] reads: the entitlements (`None`: no live subscription), this
+/// month's AI cost and smart-model calls so far.
+#[derive(Debug, Clone)]
+struct UsageView {
+    ent: Option<Entitlements>,
+    month_cost: i64,
+    smart_used: i64,
 }
 
 pub struct LlmState {
@@ -244,18 +255,26 @@ impl LlmState {
         self.cfg.anthropic.is_some() || self.cfg.openai.is_some()
     }
 
-    /// Entitlements and month-to-date cost, reused for [`Limits::usage_ttl`] so a keystroke's
-    /// request does not wait for the database. Costs metered meanwhile are added locally, so
-    /// the quota can only be overshot by requests already in flight.
-    async fn usage(&self, user: Uuid) -> Result<(Entitlements, i64), DbError> {
+    /// Entitlements, month-to-date cost and smart calls, reused for [`Limits::usage_ttl`] so a
+    /// keystroke's request does not wait for the database. Requests metered meanwhile are added
+    /// locally, so a limit can only be overshot by requests already in flight.
+    async fn usage(&self, user: Uuid) -> Result<UsageView, DbError> {
         if let Some(c) = lock(&self.usage).get(&user)
             && c.at.elapsed() < self.cfg.limits.usage_ttl
         {
-            return Ok((c.ent, c.month_cost));
+            return Ok(UsageView {
+                ent: c.ent.clone(),
+                month_cost: c.month_cost,
+                smart_used: c.smart_used,
+            });
         }
         let db = &self.app.db;
-        let (ent, month_cost) =
-            tokio::try_join!(entitlements(db, user), db.month_cost_micros(user))?;
+        let smart_model = self.app.gateway.model_for(ModelTier::Smart);
+        let (ent, month_cost, smart_used) = tokio::try_join!(
+            entitlements(db, &self.app.plans, user),
+            db.month_cost_micros(user),
+            db.month_model_calls(user, smart_model),
+        )?;
         let mut cache = lock(&self.usage);
         if cache.len() > 50_000 {
             cache.clear();
@@ -264,16 +283,22 @@ impl LlmState {
             user,
             CachedUsage {
                 at: Instant::now(),
-                ent,
+                ent: ent.clone(),
                 month_cost,
+                smart_used,
             },
         );
-        Ok((ent, month_cost))
+        Ok(UsageView {
+            ent,
+            month_cost,
+            smart_used,
+        })
     }
 
-    fn add_cost(&self, user: Uuid, cost: i64) {
+    fn add_usage(&self, user: Uuid, cost: i64, smart: bool) {
         if let Some(c) = lock(&self.usage).get_mut(&user) {
             c.month_cost += cost;
+            c.smart_used += i64::from(smart);
         }
     }
 
@@ -425,6 +450,8 @@ async fn models(State(s): State<Arc<LlmState>>, h: HeaderMap) -> Response {
 #[derive(Debug)]
 pub(crate) struct Checked {
     pub tier: LlmTier,
+    /// The model tier serving it, after the plan's allowance (set by the handler).
+    pub model_tier: ModelTier,
     pub stream: bool,
     pub body: Map<String, Value>,
 }
@@ -505,8 +532,13 @@ pub(crate) fn check(body: Value, ent: &Entitlements, limits: &Limits) -> Result<
     };
     obj.insert("max_tokens".into(), json!(requested.min(u64::from(cap))));
     ensure_cache_breakpoint(&mut obj);
+    let model_tier = match tier {
+        LlmTier::Fast => ModelTier::Fast,
+        LlmTier::Smart => ModelTier::Smart,
+    };
     Ok(Checked {
         tier,
+        model_tier,
         stream,
         body: obj,
     })
@@ -551,6 +583,8 @@ struct Meter {
     tier: LlmTier,
     model: String,
     route: &'static str,
+    /// Served by the smart model (counts against the plan's smart allowance).
+    smart: bool,
     started: Instant,
     first_byte: Option<Duration>,
     input: u32,
@@ -576,6 +610,7 @@ impl Meter {
             tier,
             model: model.to_owned(),
             route,
+            smart: false,
             started: Instant::now(),
             first_byte: None,
             input: 0,
@@ -662,7 +697,7 @@ impl Meter {
         if self.input == 0 && output == 0 && self.cache_read == 0 && self.cache_write == 0 {
             return;
         }
-        self.state.add_cost(self.user, cost);
+        self.state.add_usage(self.user, cost, self.smart);
         let row = UsageRow {
             user: self.user,
             model: self.model.clone(),
@@ -771,7 +806,7 @@ async fn messages(
             Some("llm_not_configured"),
         );
     }
-    let (ent, month_cost) = match s.usage(user.id).await {
+    let usage = match s.usage(user.id).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(%e, "llm: reading usage");
@@ -783,18 +818,43 @@ async fn messages(
             );
         }
     };
-    if month_cost >= ent.quota_micros {
+    let Some(ent) = usage.ent else {
         return error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_error",
-            "monthly AI quota used up",
-            Some("quota_exceeded"),
+            StatusCode::PAYMENT_REQUIRED,
+            "permission_error",
+            "start a Heed trial or subscription to use this",
+            Some("subscription_required"),
         );
-    }
-    let checked = match check(value, &ent, &s.cfg.limits) {
+    };
+    let mut checked = match check(value, &ent, &s.cfg.limits) {
         Ok(c) => c,
         Err(m) => return bad_request(&m),
     };
+    // The gateway's rule: refused past the hard cap; smart falls back to fast once the
+    // fair-use budget or the smart allowance is used up.
+    match ent
+        .allowance
+        .choose(usage.month_cost, usage.smart_used, Some(checked.model_tier))
+    {
+        Ok(choice) => {
+            if choice.downgraded {
+                tracing::info!(user = %user.id, "llm: smart allowance used up; serving fast");
+            }
+            checked.model_tier = choice.tier;
+        }
+        Err(GatewayError::QuotaExceeded) => {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                "monthly AI quota used up",
+                Some("quota_exceeded"),
+            );
+        }
+        Err(e) => {
+            tracing::error!(%e, "llm: choosing a model");
+            return upstream_error();
+        }
+    }
     let Some(slot) = s.acquire(user.id, ent.max_concurrent) else {
         return error(
             StatusCode::TOO_MANY_REQUESTS,
@@ -813,23 +873,22 @@ async fn messages(
 
     if let Some(a) = s.cfg.anthropic.clone() {
         s.touch_upstream();
-        let failure =
-            match anthropic(&s, &a, user.id, &ent, &checked, &version, slot, deadline).await {
-                Ok(r) | Err(Failed::Final(r)) => return r,
-                Err(Failed::Retryable(r)) => r,
-            };
+        let failure = match anthropic(&s, &a, user.id, &checked, &version, slot, deadline).await {
+            Ok(r) | Err(Failed::Final(r)) => return r,
+            Err(Failed::Retryable(r)) => r,
+        };
         // The slot went with the failed attempt; the fallback takes a new one.
         let (Some(o), Some(slot)) = (s.cfg.openai.clone(), s.acquire(user.id, ent.max_concurrent))
         else {
             return failure;
         };
         tracing::warn!(user = %user.id, tier = checked.tier.as_str(), "llm: falling back to OpenAI");
-        return openai_route(&s, &o, user.id, &ent, &checked, slot, deadline)
+        return openai_route(&s, &o, user.id, &checked, slot, deadline)
             .await
             .unwrap_or_else(|r| r);
     }
     let o = s.cfg.openai.clone().expect("configured() checked");
-    openai_route(&s, &o, user.id, &ent, &checked, slot, deadline)
+    openai_route(&s, &o, user.id, &checked, slot, deadline)
         .await
         .unwrap_or_else(|r| r)
 }
@@ -996,17 +1055,17 @@ async fn anthropic(
     s: &Arc<LlmState>,
     a: &Upstream,
     user: Uuid,
-    ent: &Entitlements,
     checked: &Checked,
     version: &str,
     slot: Slot,
     deadline: Instant,
 ) -> Result<Response, Failed> {
-    let model = a.model(checked.tier, ent).to_owned();
+    let model = a.model(checked.model_tier).to_owned();
     let mut body = checked.body.clone();
     body.insert("model".into(), json!(model));
     body.insert("metadata".into(), json!({"user_id": user.to_string()}));
     let mut meter = Meter::new(s, user, checked.tier, &model, "anthropic");
+    meter.smart = checked.model_tier == ModelTier::Smart;
     let req = s
         .http
         .post(format!("{}/v1/messages", a.base))
@@ -1072,12 +1131,11 @@ async fn openai_route(
     s: &Arc<LlmState>,
     o: &Upstream,
     user: Uuid,
-    ent: &Entitlements,
     checked: &Checked,
     slot: Slot,
     deadline: Instant,
 ) -> Result<Response, Response> {
-    let model = o.model(checked.tier, ent).to_owned();
+    let model = o.model(checked.model_tier).to_owned();
     if checked.body.get("max_tokens").and_then(Value::as_u64) == Some(0) {
         // Cache warming has no OpenAI equivalent (its caching is automatic): nothing to do.
         return Ok(Json(json!({
@@ -1097,6 +1155,7 @@ async fn openai_route(
     )
     .map_err(|m| bad_request(&m))?;
     let mut meter = Meter::new(s, user, checked.tier, &model, "openai");
+    meter.smart = checked.model_tier == ModelTier::Smart;
     let req = s
         .http
         .post(format!("{}/v1/chat/completions", o.base))

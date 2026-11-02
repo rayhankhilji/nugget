@@ -139,7 +139,7 @@ pub fn setup(app: &App) {
 /// draft starts (see `flow::show_overlay`).
 fn create_overlay(app: &App) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("overlay.html".into()))
-        .title("Nugget Double Tap")
+        .title("Heed Double Tap")
         .inner_size(OVERLAY_SIZE.0, OVERLAY_SIZE.1)
         .decorations(false)
         .resizable(false)

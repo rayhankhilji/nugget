@@ -16,7 +16,7 @@ On **Sources**, choose **Add source → Obsidian vault** and pick the folder con
 `.obsidian/` and `.trash` are hidden, so they are skipped. To skip other folders, add exclude patterns
 or a `.nuggetignore` file.
 
-Don't add the **Nugget vault** (the pages Nugget renders from its [knowledge graph](knowledge.md)) as
+Don't add the **Heed vault** (the pages Heed renders from its [knowledge graph](knowledge.md)) as
 an `obsidian` source. To read it in Obsidian, open it as a separate vault.
 
 All settings: [Connector settings → `obsidian`](../reference/connectors.md#obsidian).
