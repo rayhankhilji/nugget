@@ -95,28 +95,18 @@ export async function byokScenario({ browser, bin }) {
     await check("byok: onboarding checks keys against the server before saving", async () => {
       try {
         await page.goto(`${bridge.url}index.html`);
-        await heading("onboarding.welcome.heading").waitFor();
-        await cont();
-        // Connect apps comes before the AI step; continue without a source.
-        await heading("onboarding.source.heading").waitFor();
-        await cont();
+        // The fork: run it yourself goes straight to the AI choice; each provider is its own row.
+        await page.locator('button.ob-fork-card[data-path="local"]').click();
         await heading("onboarding.ai.heading").waitFor();
-        await page.getByRole("radio", { name: startsWith("onboarding.ai.byok") }).check();
-
-        const kind = field("kind");
-        await kind.waitFor();
-        await kind.selectOption("openai_compatible").catch(async () => {
-          // The option's value may differ; pick it by its label instead.
-          const options = await kind.locator("option").evaluateAll((os) => os.map((o) => ({ value: o.value, label: o.textContent ?? "" })));
-          const o = options.find((x) => /compatible/i.test(x.value) || /compatible/i.test(x.label));
-          expect(o, `no OpenAI-compatible option in the kind select: ${JSON.stringify(options)}`);
-          await kind.selectOption(o.value);
-        });
+        await page.getByRole("radio", { name: startsWith("onboarding.ai.compatible") }).check();
+        await field("baseUrl").waitFor();
         if ((await field("model").count()) > 0) await field("model").fill(MODEL);
         if ((await field("name").count()) > 0) await field("name").fill("e2e-mock");
 
         const base = `http://127.0.0.1:${mock.port}/v1`;
         await attempt("bad-key", { baseUrl: base, key: BAD_KEY, expectKey: "onboarding.byok.form.error.bad_key" });
+        // The key field itself says it failed (.key-field[data-state], docs/brand/open-core.html).
+        await page.locator('.key-field[data-state="invalid"]').waitFor();
         await attempt("wrong-url", { baseUrl: `http://127.0.0.1:${mock.port}/nope`, key: GOOD_KEY, expectKey: "onboarding.byok.form.error.wrong_url" });
         await attempt("no-network", { baseUrl: `http://127.0.0.1:${deadPort}/v1`, key: GOOD_KEY, expectKey: "onboarding.byok.form.error.no_network" });
         await attempt("good-key", { baseUrl: base, key: GOOD_KEY, action: "save", expectKey: "onboarding.byok.form.saved" });

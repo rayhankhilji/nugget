@@ -465,19 +465,20 @@ export async function a11yScenario({ browser, socket, pages }) {
             await heading(key).waitFor();
             await audit(page, `onboarding-${name}`, theme);
           };
-          await step("onboarding.welcome.heading", "welcome");
+          // The fork, then run it yourself: AI first, then a local source.
+          await step("onboarding.fork.heading", "fork");
+          await page.locator('button.ob-fork-card[data-path="local"]').click();
+          await heading("onboarding.ai.heading").waitFor();
+          for (const choice of ["chatgpt", "local", "ollama", "anthropic", "later"]) {
+            await page.locator(`.ai-choices input[type=radio][value="${choice}"]`).check();
+            await audit(page, `onboarding-ai-${choice}`, theme);
+          }
           await cont();
           await step("onboarding.source.heading", "source");
           await page.getByRole("button", { name: new RegExp(`^(${escapeRe(t("onboarding.source.addFolder"))}|${escapeRe(t("onboarding.source.addAnother"))})$`) }).click();
           await dialog(page).getByRole("button", { name: exactName("addSource.folder.choose") }).waitFor();
           await audit(page, "onboarding-source-folder", theme, "dialog[open]");
           await closeDialog(page);
-          await cont();
-          await heading("onboarding.ai.heading").waitFor();
-          for (const choice of ["local", "byok", "later"]) {
-            await page.getByRole("radio", { name: startsWith(`onboarding.ai.${choice}`) }).check();
-            await audit(page, `onboarding-ai-${choice}`, theme);
-          }
           await cont();
           await step("onboarding.perm.heading", "permissions");
           await cont();

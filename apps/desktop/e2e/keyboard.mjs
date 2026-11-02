@@ -272,9 +272,22 @@ export async function keyboardScenario({ browser }) {
         }
       });
 
-    await flow("onboarding from an empty home to the source step", async () => {
+    await flow("onboarding from an empty home through the fork and the AI choice to the source step", async () => {
       await page.goto(`${bridge.url}index.html`);
-      await heading("onboarding.welcome.heading").waitFor();
+      await heading("onboarding.fork.heading").waitFor();
+      // The fork's cards are buttons: Tab to "Run it yourself", Enter, and the AI step takes focus.
+      const local = page.locator('button.ob-fork-card[data-path="local"]');
+      await tabTo(page, local, { what: t("onboarding.fork.local.title") });
+      await page.keyboard.press("Enter");
+      await heading("onboarding.ai.heading").waitFor();
+      await until(`the "${t("onboarding.ai.heading")}" step's heading takes focus`, async () => [await hasFocus(heading("onboarding.ai.heading")), (await focusOf(page)).desc]);
+      // A radio group is one Tab stop; arrows choose inside it.
+      const radios = page.locator(".ai-choices input[type=radio]");
+      const later = page.getByRole("radio", { name: startsWith("onboarding.ai.later") });
+      await tabTo(page, radios, { what: "the AI choices" });
+      for (let i = 0; i < 10 && !(await later.isChecked()); i++) await step(page, "ArrowDown");
+      expect(await later.isChecked(), `arrow keys did not reach "${t("onboarding.ai.later")}"`);
+      expect(await hasFocus(later), "the checked AI choice does not have focus");
       await next("onboarding.source.heading");
     });
 
@@ -314,15 +327,7 @@ export async function keyboardScenario({ browser }) {
       );
     });
 
-    await flow("onboarding through AI, Permissions and Double Tap to the first answer", async () => {
-      await next("onboarding.ai.heading");
-      // A radio group is one Tab stop; arrows choose inside it.
-      const radios = page.locator(".ob-fieldset input[type=radio]");
-      const later = page.getByRole("radio", { name: startsWith("onboarding.ai.later") });
-      await tabTo(page, radios, { what: "the AI choices" });
-      for (let i = 0; i < 4 && !(await later.isChecked()); i++) await step(page, "ArrowDown");
-      expect(await later.isChecked(), `arrow keys did not reach "${t("onboarding.ai.later")}"`);
-      expect(await hasFocus(later), "the checked AI choice does not have focus");
+    await flow("onboarding through Permissions and Double Tap to the first answer", async () => {
       await next("onboarding.perm.heading");
       await next("onboarding.trigger.heading");
       // The last step asks the first question; what setup did is its level-2 section.

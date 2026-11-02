@@ -37,6 +37,16 @@ const updateStatus = {
 };
 const chord = { kind: "chord", chord: "Ctrl+Alt+Space" };
 let platformSettings = { notifications: { enabled: false, brief: true, agent: true, quiet: null }, quit_daemon: "ask", paused_sources: [] };
+/** Sign in with ChatGPT is the shell's (it opens the browser) and the daemon's: signed out here. */
+const chatgptSignedOut = {
+  state: "signed_out",
+  account: null,
+  plan_usage: false,
+  paused: false,
+  error: null,
+  models: { light: null, smart: null },
+  manage_usage_url: "https://chatgpt.com/settings/usage",
+};
 const doubletapSettings = { enabled: false, trigger: chord, app_providers: {}, excluded_apps: [], allow_terminals: false };
 const doubletapStatus = {
   platform: "linux",
@@ -121,6 +131,12 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     cloud_billing_preview: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_billing_portal: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_delete_account: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    // No ChatGPT account in e2e: status calls answer signed out; signing in would open a browser.
+    chatgpt_status: () => chatgptSignedOut,
+    chatgpt_cancel: () => chatgptSignedOut,
+    chatgpt_resume: () => chatgptSignedOut,
+    chatgpt_sign_out: () => chatgptSignedOut,
+    chatgpt_sign_in: () => ({ err: { kind: "other", message: "ChatGPT sign-in is not available in the e2e bridge" } }),
     pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
     pick_plugin_file: () => null,
     notify: () => null,

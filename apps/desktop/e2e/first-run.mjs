@@ -1,10 +1,10 @@
-// First run: an empty home, the real onboarding (no account: the corpus folder through the
-// (stubbed) picker, then "Decide later" for AI), then Search's "Find context" cites the note that
+// First run: an empty home, the real onboarding (the fork: run it yourself, "Decide later" for AI,
+// then the corpus folder through the (stubbed) picker), then Search's "Find context" cites the note that
 // answers the query.
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { CORPUS, FIRST_RUN_CONFIG, startDaemon } from "./daemon.mjs";
-import { check, checkWire, DIST, exactName, expect, expectNoErrorState, log, newContext, onboardingAddFolder, OUT, settle, shot, startsWith, stopDaemon, t, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, expect, expectNoErrorState, log, newContext, onboardingAddFolder, onboardingRunItYourself, OUT, settle, shot, startsWith, stopDaemon, t, until } from "./harness.mjs";
 
 /** notes/projects/Tidewater Billing.md names the reviewing firm. */
 const QUERY = "Tidewater Billing vendor contract";
@@ -29,17 +29,16 @@ export async function firstRunScenario({ browser, bin }) {
     await check("first run: onboarding to a cited answer on an empty home", async () => {
       try {
         await page.goto(`${bridge.url}index.html`);
-        // No cloud in the e2e build: the local-first welcome, then sign in → connect → first answer.
-        await heading("onboarding.welcome.heading").waitFor();
+        // The fork first (no cloud in the e2e build): run it yourself → AI → a local source.
+        const fork = await onboardingRunItYourself(page);
+        expect(fork.includes(t("onboarding.fork.local.body")), `the fork lacks the local-path copy: ${fork.slice(0, 300)}`);
+        expect(fork.includes(t("onboarding.fork.cloud.trial")), `the fork shows a price without plans: ${fork.slice(0, 300)}`);
+        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
         await cont();
 
         await heading("onboarding.source.heading").waitFor();
         const ready = await onboardingAddFolder(page, CORPUS);
         log(`  first run: "${ready.text}"`);
-        await cont();
-
-        await heading("onboarding.ai.heading").waitFor();
-        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
         await cont();
 
         await heading("onboarding.perm.heading").waitFor();

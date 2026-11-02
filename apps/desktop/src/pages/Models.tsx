@@ -8,6 +8,8 @@ import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
 import { DownloadFailureNote, isCancelled, useInstallFocus } from "../onboarding/DownloadFailure";
+import { ChatgptNotes, ChatgptRow, useChatgpt } from "../onboarding/Chatgpt";
+import { useCloudSignedIn } from "../cloudSignedIn";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
 
@@ -175,6 +177,7 @@ export function ModelsPage() {
       />
       {fit.data && <MachineLine report={fit.data} />}
       <SearchUpgrade />
+      <AiProviderStatus />
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && (
         <>
@@ -314,6 +317,79 @@ export function SearchUpgrade() {
   );
 }
 
+// ---- provider status ----
+
+/**
+ * "Your AI": one quiet list of what Heed can use (`ul.provider-status`, docs/brand/open-core.html):
+ * Sign in with ChatGPT when Heed runs on this computer, and every provider with a key, each with
+ * whether it works, its model and one action. Green means healthy and nothing else.
+ */
+export function AiProviderStatus() {
+  const t = useT();
+  const titleId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const cloud = useCloudSignedIn();
+  const chatgpt = useChatgpt();
+  const saved = useAsync(aiKeysApi.saved);
+  const [replacing, setReplacing] = useState<SavedKeyProvider | null>(null);
+  const [notice, setNotice] = useState("");
+  // ChatGPT is for running Heed yourself; an older daemon has no ChatGPT sign-in.
+  const withChatgpt = !cloud && !chatgpt.unsupported && (chatgpt.status !== null || chatgpt.cloudMode);
+  const keys = saved.data ?? [];
+  if (!withChatgpt && keys.length === 0) return null;
+  const toProviders = () => {
+    const h = document.getElementById("models-providers-title") ?? heading.current;
+    h?.scrollIntoView?.({ block: "start" });
+    h?.focus();
+  };
+  return (
+    <section className="models-group" aria-labelledby={titleId}>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>
+        {t("models.ai.title")}
+      </h2>
+      <p className="muted small">{t("models.ai.hint")}</p>
+      <ul className="provider-status" aria-label={t("models.ai.title")}>
+        {withChatgpt && <ChatgptRow chatgpt={chatgpt} />}
+        {keys.map((p) => (
+          <li key={p.id} data-provider={p.id}>
+            <span className="provider-dot" data-health={p.available ? "ok" : "warn"} aria-hidden="true" />
+            <span>
+              <span className="provider-name">{t(kindLabel(p.kind, p.base_url))}</span>
+              <span className="provider-detail">
+                {p.available ? t("models.ai.working", { name: p.id }) : t("models.ai.notWorking", { name: p.id })}
+              </span>
+            </span>
+            <span className="provider-model" dir="ltr">
+              {p.model}
+            </span>
+            <button type="button" className="btn btn-small" onClick={() => setReplacing(p)} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
+              {t("models.providers.replace")}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {withChatgpt && chatgpt.status?.state === "signed_out" && <p className="muted small chatgpt-fineprint">{t("chatgpt.fineprint")}</p>}
+      {!cloud && <ChatgptNotes chatgpt={chatgpt} onUseKey={toProviders} onOtherAi={toProviders} />}
+      <p role="status" className={notice ? "note" : undefined}>
+        {notice}
+      </p>
+      {replacing && (
+        <Dialog title={t("models.providers.replaceDialog.title", { name: replacing.id })} onClose={() => setReplacing(null)}>
+          <ReplaceKeyForm
+            provider={replacing}
+            onCancel={() => setReplacing(null)}
+            onDone={() => {
+              setNotice(t("models.providers.replaced", { name: replacing.id }));
+              setReplacing(null);
+              saved.reload();
+            }}
+          />
+        </Dialog>
+      )}
+    </section>
+  );
+}
+
 // ---- providers with a key ----
 
 /**
@@ -322,7 +398,6 @@ export function SearchUpgrade() {
  */
 export function YourProviders() {
   const t = useT();
-  const titleId = useId();
   const saved = useAsync(aiKeysApi.saved);
   const [replacing, setReplacing] = useState<SavedKeyProvider | null>(null);
   const [removing, setRemoving] = useState<SavedKeyProvider | null>(null);
@@ -341,8 +416,8 @@ export function YourProviders() {
   if (isMethodNotFound(saved.error)) return null;
 
   return (
-    <section className="models-group" aria-labelledby={titleId}>
-      <h2 id={titleId} ref={heading} tabIndex={-1}>
+    <section className="models-group" aria-labelledby="models-providers-title">
+      <h2 id="models-providers-title" ref={heading} tabIndex={-1}>
         {t("models.providers.title")}
       </h2>
       <p className="muted small">{t("models.providers.hint")}</p>
@@ -411,7 +486,7 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
         </span>
       </div>
       <p className="small">
-        {t(kindLabel(p.kind))}{" "}
+        {t(kindLabel(p.kind, p.base_url))}{" "}
         <span className="muted">
           ·{" "}
           <bdi dir="ltr">

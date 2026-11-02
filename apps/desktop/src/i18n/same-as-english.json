@@ -46,7 +46,11 @@
     "today.actionFullName",
     "today.learned.line",
     "shell.tray.doubleTap",
-    "cloud.title"
+    "cloud.title",
+    "onboarding.fork.cloud.kicker",
+    "onboarding.ai.ollama",
+    "onboarding.ai.openrouter",
+    "onboarding.byok.provider.openrouter"
   ],
   "ar": [
     "cloud.syncFailed",
@@ -214,7 +218,8 @@
     "status.mentions",
     "today.factor.importance",
     "updates.badge.stable",
-    "updates.channel.stable"
+    "updates.channel.stable",
+    "onboarding.fork.local.kicker"
   ],
   "hi": [
     "addSource.linear.include",

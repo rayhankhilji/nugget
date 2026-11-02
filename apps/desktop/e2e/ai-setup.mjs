@@ -10,7 +10,8 @@ import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { CORPUS, locateE2eBinaries, rpc, rpcStream, startDaemon } from "./daemon.mjs";
 import {
-  check, checkWire, DIST, exactName, expect, expectNoErrorState, log, navTo, newContext, onboardingAddFolder, OUT, settle, shot, startsWith, stopDaemon, t, tPattern, until,
+  check, checkWire, DIST, exactName, expect, expectNoErrorState, log, navTo, newContext, onboardingAddFolder,
+  onboardingRunItYourself, OUT, settle, shot, startsWith, stopDaemon, t, tPattern, until,
 } from "./harness.mjs";
 
 /** The model the manifest recommends for a 16 GB machine, and one that needs more RAM. */
@@ -169,14 +170,8 @@ export async function aiSetupScenario({ browser }) {
     await check("ai setup: install the recommended model in onboarding, with progress", async () => {
       try {
         await page.goto(`${bridge.url}index.html`);
-        await heading("onboarding.welcome.heading").waitFor();
-        await cont();
-
-        await heading("onboarding.source.heading").waitFor();
-        await onboardingAddFolder(page, CORPUS);
-        await cont();
-
-        await heading("onboarding.ai.heading").waitFor();
+        // The fork: run it yourself goes to the AI choice; the folder comes after it.
+        await onboardingRunItYourself(page);
         await page.getByRole("radio", { name: startsWith("onboarding.ai.local") }).check();
         const cards = page.locator("li.card");
         const card = cards.filter({ has: page.locator(".card-title", { hasText: new RegExp(`^${MODEL_ID}$`) }) });
@@ -210,6 +205,10 @@ export async function aiSetupScenario({ browser }) {
           `no partial download progress was shown: ${JSON.stringify(samples.slice(-5))}`,
         );
         expect(served.stats.served >= MODEL_BYTES, `the mock server sent ${served.stats.served} of ${MODEL_BYTES} bytes`);
+        await cont();
+
+        await heading("onboarding.source.heading").waitFor();
+        await onboardingAddFolder(page, CORPUS);
         await cont();
 
         for (const h of ["onboarding.perm.heading", "onboarding.trigger.heading"]) {
