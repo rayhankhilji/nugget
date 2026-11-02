@@ -45,6 +45,7 @@ const doubletapStatus = {
   trigger_error: null,
   accessibility: "not_required",
   input_monitoring: "not_required",
+  full_disk_access: "not_required",
   hint: null,
   modifiers: [],
   recommended_trigger: chord,

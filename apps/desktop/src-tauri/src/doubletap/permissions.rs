@@ -1,8 +1,11 @@
 //! Permission onboarding per OS and the `DoubleTapStatus` the settings page shows.
 //!
 //! - **macOS:** reading and inserting need Accessibility (`nugget_a11y` asks with the system
-//!   prompt). The trigger itself uses NSEvent modifier monitors or a Carbon hot key; the
-//!   hotkey crate does not report an Input Monitoring state, so it is `unknown`.
+//!   prompt). The trigger itself uses NSEvent modifier monitors or a Carbon hot key; Input
+//!   Monitoring is read with `CGPreflightListenEventAccess` (`nugget_hotkey::input_monitoring`).
+//!   Full Disk Access is reported too: the Messages source needs it (nuggetd, started by the app,
+//!   reads `~/Library/Messages`, and macOS attributes that to Nugget.app), and the page shows it
+//!   only when such a source is set up.
 //! - **Linux:** AT-SPI must be enabled for the session (`doubletap.hint.atspi`). Wayland cannot
 //!   observe modifier double taps, so a double-tap trigger there gets
 //!   `doubletap.hint.wayland_chord`. A chord goes through the desktop's GlobalShortcuts portal:
@@ -54,6 +57,9 @@ pub struct DoubleTapStatus {
     pub trigger_error: Option<String>,
     pub accessibility: PermissionState,
     pub input_monitoring: PermissionState,
+    /// macOS only (`not_required` elsewhere): whether Nugget can read the folders macOS keeps
+    /// behind Full Disk Access (Messages, Mail, Safari).
+    pub full_disk_access: PermissionState,
     pub hint: Option<&'static str>,
     pub modifiers: Vec<ModifierOption>,
     pub recommended_trigger: TriggerSpec,
@@ -156,11 +162,59 @@ pub fn modifiers(platform: Platform) -> Vec<ModifierOption> {
         .collect()
 }
 
-/// Input Monitoring is a macOS notion; the hotkey crate does not report it.
+/// Input Monitoring is a macOS notion (`CGPreflightListenEventAccess`).
 pub fn input_monitoring(platform: Platform) -> PermissionState {
-    match platform {
-        Platform::MacOs => PermissionState::Unknown,
+    match (platform, nugget_hotkey::input_monitoring()) {
+        (Platform::MacOs, Some(true)) => PermissionState::Granted,
+        (Platform::MacOs, Some(false)) => PermissionState::Denied,
+        (Platform::MacOs, None) => PermissionState::Unknown,
         _ => PermissionState::NotRequired,
+    }
+}
+
+/// Places under the home folder that macOS keeps behind Full Disk Access. Reading any one of
+/// them answers for all: macOS has no API to ask, so this is how apps find out.
+const FULL_DISK_ACCESS_PROBES: [&str; 4] = [
+    "Library/Messages",
+    "Library/Mail",
+    "Library/Safari",
+    "Library/Application Support/com.apple.TCC",
+];
+
+/// Full Disk Access is a macOS notion. Reads (never writes) a few protected folders; reading
+/// them never prompts.
+pub fn full_disk_access(platform: Platform) -> PermissionState {
+    if platform != Platform::MacOs {
+        return PermissionState::NotRequired;
+    }
+    let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) else {
+        return PermissionState::Unknown;
+    };
+    let home = std::path::PathBuf::from(home);
+    full_disk_access_from(
+        FULL_DISK_ACCESS_PROBES
+            .iter()
+            .map(|p| std::fs::read_dir(home.join(p)).map(drop)),
+    )
+}
+
+/// One refused read means no access (macOS answers `EPERM`); otherwise one that worked means
+/// access. Folders that are missing (no Mail account ever set up) say nothing.
+fn full_disk_access_from(reads: impl Iterator<Item = std::io::Result<()>>) -> PermissionState {
+    let mut granted = false;
+    for read in reads {
+        match read {
+            Ok(()) => granted = true,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                return PermissionState::Denied;
+            }
+            Err(_) => {}
+        }
+    }
+    if granted {
+        PermissionState::Granted
+    } else {
+        PermissionState::Unknown
     }
 }
 
@@ -191,6 +245,28 @@ pub fn hint_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn full_disk_access_from_reads() {
+        use std::io::{Error, ErrorKind};
+        let ok = || Ok(());
+        let missing = || Err(Error::from(ErrorKind::NotFound));
+        let refused = || Err(Error::from(ErrorKind::PermissionDenied));
+        let state = |reads: Vec<std::io::Result<()>>| full_disk_access_from(reads.into_iter());
+        assert_eq!(state(vec![ok(), missing()]), PermissionState::Granted);
+        assert_eq!(state(vec![missing(), refused()]), PermissionState::Denied);
+        assert_eq!(state(vec![ok(), refused()]), PermissionState::Denied);
+        assert_eq!(state(vec![missing(), missing()]), PermissionState::Unknown);
+        assert_eq!(state(vec![]), PermissionState::Unknown);
+    }
+
+    #[test]
+    fn macos_only_permissions_elsewhere() {
+        for p in [Platform::Linux, Platform::Windows] {
+            assert_eq!(input_monitoring(p), PermissionState::NotRequired);
+            assert_eq!(full_disk_access(p), PermissionState::NotRequired);
+        }
+    }
 
     #[test]
     fn wayland_without_a_portal() {
