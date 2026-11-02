@@ -65,6 +65,10 @@ pub struct Subscription {
     pub cancel_at_period_end: bool,
 }
 
+fn billing_default() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Me {
     pub user_id: String,
@@ -75,6 +79,9 @@ pub struct Me {
     pub plan: Option<String>,
     #[serde(default)]
     pub embeddings: bool,
+    /// False on a self-hosted server with billing off: everyone is entitled, no Stripe.
+    #[serde(default = "billing_default")]
+    pub billing: bool,
     #[serde(default)]
     pub subscription: Option<Subscription>,
     #[serde(default)]

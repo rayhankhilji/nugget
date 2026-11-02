@@ -2355,6 +2355,7 @@
   "cloud.ask.untitled": "无标题",
   "cloud.ask.open": "打开",
   "cloud.ask.openLabel": "打开 {title}",
+  "cloud.billing.selfHosted": "此服务器为自托管，未启用计费。你的账户适用 {plan} 的限制。",
   "cloud.billing.title": "套餐与账单",
   "cloud.billing.choose": "Heed 是付费服务。选择一个套餐即可开始免费试用。",
   "cloud.billing.prices": "每月 {monthly} 或每年 {annual}",

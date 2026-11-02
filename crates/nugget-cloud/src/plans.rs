@@ -72,6 +72,10 @@ pub struct Catalog {
     /// Stripe price id → (plan id, interval), filled from the environment.
     #[serde(skip)]
     prices: BTreeMap<String, (String, Interval)>,
+    /// `NUGGET_BILLING=off` (self-hosting): no Stripe, and every signed-in user is entitled to
+    /// this plan (`NUGGET_SELFHOST_PLAN`, default `heed_max`).
+    #[serde(skip)]
+    pub billing_off_plan: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,7 +119,28 @@ impl Catalog {
                 }
             }
         }
+        c.billing_off_plan = match env("NUGGET_BILLING")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            None | Some("" | "on") => None,
+            Some("off") => {
+                let plan = env("NUGGET_SELFHOST_PLAN")
+                    .map(|p| p.trim().to_owned())
+                    .unwrap_or_else(|| "heed_max".into());
+                if !c.plans.contains_key(&plan) {
+                    return bad(format!("NUGGET_SELFHOST_PLAN names no plan: {plan:?}"));
+                }
+                Some(plan)
+            }
+            Some(other) => return bad(format!("NUGGET_BILLING must be on or off, not {other:?}")),
+        };
         Ok(c)
+    }
+
+    /// Whether Stripe billing is on (the default; off only with `NUGGET_BILLING=off`).
+    pub fn billing_enabled(&self) -> bool {
+        self.billing_off_plan.is_none()
     }
 
     pub fn load(env: impl Fn(&str) -> Option<String>) -> Result<Self, PlansError> {
@@ -162,6 +187,24 @@ pub async fn entitlement(
     catalog: &Catalog,
     user: uuid::Uuid,
 ) -> Result<Option<Entitlement>, crate::db::DbError> {
+    if let Some(id) = &catalog.billing_off_plan {
+        // Billing off (self-hosted): everyone signed in has the configured plan.
+        let plan = catalog.get(id).cloned().expect("validated at load");
+        let subscription = crate::db::SubscriptionRow {
+            id: "selfhost".into(),
+            plan: id.clone(),
+            interval: "month".into(),
+            status: "active".into(),
+            trial_end: None,
+            current_period_end: None,
+            cancel_at_period_end: false,
+        };
+        return Ok(Some(Entitlement {
+            plan_id: id.clone(),
+            plan,
+            subscription,
+        }));
+    }
     let live = db
         .subscriptions(user)
         .await?
@@ -260,6 +303,32 @@ mod tests {
             }
         };
         assert!(Catalog::parse(ok, dup).is_err());
+    }
+
+    #[test]
+    fn billing_flag() {
+        let on = Catalog::parse(DEFAULT_TOML, env).unwrap();
+        assert!(on.billing_enabled());
+        let with = |extra: &'static [(&'static str, &'static str)]| {
+            Catalog::parse(DEFAULT_TOML, move |k| {
+                extra
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| (*v).to_owned())
+                    .or_else(|| env(k))
+            })
+        };
+        let off = with(&[("NUGGET_BILLING", "off")]).unwrap();
+        assert_eq!(off.billing_off_plan.as_deref(), Some("heed_max"));
+        assert!(!off.billing_enabled());
+        let heed = with(&[("NUGGET_BILLING", "OFF"), ("NUGGET_SELFHOST_PLAN", "heed")]).unwrap();
+        assert_eq!(heed.billing_off_plan.as_deref(), Some("heed"));
+        assert!(with(&[("NUGGET_BILLING", "off"), ("NUGGET_SELFHOST_PLAN", "gold")]).is_err());
+        assert!(
+            with(&[("NUGGET_BILLING", "maybe")]).is_err(),
+            "typos are refused, not read as on"
+        );
+        assert!(with(&[("NUGGET_BILLING", "on")]).unwrap().billing_enabled());
     }
 
     #[test]

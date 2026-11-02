@@ -290,6 +290,18 @@ describe("CloudPage background import", () => {
   }, 10_000);
 });
 
+describe("CloudPage self-hosted", () => {
+  it("shows no plans or billing buttons when the server has billing off", async () => {
+    const selfHosted: CloudMe = { ...trialing, billing: false, subscription: { ...trialing.subscription!, status: "active" } };
+    mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: selfHosted, cloud_billing_plans: plans });
+    const { container } = await render(<AccountPage />);
+    const section = container.querySelector('section[aria-labelledby="cloud-billing"]')!;
+    expect(section.textContent).toContain("self-hosted with billing off");
+    expect(byText(section as HTMLElement, "button", "Manage billing")).toBeUndefined();
+    expect(section.textContent).not.toContain("£39");
+  });
+});
+
 describe("cloudApi", () => {
   it("keeps the cloud error code", async () => {
     mockDaemon({

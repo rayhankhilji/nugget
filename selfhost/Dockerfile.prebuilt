@@ -1,0 +1,12 @@
+# Packages a nugget-cloud binary you built yourself (`cargo build --release -p nugget-cloud`),
+# for machines where building inside Docker is too slow. Build from the repository root:
+#   docker build -f selfhost/Dockerfile.prebuilt -t heed-cloud:local .
+# Use the same OS family as the build machine (glibc); Ubuntu 24.04 here.
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* && useradd --system --uid 10001 heed
+ARG BINARY=target/release/nugget-cloud
+COPY ${BINARY} /usr/local/bin/nugget-cloud
+USER heed
+EXPOSE 8080
+CMD ["nugget-cloud"]

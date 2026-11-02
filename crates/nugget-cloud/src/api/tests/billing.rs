@@ -620,3 +620,70 @@ async fn website_cors_return_urls_and_no_device_seat() {
     let (s, _) = call(&h.app, "POST", "/v1/billing/portal", Some(w), None).await;
     assert_eq!(s, StatusCode::OK, "no body: app hand-off");
 }
+
+#[tokio::test]
+async fn billing_off_entitles_everyone_and_closes_stripe_routes() {
+    let Some((db, pool)) = crate::testkit::test_db().await else {
+        return;
+    };
+    let (auth, _composio, llm) = fakes();
+    let gateway = Gateway::new(
+        Some(llm as Arc<dyn crate::gateway::Llm>),
+        None,
+        "claude-haiku-5-5".into(),
+        "claude-sonnet-5-5".into(),
+    );
+    let off = |k: &str| match k {
+        "NUGGET_BILLING" => Some("off".to_owned()),
+        _ => None,
+    };
+    let plans = Catalog::parse(crate::plans::DEFAULT_TOML, off).unwrap();
+    let state = AppState::new(db, auth, gateway, Arc::new(plans))
+        .with_limits(crate::ratelimit::Limits::unlimited());
+    let app = router(Arc::new(state));
+    let u = add_user(&pool).await;
+    let (s, me) = call(&app, "GET", "/v1/me", Some(u), None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        (me["plan"].as_str(), me["billing"].as_bool()),
+        (Some("heed_max"), Some(false))
+    );
+    assert_eq!(me["subscription"]["status"], "active");
+    // Gated routes work with no subscription row at all.
+    let (s, v) = call(
+        &app,
+        "POST",
+        "/v1/ask",
+        Some(u),
+        Some(json!({"question": "anything"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    for (m, uri) in [
+        ("POST", "/v1/billing/checkout"),
+        ("POST", "/v1/billing/portal"),
+    ] {
+        let (s, v) = call(
+            &app,
+            m,
+            uri,
+            Some(u),
+            Some(json!({"plan": "heed", "interval": "month"})),
+        )
+        .await;
+        assert_eq!(
+            (s, v["error"].as_str()),
+            (StatusCode::NOT_FOUND, Some("billing_disabled")),
+            "{uri}"
+        );
+    }
+    let req = Request::post("/v1/webhooks/stripe")
+        .body(Body::from("{}"))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let (_, p) = call(&app, "GET", "/v1/billing/plans", None, None).await;
+    assert_eq!(p["billing"], false);
+}

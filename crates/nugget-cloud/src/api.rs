@@ -533,6 +533,7 @@ async fn me(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Valu
         "email": c.user.email,
         "plan": c.subscription.as_ref().map(|x| &x.plan),
         "embeddings": s.gateway.has_embeddings(),
+        "billing": s.plans.billing_enabled(),
         "subscription": c.subscription,
         "entitlements": c.subscription.as_ref().zip(c.plan.as_ref()).map(|(x, p)| billing::entitlements(&x.plan, p)),
         "usage": {"month_cost_micros": cost, "smart_asks_used": smart},

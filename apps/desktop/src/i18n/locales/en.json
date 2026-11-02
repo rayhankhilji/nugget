@@ -2355,6 +2355,7 @@
   "cloud.ask.untitled": "Untitled",
   "cloud.ask.open": "Open",
   "cloud.ask.openLabel": "Open {title}",
+  "cloud.billing.selfHosted": "This server is self-hosted with billing off. Your account has the {plan} limits.",
   "cloud.billing.title": "Plan & billing",
   "cloud.billing.choose": "Heed is a paid service. Pick a plan to start your free trial.",
   "cloud.billing.prices": "{monthly} a month or {annual} a year",

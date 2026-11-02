@@ -338,7 +338,12 @@ export function Billing() {
         </p>
       )}
       {me.loading && !me.data && <Loading lines={2} />}
-      {me.data && subscribed && sub && (
+      {me.data?.billing === false && (
+        <p className="note" role="status">
+          {t("cloud.billing.selfHosted", { plan: ent?.name ?? me.data.plan ?? "" })}
+        </p>
+      )}
+      {me.data && me.data.billing !== false && subscribed && sub && (
         <div className="cloud-subscription">
           <dl className="plan-strip">
             <div>
@@ -384,7 +389,7 @@ export function Billing() {
           </p>
         </div>
       )}
-      {me.data && !subscribed && (
+      {me.data && me.data.billing !== false && !subscribed && (
         <>
           <p>{t("cloud.billing.choose")}</p>
           <CloudErrorNote error={plans.error} onRetry={plans.reload} />

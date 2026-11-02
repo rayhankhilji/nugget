@@ -2355,6 +2355,7 @@
   "cloud.ask.untitled": "Sans titre",
   "cloud.ask.open": "Ouvrir",
   "cloud.ask.openLabel": "Ouvrir {title}",
+  "cloud.billing.selfHosted": "Ce serveur est auto-hébergé, sans facturation. Votre compte a les limites de {plan}.",
   "cloud.billing.title": "Forfait et facturation",
   "cloud.billing.choose": "Heed est un service payant. Choisissez un forfait pour commencer votre essai gratuit.",
   "cloud.billing.prices": "{monthly} par mois ou {annual} par an",

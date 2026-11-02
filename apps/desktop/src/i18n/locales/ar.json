@@ -2355,6 +2355,7 @@
   "cloud.ask.untitled": "بلا عنوان",
   "cloud.ask.open": "فتح",
   "cloud.ask.openLabel": "فتح {title}",
+  "cloud.billing.selfHosted": "هذا الخادم مستضاف ذاتيًا والفوترة متوقفة. لحسابك حدود {plan}.",
   "cloud.billing.title": "الخطة والفوترة",
   "cloud.billing.choose": "Heed خدمة مدفوعة. اختر خطة لبدء تجربتك المجانية.",
   "cloud.billing.prices": "{monthly} شهريًا أو {annual} سنويًا",

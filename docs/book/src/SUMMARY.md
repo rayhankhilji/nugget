@@ -28,6 +28,7 @@
 - [Plugins](guide/plugins.md)
 - [Privacy](guide/privacy.md)
 - [Backup, restore and export](guide/backup.md)
+- [Self-hosting Heed Cloud](guide/self-host.md)
 - [Languages](guide/languages.md)
 - [Accessibility](guide/accessibility.md)
 - [Troubleshooting](guide/troubleshooting.md)
