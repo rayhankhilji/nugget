@@ -3811,8 +3811,29 @@ tr[aria-current="true"] {
 }
 
 .page-home .page-header h1 {
-  font-size: var(--fs-3xl);
+  font-size: 44px;
+  font-weight: 320;
   letter-spacing: -0.025em;
+}
+
+/* Inline citations: a small grey pill after the sentence, not a footnote mark. */
+.cite {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--heed-ink) 7%, transparent);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 20px;
+  vertical-align: 1px;
+}
+
+.cite:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 /* Numbers, times, counts and shortcuts in Geist Mono with tabular figures. */

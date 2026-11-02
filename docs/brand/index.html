@@ -31,8 +31,6 @@
   .dock .bar { display: flex; gap: 14px; align-items: end; padding: 10px 14px; border-radius: 22px; background: rgb(255 255 255 / .45); backdrop-filter: blur(20px); box-shadow: 0 10px 30px rgb(7 7 152 / .2); }
   .dock .bar i { width: 56px; height: 56px; border-radius: 13px; background: rgb(255 255 255 / .7); display: block; }
   .dock .bar img { width: 64px; height: 64px; }
-  .tab { display: inline-flex; align-items: center; gap: 8px; background: var(--heed-surface); border-radius: 10px 10px 0 0; padding: 10px 16px; box-shadow: var(--heed-shadow-1); font-size: 13px; }
-  .tab img { width: 16px; height: 16px; }
   .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
   .sw { border-radius: 12px; overflow: hidden; background: var(--heed-surface); box-shadow: var(--heed-shadow-1); }
   .sw b { display: block; height: 84px; }
@@ -46,9 +44,33 @@
   .scale span { display: flex; align-items: baseline; gap: 16px; } .scale span small { width: 48px; }
   .do, .dont { border-radius: 12px; padding: 16px 18px; background: var(--heed-surface); box-shadow: var(--heed-shadow-1); }
   .do b { color: var(--heed-ok-ink); } .dont b { color: var(--heed-danger-ink); }
-  .motion-demo { display: flex; gap: 12px; flex-wrap: wrap; }
-  .motion-demo .card { width: 200px; animation: rise var(--heed-dur-panel) var(--heed-ease-enter) both; }
-  .motion-demo .card:nth-child(2) { animation-delay: var(--heed-stagger); } .motion-demo .card:nth-child(3) { animation-delay: calc(var(--heed-stagger) * 2); }
+  .motion-demo { display: grid; grid-template-columns: 1fr auto; gap: 20px; align-items: start; }
+  .motion-demo ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .motion-demo ol li { display: flex; justify-content: space-between; padding: 10px 12px; border-radius: 10px; background: var(--heed-surface-2); box-shadow: inset 0 0 0 1px var(--heed-line); font-size: 13px; animation: loop-rise 4s var(--heed-ease-enter) infinite both; }
+  .motion-demo ol li small { font-family: var(--heed-font-mono); color: var(--heed-ink-quiet); }
+  .motion-demo ol li:nth-child(2) { animation-delay: 30ms; } .motion-demo ol li:nth-child(3) { animation-delay: 60ms; }
+  .motion-demo ol li:nth-child(4) { animation-delay: 90ms; } .motion-demo ol li:nth-child(5) { animation-delay: 120ms; }
+  @keyframes loop-rise { 0% { opacity: 0; transform: translateY(var(--heed-rise)); } 8%, 86% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+  .tick { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--heed-signal-wash); color: var(--heed-ink); white-space: nowrap; }
+  .tick-dot { position: relative; width: 18px; height: 18px; }
+  .tick-dot > * { position: absolute; inset: 0; border-radius: 50%; }
+  .tick-ring { border: 2px solid var(--heed-signal); border-top-color: transparent; animation: spin 1s linear infinite, tick-out 4s steps(1) infinite; }
+  .tick-done { background: var(--heed-signal); display: grid; place-items: center; animation: tick-in 4s var(--heed-ease-enter) infinite; }
+  .tick-done path { stroke-dasharray: 14; animation: tick-draw 4s var(--heed-ease-enter) infinite; }
+  @keyframes tick-out { 0% { opacity: 1; } 45% { opacity: 0; } }
+  @keyframes tick-in { 0%, 44% { opacity: 0; transform: scale(.85); } 48%, 100% { opacity: 1; transform: none; } }
+  @keyframes tick-draw { 0%, 45% { stroke-dashoffset: 14; } 50%, 100% { stroke-dashoffset: 0; } }
+  .browser { border-radius: 16px; overflow: hidden; background: #e7e3da; box-shadow: var(--heed-shadow-2); display: flex; flex-direction: column; min-height: 220px; }
+  .browser .strip { display: flex; align-items: end; gap: 2px; padding: 8px 10px 0; }
+  .browser .strip span { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 9px 9px 0 0; font-size: 12px; color: #5f5951; max-width: 170px; white-space: nowrap; overflow: hidden; }
+  .browser .strip span i { width: 14px; height: 14px; border-radius: 4px; background: #c9c3b8; flex: none; }
+  .browser .strip span.on { background: var(--heed-surface); color: var(--heed-ink); }
+  .browser .strip img { width: 14px; height: 14px; }
+  .browser .url { background: var(--heed-surface); padding: 6px 10px 8px; }
+  .browser .url b { display: block; font: 400 12px var(--heed-font-mono); color: var(--heed-ink-quiet); background: var(--heed-surface-2); border-radius: 999px; padding: 5px 12px; }
+  .browser .page { flex: 1; background: linear-gradient(to bottom, rgb(246 243 236 / .2), var(--heed-canvas)), url("../../apps/desktop/src/brand/img/sky.webp") center 30% / cover; padding: 22px 24px; }
+  .browser .page p { margin: 0; font-family: var(--heed-font-display); font-variation-settings: var(--heed-display-settings); font-weight: 340; font-size: 30px; letter-spacing: -.02em; line-height: 1.05; color: var(--heed-ink); }
+  .browser .page small { display: inline-block; margin-top: 12px; background: var(--heed-signal); color: #fff; border-radius: 999px; padding: 6px 14px; font-size: 12px; }
   @keyframes rise { from { opacity: 0; transform: translateY(var(--heed-rise)); } }
   .meter { height: 6px; border-radius: 3px; background: var(--heed-signal-wash); overflow: hidden; } .meter b { display: block; height: 100%; width: 62%; background: var(--heed-signal); }
   .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
@@ -60,7 +82,7 @@
   .imagery img { width: 100%; height: 220px; object-fit: cover; border-radius: 16px; display: block; }
   .imagery figcaption { font-size: 12px; color: var(--heed-ink-quiet); margin-top: 6px; }
   @media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } header .display { font-size: 48px; } }
-  @media (prefers-reduced-motion: reduce) { .steps .now i { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .steps .now i, .motion-demo ol li, .tick-ring, .tick-done, .tick-done path { animation: none; } .tick-ring { display: none; } }
 </style>
 </head>
 <body>
@@ -92,7 +114,11 @@
     <h3>In the dock and the browser</h3>
     <div class="grid g2">
       <div class="dock"><div class="bar"><i></i><i></i><img src="assets/heed-app-icon.svg" alt="Heed in the macOS dock"><i></i></div></div>
-      <div class="card" style="background:var(--heed-surface-2)"><span class="tab"><img src="assets/favicon.svg" alt="">Heed · Your mornings back</span></div>
+      <div class="browser" aria-label="Heed's website in a browser tab">
+        <div class="strip"><span><i></i>Inbox (3)</span><span class="on"><img src="assets/favicon.svg" alt="">Heed · Your mornings back</span><span><i></i>Calendar</span></div>
+        <div class="url"><b>heed.app</b></div>
+        <div class="page"><p>Let it run.<br>We’ll cover the rest.</p><small>Get Heed</small></div>
+      </div>
     </div>
   </section>
 
@@ -207,7 +233,16 @@
         micro&nbsp;&nbsp;&nbsp;&nbsp;120ms · ui 200ms · panel 320ms<br>
         brand&nbsp;&nbsp;&nbsp;&nbsp;600–900ms
       </div>
-      <div class="motion-demo"><div class="card">Rise</div><div class="card">and</div><div class="card">stagger</div></div>
+      <div class="card motion-demo" aria-label="Motion demo: rows rise and stagger; an agent step ticks to a check">
+        <ol>
+          <li>Reply to Margaret <small>2m</small></li>
+          <li>Moorland sync moved <small>14m</small></li>
+          <li>Invoice 4471 is due <small>1h</small></li>
+          <li>Board deck comments <small>3h</small></li>
+          <li>Renewal: Linear <small>2d</small></li>
+        </ol>
+        <div class="tick"><span class="tick-dot"><span class="tick-ring"></span><span class="tick-done"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5.2 4.2 7.4 8 3" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span></span>Drafting the reply</div>
+      </div>
     </div>
   </section>
 

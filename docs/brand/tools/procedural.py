@@ -1,5 +1,5 @@
 """Heed's original procedural imagery (Apache-2.0): an ultramarine dithered landscape, an
-engraved (line-hatched) landscape, and a soft generated sky.
+engraved (line-hatched) landscape, a soft generated sky and the empty-state vignette.
 
     python3 docs/brand/tools/procedural.py apps/desktop/src/brand/img
 
@@ -98,6 +98,26 @@ def sky(w, h, seed=3):
     return Image.fromarray(np.clip(col, 0, 255).astype(np.uint8), "RGB")
 
 
+def vignette(w=400, h=144, pitch=5, seed=5):
+    """The empty-state vignette: a sun over two hills, engraved in ultramarine on transparency."""
+    rng = np.random.default_rng(seed)
+    ys, xs = np.mgrid[0:h, 0:w]
+    lum = np.ones((h, w))
+    sun = (xs - w * 0.62) ** 2 + (ys - h * 0.52) ** 2 < (h * 0.26) ** 2
+    lum = np.where(sun, 0.62, lum)
+    for base, height, scale, tone in [(0.58, 0.22, 140, 0.4), (0.76, 0.16, 100, 0.12)]:
+        ridge = ridge_line(w, rng, base * h, height * h, scale)
+        lum = np.where(ys >= ridge[None, :], tone, lum)
+    edge = np.clip(1 - (((xs - w / 2) / (w / 2)) ** 2 + ((ys - h / 2) / (h / 2)) ** 2), 0, 1)  # fade out at the ends
+    lum = 1 - (1 - lum) * np.clip(edge * 2.2, 0, 1)
+    phase = (ys % pitch) / pitch
+    ink = np.abs(phase - 0.5) * 2 < np.clip(0.9 * (1 - lum) ** 1.1, 0, 0.92)
+    rgba = np.zeros((h, w, 4), np.uint8)
+    rgba[..., :3] = SIGNAL
+    rgba[..., 3] = np.where(ink, 255, 0)
+    return Image.fromarray(rgba, "RGBA")
+
+
 def save(im, path, budget=250_000):
     if path.endswith(".png"):
         im.convert("P", palette=Image.ADAPTIVE, colors=2 if "dither" in path or "engrav" in path else 64).save(path, optimize=True)
@@ -118,3 +138,5 @@ if __name__ == "__main__":
     print("dither", save(dither(lum), os.path.join(out, "dither-landscape.png")))
     print("engraving", save(engraving(landscape(1600, 640, seed=11, clouds=False)), os.path.join(out, "engraving-landscape.png")))
     print("sky", save(sky(1600, 1000), os.path.join(out, "sky.webp")))
+    vignette().save(os.path.join(out, "vignette.png"), optimize=True)
+    print("vignette", os.path.getsize(os.path.join(out, "vignette.png")))
