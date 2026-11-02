@@ -3,15 +3,15 @@ route            form     perf a11y best  seo
 /                desktop   100  100  100  100 
 /pricing         mobile     99  100  100  100 
 /pricing         desktop   100  100  100  100 
-/download        mobile     99  100  100  100 
+/download        mobile    100  100  100  100 
 /download        desktop   100  100  100  100 
-/signin          mobile     99  100  100  100 
+/signin          mobile    100  100  100  100 
 /signin          desktop   100  100  100  100 
-/signup          mobile     99  100  100  100 
+/signup          mobile    100  100  100  100 
 /signup          desktop   100  100  100  100 
 /account         mobile    100  100  100   69  is-crawlable
 /account         desktop   100  100  100   69  is-crawlable
-/checkout        mobile     98  100  100   69  is-crawlable
+/checkout        mobile    100  100  100   69  is-crawlable
 /checkout        desktop   100  100  100   69  is-crawlable
 /legal/privacy   mobile    100  100  100  100 
 /legal/privacy   desktop   100  100  100  100 
