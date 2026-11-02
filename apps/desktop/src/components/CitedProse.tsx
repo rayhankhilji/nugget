@@ -3,6 +3,7 @@ import { appName, type CloudCitation } from "../cloud";
 import { splitCitations } from "../citations";
 import { formatTime } from "../format";
 import { useOpener } from "../hooks";
+import { AppGlyph } from "./AppLogo";
 import { useT } from "../i18n";
 
 /** Only web links are offered; anything else from a source (file:, javascript:, app schemes) is not. */
@@ -59,7 +60,7 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
           <button type="button" className="sources-stack" aria-expanded={open} aria-controls={`${prefix}-list`} onClick={() => setOpen((o) => !o)}>
             <span className="sources-stack-glyphs" aria-hidden="true">
               {apps.slice(0, 3).map((a) => (
-                <span key={a}>{appName(a).slice(0, 1)}</span>
+                <AppGlyph key={a} source={a} className="" />
               ))}
             </span>
             {t("cite.sources", { count: citations.length })}
@@ -114,9 +115,7 @@ function CiteChip({ n, source, author, onClick }: { n: number; source: string | 
   const name = author ? `${author} · ${app}` : app;
   return (
     <button type="button" className="cite cite-app" onClick={onClick} aria-label={t("cite.label", { name, n })}>
-      <span className="cite-glyph" aria-hidden="true">
-        {app.slice(0, 1)}
-      </span>
+      <AppGlyph source={source} className="cite-glyph" />
       {name}
     </button>
   );

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { appName, cloudApi, type CloudSearchResponse } from "../cloud";
+import { AppGlyph } from "../components/AppLogo";
 import { formatTime } from "../format";
 import { useOpener } from "../hooks";
 import { useT } from "../i18n";
@@ -85,6 +86,7 @@ export function CloudSearch() {
                       )}
                     </div>
                     <p className="small muted result-meta">
+                      <AppGlyph source={r.source} />
                       {appName(r.source)}
                       {r.author && <> · {r.author}</>}
                       {r.occurred_at && <> · {formatTime(r.occurred_at)}</>}

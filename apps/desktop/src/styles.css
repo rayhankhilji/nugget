@@ -4912,3 +4912,33 @@ section[hidden] {
     animation: fade-in var(--dur-1) linear;
   }
 }
+
+/* App glyphs: the Connections logos, small and round, in chips, the sources stack and search. */
+.app-glyph,
+.cite-glyph,
+.sources-stack-glyphs > span {
+  overflow: hidden;
+}
+
+.app-glyph img,
+.cite-glyph img,
+.sources-stack-glyphs > span img {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+}
+
+.app-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line);
+  color: var(--logo-ink);
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: -3px;
+}
