@@ -3,7 +3,11 @@
 //! - `GET /v1/cards?tz=`: `{cards, last_refresh}`, open cards best first.
 //! - `POST /v1/cards/refresh`: run knowledge and cards now; `{cards, last_refresh, report}`.
 //! - `POST /v1/cards/seen {ids}`: the desktop showed these.
-//! - `POST /v1/cards/{id}/accept | done`, `/dismiss {reason, note?}`, `/snooze {until}`: `{card}`.
+//! - `POST /v1/cards/{id}/accept {action?, body?}`: accepts the card and, when it offers a
+//!   supported action (`action` index, else the first supported), proposes it through
+//!   `/v1/actions`' path: `{card, action}` with the pending action (preview, digest). Approving
+//!   stays `POST /v1/actions/{id}/approve {digest}`; nothing runs from here.
+//! - `POST /v1/cards/{id}/done`, `/dismiss {reason, note?}`, `/snooze {until}`: `{card}`.
 
 use std::sync::Arc;
 
@@ -16,7 +20,9 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::{ApiError, ApiResult, AppState, caller};
+use crate::card_actions::{self, CardActionError};
 use crate::cards::{self, CardOp, CardsError};
+use crate::gateway::Allowance;
 use crate::intel::{self, IntelError};
 
 #[derive(Deserialize)]
@@ -70,13 +76,37 @@ impl From<IntelError> for ApiError {
     }
 }
 
-/// The signed-in, subscribed caller's id, when their plan has the "Needs you" inbox.
-async fn inbox_user(s: &AppState, h: &HeaderMap) -> ApiResult<Uuid> {
+/// The signed-in, subscribed caller's id and AI allowance, when their plan has the "Needs you"
+/// inbox.
+async fn inbox_caller(s: &AppState, h: &HeaderMap) -> ApiResult<(Uuid, Allowance)> {
     let c = caller(s, h).await?;
-    if !c.entitled()?.needs_you_inbox {
+    let plan = c.entitled()?;
+    if !plan.needs_you_inbox {
         return Err(not_in_plan());
     }
-    Ok(c.user.id)
+    Ok((c.user.id, Allowance::from(plan)))
+}
+
+async fn inbox_user(s: &AppState, h: &HeaderMap) -> ApiResult<Uuid> {
+    Ok(inbox_caller(s, h).await?.0)
+}
+
+impl From<CardActionError> for ApiError {
+    fn from(e: CardActionError) -> Self {
+        let msg = e.to_string();
+        match e {
+            CardActionError::Action(e) => e.into(),
+            CardActionError::Gateway(e) => e.into(),
+            CardActionError::Db(e) => e.into(),
+            CardActionError::NoAction => Self::new(StatusCode::NOT_FOUND, "not_found", msg),
+            CardActionError::NotSupported(_) => {
+                Self::new(StatusCode::BAD_REQUEST, "not_connected", msg)
+            }
+            CardActionError::NeedsBody => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, "body_required", msg)
+            }
+        }
+    }
 }
 
 pub(super) fn not_in_plan() -> ApiError {
@@ -107,8 +137,9 @@ pub(super) async fn timezone(
 
 async fn inbox(s: &AppState, user: Uuid, tz: Option<String>) -> ApiResult<Value> {
     let (list, last) = cards::inbox(&s.db, user, &cards::config(tz)).await?;
+    let apps = card_actions::connected(&s.db, user).await?;
     Ok(json!({
-        "cards": list.iter().map(cards::wire).collect::<Vec<_>>(),
+        "cards": list.iter().map(|c| cards::wire(c, &apps)).collect::<Vec<_>>(),
         "last_refresh": last.and_then(|t| t.format(&time::format_description::well_known::Rfc3339).ok()),
     }))
 }
@@ -166,6 +197,10 @@ pub(super) struct ActBody {
     note: Option<String>,
     #[serde(default, with = "time::serde::rfc3339::option")]
     until: Option<OffsetDateTime>,
+    /// `accept`: the card action to propose (default: the first supported one).
+    action: Option<usize>,
+    /// `accept` of a reply: the text, when the user wrote or edited it.
+    body: Option<String>,
 }
 
 pub(super) async fn act(
@@ -174,9 +209,29 @@ pub(super) async fn act(
     Path((id, action)): Path<(String, String)>,
     body: Option<Json<ActBody>>,
 ) -> ApiResult<Json<Value>> {
-    let u = inbox_user(&s, &h).await?;
+    let (u, allowance) = inbox_caller(&s, &h).await?;
     let b = body.map(|Json(b)| b).unwrap_or_default();
     let now = OffsetDateTime::now_utc();
+    let tz = intel::profile(&s.db, u).await?.timezone;
+    let cfg = cards::config(tz.clone());
+    let apps = card_actions::connected(&s.db, u).await?;
+    // Accepting proposes the card's action first: if that fails the card stays as it was.
+    let mut proposed = None;
+    if action == "accept" {
+        let card = cards::card(&s.db, u, &cfg, &id).await?;
+        if let Some(i) = card_actions::chosen(&card, b.action, &apps) {
+            let inputs = card_actions::Inputs {
+                connected: &apps,
+                allowance,
+                body: b.body.clone(),
+                timezone: tz,
+            };
+            proposed =
+                Some(card_actions::propose(&s.actions(), &s.gateway, u, &card, i, inputs).await?);
+        } else if b.action.is_some() {
+            return Err(CardActionError::NoAction.into());
+        }
+    }
     let bad = |m: &str| ApiError::new(StatusCode::BAD_REQUEST, "bad_request", m);
     let op = match action.as_str() {
         "accept" => CardOp::Accept(id),
@@ -206,7 +261,10 @@ pub(super) async fn act(
             ));
         }
     };
-    let tz = intel::profile(&s.db, u).await?.timezone;
-    let card = cards::act(&s.db, u, &cards::config(tz), op, now).await?;
-    Ok(Json(json!({ "card": card.as_ref().map(cards::wire) })))
+    let card = cards::act(&s.db, u, &cfg, op, now).await?;
+    let mut out = json!({ "card": card.as_ref().map(|c| cards::wire(c, &apps)) });
+    if let Some(a) = proposed {
+        out["action"] = json!(a);
+    }
+    Ok(Json(out))
 }

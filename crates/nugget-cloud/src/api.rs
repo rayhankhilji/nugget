@@ -15,12 +15,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::actions::store::Actions;
+use crate::apps::{self, RateLimiter};
 use crate::ask;
 use crate::auth::{AuthError, AuthProvider, AuthUser};
 use crate::composio::{Composio, ComposioError, Toolkit, map_status};
 use crate::db::{Db, DbError, SubscriptionRow};
 use crate::gateway::{Allowance, Gateway, GatewayError};
-use crate::ingest::{self, Ingest, SyncReport};
+use crate::ingest::{Ingest, SyncReport};
 use crate::plans::{Catalog, ModelTier, Plan};
 use crate::stripe::{Stripe, StripeError};
 use crate::webhook;
@@ -40,6 +42,13 @@ pub struct AppState {
     pub auth_configs: BTreeMap<String, String>,
     pub webhook_secret: Option<String>,
     pub connect_callback: String,
+    /// Shared by every sync, so per-account rate limits hold across requests and the scheduler.
+    pub limiter: RateLimiter,
+    /// Assesses proposed actions (see [`crate::actions`]).
+    pub policy: Arc<nugget_policy::PolicyEngine>,
+    /// Logos as `data:` URIs (the desktop CSP allows no remote images). Never fetches unless
+    /// built with a client ([`crate::apps::logos::LogoCache::new`]).
+    pub logos: crate::apps::logos::LogoCache,
     pub stripe: Option<Arc<dyn Stripe>>,
     pub stripe_webhook_secret: Option<String>,
     /// Public https base of this service (Stripe return pages).
@@ -68,6 +77,9 @@ impl AppState {
             app_scheme: "nugget".into(),
             site_origins: Vec::new(),
             toolkits: Mutex::new(None),
+            limiter: RateLimiter::default(),
+            policy: Arc::new(crate::actions::default_policy()),
+            logos: Default::default(),
         }
     }
 
@@ -85,7 +97,19 @@ impl AppState {
             composio: self.composio.clone()?,
             gateway: self.gateway.clone(),
             catalog: self.plans.clone(),
+            limiter: self.limiter.clone(),
+            // A trigger is only useful if its webhook is accepted.
+            triggers: self.webhook_secret.is_some(),
         })
+    }
+
+    /// Outbound actions, with this state's database, Composio and policy.
+    pub fn actions(&self) -> Actions {
+        Actions {
+            db: self.db.clone(),
+            composio: self.composio.clone(),
+            policy: self.policy.clone(),
+        }
     }
 
     fn composio(&self) -> Result<&Arc<dyn Composio>, ApiError> {
@@ -301,6 +325,8 @@ fn cors_layer(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
 
 fn routes(state: Arc<AppState>) -> Router {
     Router::new()
+        .merge(apps_routes::routes())
+        .merge(actions_routes::routes())
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/me", get(me).delete(delete_me))
         .route("/v1/connections", get(list_connections).post(connect))
@@ -393,19 +419,20 @@ impl AppState {
                     Some((Instant::now(), list.clone()));
                 list
             }
-            None => ingest::SUPPORTED
+            None => apps::CATALOG
                 .iter()
-                .map(|s| Toolkit {
-                    slug: (*s).into(),
-                    name: (*s).into(),
-                    logo: None,
+                .map(|a| Toolkit {
+                    slug: a.slug.into(),
+                    name: a.name.into(),
+                    logo: Some(a.fallback_logo()),
                 })
                 .collect(),
         }
     }
 
+    /// An app this build supports and this deployment has a Composio auth config for.
     fn connectable(&self, slug: &str) -> bool {
-        ingest::SUPPORTED.contains(&slug) && self.auth_configs.contains_key(slug)
+        apps::spec(slug).is_some() && self.auth_configs.contains_key(slug)
     }
 }
 
@@ -415,10 +442,7 @@ async fn list_connections(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiRe
     if let Some(c) = &s.composio {
         match c.accounts(&u.id.to_string()).await {
             Ok(accounts) => {
-                for a in accounts
-                    .iter()
-                    .filter(|a| ingest::SUPPORTED.contains(&a.toolkit.as_str()))
-                {
+                for a in accounts.iter().filter(|a| apps::spec(&a.toolkit).is_some()) {
                     s.db.upsert_connection(u.id, &a.toolkit, &a.id, map_status(&a.status))
                         .await?;
                 }
@@ -440,6 +464,17 @@ async fn list_connections(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiRe
         .collect();
     available.sort_by(|a, b| b.connectable.cmp(&a.connectable).then(a.name.cmp(&b.name)));
     available.truncate(60);
+    // The desktop CSP allows only data: images. Apps we support get their fetched, sanitised
+    // logo; the rest of Composio's catalogue gets a monogram (no fetch).
+    for a in &mut available {
+        a.logo = Some(match (apps::spec(&a.slug), a.logo.take()) {
+            (Some(spec), url) => {
+                let url = url.unwrap_or_else(|| spec.fallback_logo());
+                s.logos.data_uri(&url, &a.name).await
+            }
+            (None, _) => apps::logos::monogram(&a.name),
+        });
+    }
     Ok(Json(
         json!({"connections": connections, "available": available}),
     ))
@@ -615,11 +650,21 @@ async fn composio_webhook(
         .and_then(Value::as_str)
         && let Some((user, conn)) = s.db.connection_owner(acc).await?
     {
-        s.db.mark_due(user, Some(conn)).await?;
+        // The event names its Composio user too; it must be the account's owner.
+        let named = v.pointer("/metadata/user_id").and_then(Value::as_str);
+        if named.is_none_or(|n| n == user.to_string()) {
+            s.db.mark_due(user, Some(conn)).await?;
+        } else {
+            tracing::warn!("webhook names a user who does not own the account; ignored");
+        }
     }
     Ok(StatusCode::OK)
 }
 
+#[path = "api/actions.rs"]
+mod actions_routes;
+#[path = "api/apps.rs"]
+mod apps_routes;
 mod brief;
 mod cards;
 #[cfg(test)]

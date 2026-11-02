@@ -14,6 +14,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use super::*;
+use crate::composio::Composio;
 use crate::db::NewItem;
 use crate::gateway::{Embedder, GatewayError, Llm, LlmRequest, LlmResponse};
 use crate::ingest::{chunk, content_hash, indexed_text};
@@ -50,6 +51,8 @@ impl Llm for ScriptLlm {
             } else {
                 json!({"entities": [], "claims": []}).to_string()
             }
+        } else if req.system.starts_with("You draft a short email reply") {
+            "Hi Dana, the signed contract is attached. Best, Me".into()
         } else if req.system.starts_with("You write the user's morning brief") {
             "Dana is waiting on the signed contract [1].".into()
         } else {
@@ -627,4 +630,181 @@ async fn scheduler_runs_changed_users_and_skips_quota_spent_extraction() {
         .unwrap()
         .get(0);
     assert_eq!(before, after);
+}
+
+/// "Awaiting your reply" on a Gmail-connected user: the card offers its reply, accepting it
+/// proposes a `reply_mail` through the actions path (drafted by the fast model), the preview
+/// shows it, and only an approval with the preview's digest sends it, once.
+#[tokio::test]
+async fn awaiting_reply_card_proposes_previews_and_sends_only_on_approval() {
+    let Some((db, pool)) = test_db().await else {
+        return;
+    };
+    let (auth, composio, _) = fakes();
+    let llm = Arc::new(ScriptLlm::default());
+    let gateway = Gateway::new(
+        Some(llm.clone() as Arc<dyn Llm>),
+        None,
+        "claude-haiku-5-5".into(),
+        "claude-sonnet-5-5".into(),
+    );
+    let mut state = AppState::new(db.clone(), auth, gateway, catalog());
+    state.composio = Some(composio.clone() as Arc<dyn Composio>);
+    let app = router(Arc::new(state));
+    let u = subscriber(&pool, "heed").await;
+    let now = OffsetDateTime::now_utc();
+    seed(&db, u, now).await;
+    let (_, v) = call(&app, "POST", "/v1/cards/refresh", u, Some(json!({}))).await;
+    let card = v["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["kind"] == "unanswered_thread" && c["title"].as_str().unwrap_or("").contains("Dana")
+        })
+        .unwrap_or_else(|| panic!("Dana's card: {v}"))
+        .clone();
+    let id = card["id"].as_str().unwrap().to_owned();
+    assert_eq!(card["actions"][0]["kind"], "draft_reply", "{card}");
+    assert_eq!(
+        card["actions"][0]["supported"], false,
+        "Gmail is not connected yet"
+    );
+
+    // Not connected: accepting asks to connect, and the card is left as it was.
+    let (s, e) = call(
+        &app,
+        "POST",
+        &format!("/v1/cards/{id}/accept"),
+        u,
+        Some(json!({"action": 0})),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("not_connected")),
+        "{e}"
+    );
+
+    let account = format!("ca_{}_gmail", &u.to_string()[..8]);
+    db.upsert_connection(u, "gmail", &account, "active")
+        .await
+        .unwrap();
+    let (_, v) = call(&app, "GET", "/v1/cards", u, None).await;
+    let listed = v["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(listed["actions"][0]["supported"], true, "{listed}");
+
+    // Accept: the card is accepted and its reply proposed, pending approval.
+    let (s, v) = call(&app, "POST", &format!("/v1/cards/{id}/accept"), u, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["card"]["state"], "accepted");
+    let action = &v["action"];
+    assert_eq!(action["kind"], "reply_mail");
+    assert_eq!(action["toolkit"], "gmail");
+    assert_eq!(action["status"], "pending");
+    assert_eq!(action["decision"], "confirm");
+    assert_eq!(
+        llm.count("You draft a short email reply"),
+        1,
+        "drafted by the fast model"
+    );
+    let aid = action["id"].as_str().unwrap().to_owned();
+    let digest = action["digest"].as_str().unwrap().to_owned();
+    let sent = |tool: &str| -> Vec<Value> {
+        composio
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c.1 == tool)
+            .map(|c| c.2.clone())
+            .collect()
+    };
+    assert!(
+        sent("GMAIL_REPLY_TO_THREAD").is_empty(),
+        "nothing sent on accept"
+    );
+
+    // Accepting again returns the same pending action (idempotent per card and action).
+    let (_, again) = call(&app, "POST", &format!("/v1/cards/{id}/accept"), u, None).await;
+    assert_eq!(again["action"]["id"], aid.as_str());
+
+    // Preview: the dry run the user reads, same digest, still nothing sent.
+    let (s, p) = call(&app, "GET", &format!("/v1/actions/{aid}/preview"), u, None).await;
+    assert_eq!(s, StatusCode::OK, "{p}");
+    assert_eq!(p["digest"], digest.as_str());
+    assert!(
+        p["preview"]
+            .to_string()
+            .contains("the signed contract is attached"),
+        "{p}"
+    );
+    assert!(sent("GMAIL_REPLY_TO_THREAD").is_empty());
+
+    // A wrong digest is refused; the preview's digest sends it once.
+    let (s, e) = call(
+        &app,
+        "POST",
+        &format!("/v1/actions/{aid}/approve"),
+        u,
+        Some(json!({"digest": "0".repeat(64)})),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::PRECONDITION_FAILED, Some("digest_mismatch"))
+    );
+    let (s, done) = call(
+        &app,
+        "POST",
+        &format!("/v1/actions/{aid}/approve"),
+        u,
+        Some(json!({"digest": digest})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{done}");
+    assert_eq!(done["status"], "succeeded");
+    let calls = sent("GMAIL_REPLY_TO_THREAD");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["thread_id"], "t-d1", "{}", calls[0]);
+    assert!(
+        calls[0].to_string().contains("dana@harbourline.example"),
+        "{}",
+        calls[0]
+    );
+
+    // The sensitive clinic card is never drafted by the model: the user writes the text.
+    let (_, v) = call(&app, "GET", "/v1/cards", u, None).await;
+    if let Some(c) = v["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["sensitive"] == true && c["kind"] == "unanswered_thread")
+    {
+        let cid = c["id"].as_str().unwrap();
+        let (s, e) = call(&app, "POST", &format!("/v1/cards/{cid}/accept"), u, None).await;
+        assert_eq!(
+            (s, e["error"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some("body_required")),
+            "{e}"
+        );
+        let (s, ok) = call(
+            &app,
+            "POST",
+            &format!("/v1/cards/{cid}/accept"),
+            u,
+            Some(json!({"body": "Confirmed, thanks."})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{ok}");
+        assert_eq!(ok["action"]["status"], "pending");
+    }
+    assert!(!llm.saw("therapy"));
+    assert_eq!(llm.count("You draft a short email reply"), 1);
 }

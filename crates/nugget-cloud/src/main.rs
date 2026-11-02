@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !gateway.has_llm() {
         tracing::warn!("no LLM key: /v1/ask will answer 503");
     }
+    let logo_http = http.clone();
     let auth = SupabaseAuth::new(
         http.clone(),
         cfg.supabase_url.clone(),
@@ -59,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     state.stripe_webhook_secret = cfg.stripe_webhook_secret.clone();
     state.public_url = cfg.public_url.clone();
     state.app_scheme = cfg.app_scheme.clone();
+    state.logos = nugget_cloud::apps::logos::LogoCache::new(logo_http);
     state.site_origins = cfg.site_origins.clone();
     let state = Arc::new(state);
     if let Some(ingest) = state.ingest() {

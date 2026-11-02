@@ -3,7 +3,10 @@
 //! - [`auth`]: checks Supabase access tokens, deletes users (GDPR).
 //! - [`db`]: Postgres access; every user query runs in a transaction scoped by RLS.
 //! - [`composio`]: connected accounts and tool calls through Composio.
-//! - [`ingest`]: Gmail and Calendar sync into `items` and `chunks`.
+//! - [`apps`]: the Connections catalogue and one sync adapter per app (Gmail, Calendar, Drive,
+//!   Outlook, Slack, Teams, Notion) behind one trait.
+//! - [`ingest`]: runs an app's adapter into `items` and `chunks` (dedup, deletes, cursors).
+//! - [`actions`]: outbound actions behind proposal, preview, approval and an audit chain.
 //! - [`gateway`]: LLM and embedding calls with our keys, metering and quotas.
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
@@ -18,10 +21,13 @@
 //! - [`plans`]: plans and entitlements (`plans.toml`).
 //! - [`stripe`]: Checkout, portal, subscriptions and Stripe webhook signatures.
 
+pub mod actions;
 pub mod api;
+pub mod apps;
 pub mod ask;
 pub mod auth;
 pub mod brief;
+pub mod card_actions;
 pub mod cards;
 pub mod composio;
 pub mod config;

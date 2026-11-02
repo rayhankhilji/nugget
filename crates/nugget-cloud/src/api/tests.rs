@@ -29,7 +29,17 @@ struct Harness {
     stripe: Arc<FakeStripe>,
 }
 
+mod actions;
+
 async fn harness(embeddings: bool) -> Option<Harness> {
+    harness_with(
+        embeddings,
+        &[("gmail", "ac_gmail"), ("googlecalendar", "ac_cal")],
+    )
+    .await
+}
+
+async fn harness_with(embeddings: bool, auth_configs: &[(&str, &str)]) -> Option<Harness> {
     let (db, pool) = test_db().await?;
     let (auth, composio, llm) = fakes();
     let embedder = embeddings.then(|| Arc::new(FakeEmbedder) as Arc<dyn Embedder>);
@@ -39,12 +49,10 @@ async fn harness(embeddings: bool) -> Option<Harness> {
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let configs = [
-        ("gmail".to_owned(), "ac_gmail".to_owned()),
-        ("googlecalendar".to_owned(), "ac_cal".to_owned()),
-    ]
-    .into_iter()
-    .collect();
+    let configs = auth_configs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
     let plans = Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap();
     let stripe = Arc::new(FakeStripe::default());
     let mut state = AppState::new(db.clone(), auth.clone(), gateway, Arc::new(plans));
@@ -495,12 +503,12 @@ async fn scheduler_syncs_due_connections() {
     }
     call(&h.app, "GET", "/v1/connections", Some(u), None).await; // records them active, due now
     let gateway = Gateway::new(None, None, String::new(), String::new());
-    let ingest = Ingest {
-        db: h.db.clone(),
-        composio: h.composio.clone(),
+    let ingest = Ingest::new(
+        h.db.clone(),
+        h.composio.clone(),
         gateway,
-        catalog: Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
-    };
+        Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
+    );
     assert_eq!(ingest.run_due(10).await, 2);
     assert_eq!(ingest.run_due(10).await, 0, "next sync scheduled later");
     let n: i64 = h

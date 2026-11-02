@@ -314,11 +314,31 @@ pub fn dismiss_reason(reason: &str, note: Option<&str>) -> Option<DismissReason>
     })
 }
 
-/// A card for the wire: the daemon's `CardView`, which the desktop already renders. Actions are
-/// listed but not executable from the cloud yet (`supported: false`).
-pub fn wire(c: &Card) -> Value {
-    serde_json::to_value(nugget_proactive::view::card_view(c, &|_| false))
-        .unwrap_or_else(|_| json!({"id": c.id}))
+/// A card for the wire: the daemon's `CardView`, which the desktop already renders. An action is
+/// `supported` when it maps to a Composio action and the user has that app connected
+/// ([`crate::card_actions`]).
+pub fn wire(c: &Card, connected: &[String]) -> Value {
+    serde_json::to_value(nugget_proactive::view::card_view(c, &|a| {
+        crate::card_actions::supported(a, connected)
+    }))
+    .unwrap_or_else(|_| json!({"id": c.id}))
+}
+
+/// One card, in any state.
+pub async fn card(
+    db: &Db,
+    user: Uuid,
+    cfg: &ProactiveConfig,
+    id: &str,
+) -> Result<Card, CardsError> {
+    let current = load(db, user).await?;
+    let (p, _) = proactive(
+        empty_store()?,
+        None,
+        cfg.clone(),
+        current.as_ref().map(|c| &c.0),
+    )?;
+    Ok(p.card(id)?)
 }
 
 #[cfg(test)]

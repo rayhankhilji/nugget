@@ -20,13 +20,14 @@ nugget-infer.workspace = true
 nugget-graph.workspace = true
 futures.workspace = true
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+nugget-policy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-time.workspace = true
+time = { workspace = true, features = ["macros"] }
 reqwest = { workspace = true, features = ["json", "query", "form"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 # Postgres over rustls with the workspace's single crypto provider (aws-lc-rs), no `ring`.
@@ -47,6 +48,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.6", default-features = false, features = ["cors"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

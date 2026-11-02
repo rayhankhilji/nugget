@@ -16,11 +16,13 @@ pub mod pkce;
 pub mod session;
 
 pub use api::{
-    Answer, Api, AskRequest, AskUsage, AvailableApp, BillingLink, Brief, Card, CardAction,
-    CardEvidence, Cards, Citation, ConnectStart, Connection, Connections, DEVICE_HEADER,
+    Action, ActionInput, ActionKind, ActionPreview, ActionStatus, Answer, Api, AppInfo, AskRequest,
+    AskUsage, AvailableApp, BillingLink, Brief, Card, CardAction, CardEvidence, CardOutcome, Cards,
+    Citation, ConnectStart, Connection, Connections, CreateEvent, CreatePage, DEVICE_HEADER,
     DismissReason, Entitlements, FacetCount, Facets, Interval, Me, ModelTier, PlanOffer, Plans,
-    SearchDates, SearchRequest, SearchResponse, SearchResult, Subscription, SyncReport, SyncResult,
-    Timeline, TimelineBucket, Usage,
+    PostMessage, PreviewDiff, PreviewField, ProposeAction, ReplyMail, SearchDates, SearchRequest,
+    SearchResponse, SearchResult, SendMail, Subscription, SyncReport, SyncResult, Timeline,
+    TimelineBucket, UpdateEvent, Usage,
 };
 pub use auth::{Callback, Provider, REDIRECT_URL, parse_callback};
 pub use session::{

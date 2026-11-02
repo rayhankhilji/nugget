@@ -173,6 +173,100 @@ do $$ begin
 end $$;
 rollback;
 
+-- Actions and their audit chain (20261102120001_apps_actions.sql).
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.pending_actions (id, user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+  values ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail',
+          'GMAIL_SEND_EMAIL', '{}', 'Send an email', repeat('a', 64), 'send', 'confirm', 'k1');
+insert into public.action_audit (user_id, action_id, seq, event, prev_hash, hash)
+  values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000a1', 1, 'proposed', repeat('0', 64), repeat('1', 64));
+update public.pending_actions set status = 'cancelled' where id = '00000000-0000-0000-0000-0000000000a1';
+commit;
+
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 0, 'service as B sees no A actions';
+  assert (select count(*) from public.action_audit) = 0, 'service as B sees no A audit';
+  update public.pending_actions set status = 'pending';
+  assert not found, 'service as B cannot touch A actions';
+  begin
+    insert into public.pending_actions (user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail', 'T', '{}', 's', repeat('b', 64), 'send', 'confirm', 'k2');
+    raise exception 'cross-user action insert was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+
+-- The audit chain is append-only for the service, and actions are never deleted by it.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  begin
+    update public.action_audit set event = 'forged';
+    raise exception 'service could rewrite the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.action_audit;
+    raise exception 'service could delete the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.pending_actions;
+    raise exception 'service could delete actions';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+
+-- A user reads their own actions and audit, and can neither write nor delete them.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 1, 'A sees own action';
+  assert (select count(*) from public.action_audit) = 1, 'A sees own audit';
+  begin
+    update public.pending_actions set status = 'pending';
+    raise exception 'user could approve directly';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    delete from public.action_audit;
+    raise exception 'user could delete the audit';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.pending_actions (user_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', 'send_mail', 'gmail', 'T', '{}', 's', repeat('c', 64), 'send', 'confirm', 'k3');
+    raise exception 'user could propose directly';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.pending_actions) = 0, 'B sees no A actions';
+  assert (select count(*) from public.action_audit) = 0, 'B sees no A audit';
+end $$;
+rollback;
+
+-- Slack and Teams messages are items too.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.items (user_id, source, external_id, kind, body, content_hash)
+  values ('00000000-0000-0000-0000-00000000000a', 'slack', 'C1:1.0', 'message', 'hi', 'h');
+rollback;
+
 -- M2/M3 tables: the same isolation.
 begin;
 set local role nugget_service;
@@ -273,6 +367,8 @@ do $$ begin
   assert (select count(*) from public.briefs where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'briefs cascade';
   assert (select count(*) from public.proactive_state) = 0, 'proactive state cascades';
   assert (select count(*) from public.llm_cache) = 0, 'llm cache cascades';
+  assert (select count(*) from public.pending_actions) = 0, 'actions cascade';
+  assert (select count(*) from public.action_audit) = 0, 'audit cascades with the user';
   assert (select count(*) from public.subscriptions) = 0, 'subscriptions cascade';
   assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;

@@ -2,7 +2,7 @@
 //! `/v1/brief`). The page passes its IANA zone (`tz`) so "today" and "yesterday" are the user's.
 
 use nugget_cloud_client::{
-    Brief, Card, CardAction, Cards, CloudError, DismissReason, SearchRequest, SearchResponse,
+    Brief, CardAction, CardOutcome, Cards, CloudError, DismissReason, SearchRequest, SearchResponse,
 };
 use tauri::{AppHandle, State};
 
@@ -36,15 +36,37 @@ fn check_id(id: &str) -> Result<()> {
 
 /// `action`: `accept`, `done`, `dismiss` (with `reason`, and `note` for `other`) or `snooze`
 /// (with `until`, RFC 3339).
-fn card_action(
-    action: &str,
+/// `accept` (optionally `index`: the card action to propose, and `body`: the reply text), `done`,
+/// `dismiss` (with `reason`, and `note` for `other`) or `snooze` (with `until`, RFC 3339).
+struct ActionArgs {
     reason: Option<String>,
     note: Option<String>,
     until: Option<String>,
-) -> Result<CardAction> {
+    index: Option<u32>,
+    body: Option<String>,
+}
+
+const MAX_BODY_LEN: usize = 100_000;
+
+fn card_action(action: &str, a: ActionArgs) -> Result<CardAction> {
+    let ActionArgs {
+        reason,
+        note,
+        until,
+        index,
+        body,
+    } = a;
     let bad = |m: &str| -> super::CloudCmdError { CloudError::Invalid(m.into()).into() };
     Ok(match action {
-        "accept" => CardAction::Accept,
+        "accept" => {
+            if body.as_ref().is_some_and(|b| b.len() > MAX_BODY_LEN) {
+                return Err(bad("the reply is too long"));
+            }
+            CardAction::Accept {
+                action: index,
+                body,
+            }
+        }
         "done" => CardAction::Done,
         "dismiss" => {
             let reason = match reason.as_deref().unwrap_or("not_relevant") {
@@ -119,6 +141,8 @@ pub async fn cloud_cards_seen(
     checked(&app, api.cards_seen(&ids).await)
 }
 
+// Each argument is a named key of the page's `invoke` call.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn cloud_card_action(
     app: AppHandle,
@@ -128,9 +152,20 @@ pub async fn cloud_card_action(
     reason: Option<String>,
     note: Option<String>,
     until: Option<String>,
-) -> Result<Option<Card>> {
+    index: Option<u32>,
+    body: Option<String>,
+) -> Result<CardOutcome> {
     check_id(&id)?;
-    let action = card_action(&action, reason, note, until)?;
+    let action = card_action(
+        &action,
+        ActionArgs {
+            reason,
+            note,
+            until,
+            index,
+            body,
+        },
+    )?;
     let api = cloud.api()?;
     checked(&app, api.card_action(&id, &action).await)
 }
@@ -150,6 +185,16 @@ pub async fn cloud_brief(
 mod tests {
     use super::*;
 
+    fn args(reason: Option<&str>, index: Option<u32>) -> ActionArgs {
+        ActionArgs {
+            reason: reason.map(str::to_owned),
+            note: None,
+            until: None,
+            index,
+            body: None,
+        }
+    }
+
     #[test]
     fn inputs_are_checked() {
         assert!(check_tz(&Some("America/Port-au-Prince".into())).is_ok());
@@ -158,14 +203,21 @@ mod tests {
         assert!(check_id("abc123").is_ok());
         assert!(check_id("a/b").is_err());
         assert_eq!(
-            card_action("dismiss", Some("wrong_info".into()), None, None).unwrap(),
+            card_action("dismiss", args(Some("wrong_info"), None)).unwrap(),
             CardAction::Dismiss {
                 reason: DismissReason::WrongInfo,
                 note: None
             }
         );
-        assert!(card_action("dismiss", Some("meh".into()), None, None).is_err());
-        assert!(card_action("snooze", None, None, None).is_err());
-        assert!(card_action("explode", None, None, None).is_err());
+        assert!(card_action("dismiss", args(Some("meh"), None)).is_err());
+        assert!(card_action("snooze", args(None, None)).is_err());
+        assert!(card_action("explode", args(None, None)).is_err());
+        assert_eq!(
+            card_action("accept", args(None, Some(1))).unwrap(),
+            CardAction::Accept {
+                action: Some(1),
+                body: None
+            }
+        );
     }
 }

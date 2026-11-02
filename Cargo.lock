@@ -4136,6 +4136,7 @@ dependencies = [
  "nugget-infer",
  "nugget-ingest",
  "nugget-knowledge",
+ "nugget-policy",
  "nugget-proactive",
  "nugget-retrieve",
  "nugget-store",

@@ -6,7 +6,7 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use super::{Api, Citation};
+use super::{Action, Api, Citation};
 use crate::{CloudError, Result};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,7 +142,13 @@ pub enum DismissReason {
 /// What to do with a card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CardAction {
-    Accept,
+    /// Accept the card. When it offers a supported action (`action` index, else the first
+    /// supported one) the cloud also proposes it: see [`CardOutcome::action`]. `body` is the reply
+    /// text when the user wrote it (required for sensitive cards, which are not drafted).
+    Accept {
+        action: Option<u32>,
+        body: Option<String>,
+    },
     Done,
     Dismiss {
         reason: DismissReason,
@@ -172,9 +178,13 @@ struct BriefEnvelope {
     brief: Option<Brief>,
 }
 
-#[derive(Deserialize)]
-struct CardEnvelope {
-    card: Option<Card>,
+/// A card after a user action; `action` is the proposal accepting it made (pending: approve it
+/// with [`Api::approve_action`] and the preview's digest).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardOutcome {
+    pub card: Option<Card>,
+    #[serde(default)]
+    pub action: Option<Action>,
 }
 
 /// Card ids are short hex hashes; refuse anything else before it goes into a path.
@@ -236,20 +246,20 @@ impl Api {
     }
 
     /// `POST /v1/cards/{id}/{accept|done|dismiss|snooze}`: the card afterwards.
-    pub async fn card_action(&self, id: &str, action: &CardAction) -> Result<Option<Card>> {
+    pub async fn card_action(&self, id: &str, action: &CardAction) -> Result<CardOutcome> {
         let id = card_id(id)?;
         let (name, body) = match action {
-            CardAction::Accept => ("accept", json!({})),
+            CardAction::Accept { action, body } => {
+                ("accept", json!({ "action": action, "body": body }))
+            }
             CardAction::Done => ("done", json!({})),
             CardAction::Dismiss { reason, note } => {
                 ("dismiss", json!({ "reason": reason, "note": note }))
             }
             CardAction::Snooze { until } => ("snooze", json!({ "until": until })),
         };
-        let env: CardEnvelope = self
-            .json(Method::POST, &format!("cards/{id}/{name}"), Some(body))
-            .await?;
-        Ok(env.card)
+        self.json(Method::POST, &format!("cards/{id}/{name}"), Some(body))
+            .await
     }
 
     /// `GET /v1/brief`: today's brief (from 07:00 local), else the latest one, if any.
@@ -380,7 +390,14 @@ mod tests {
         .await
         .unwrap();
         assert!(matches!(
-            api.card_action("../x", &CardAction::Accept).await,
+            api.card_action(
+                "../x",
+                &CardAction::Accept {
+                    action: None,
+                    body: None
+                }
+            )
+            .await,
             Err(CloudError::Invalid(_))
         ));
 
