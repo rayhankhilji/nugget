@@ -78,7 +78,7 @@ const ogAlt = smart(`${OG_PAGES[slug]?.line ?? "Heed"} (Heed, over a dithered bl
   <body>
     <a class="skip" href="#main">Skip to content</a>
     <Header minimal={minimal} />
-    <main id="main">
+    <main id="main" tabindex="-1">
       <slot />
     </main>
     <Footer minimal={minimal} cta={footerCta} />

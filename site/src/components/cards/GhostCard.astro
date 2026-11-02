@@ -33,7 +33,7 @@ const ghost = "at 2pm works. I've moved the review to Friday so we get the full 
     let visible = false;
     new IntersectionObserver(([e]) => (visible = !!e?.isIntersecting)).observe(root);
     const ready = async () => {
-      while (!visible || document.hidden) await wait(300);
+      while (!visible || document.hidden || document.documentElement.classList.contains("motion-off")) await wait(300);
     };
     (async () => {
       await wait(1200);
