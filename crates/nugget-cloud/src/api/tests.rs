@@ -22,7 +22,17 @@ struct Harness {
     auth: Arc<crate::testkit::FakeAuth>,
 }
 
+mod actions;
+
 async fn harness(embeddings: bool) -> Option<Harness> {
+    harness_with(
+        embeddings,
+        &[("gmail", "ac_gmail"), ("googlecalendar", "ac_cal")],
+    )
+    .await
+}
+
+async fn harness_with(embeddings: bool, auth_configs: &[(&str, &str)]) -> Option<Harness> {
     let (db, pool) = test_db().await?;
     let (auth, composio, llm) = fakes();
     let embedder = embeddings.then(|| Arc::new(FakeEmbedder) as Arc<dyn Embedder>);
@@ -32,12 +42,10 @@ async fn harness(embeddings: bool) -> Option<Harness> {
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let configs = [
-        ("gmail".to_owned(), "ac_gmail".to_owned()),
-        ("googlecalendar".to_owned(), "ac_cal".to_owned()),
-    ]
-    .into_iter()
-    .collect();
+    let configs = auth_configs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
     let state = AppState::new(
         db.clone(),
         auth.clone(),
@@ -471,11 +479,7 @@ async fn scheduler_syncs_due_connections() {
     }
     call(&h.app, "GET", "/v1/connections", Some(u), None).await; // records them active, due now
     let gateway = Gateway::new(None, None, String::new(), String::new());
-    let ingest = Ingest {
-        db: h.db.clone(),
-        composio: h.composio.clone(),
-        gateway,
-    };
+    let ingest = Ingest::new(h.db.clone(), h.composio.clone(), gateway);
     assert_eq!(ingest.run_due(10).await, 2);
     assert_eq!(ingest.run_due(10).await, 0, "next sync scheduled later");
     let n: i64 = h

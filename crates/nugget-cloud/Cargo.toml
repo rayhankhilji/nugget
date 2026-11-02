@@ -12,13 +12,14 @@ publish = false
 nugget-core.workspace = true
 nugget-store.workspace = true
 nugget-retrieve.workspace = true
+nugget-policy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-time.workspace = true
+time = { workspace = true, features = ["macros"] }
 reqwest = { workspace = true, features = ["json", "query"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 # Postgres over rustls with the workspace's single crypto provider (aws-lc-rs), no `ring`.
@@ -36,6 +37,7 @@ url = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

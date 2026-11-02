@@ -50,6 +50,9 @@ pub struct Connection {
     pub last_error: Option<String>,
     #[serde(skip)]
     pub sync_cursor: Value,
+    /// Composio trigger instance(s) nudging this connection, comma-separated.
+    #[serde(skip)]
+    pub trigger_id: Option<String>,
 }
 
 /// One normalised email, event or doc, ready to store.
@@ -94,6 +97,7 @@ impl Connection {
             last_synced_at: r.get("last_synced_at"),
             last_error: r.get("last_error"),
             sync_cursor: r.get("sync_cursor"),
+            trigger_id: r.get("trigger_id"),
         }
     }
 }
@@ -198,7 +202,7 @@ impl Db {
     }
 
     /// Runs `f` in a transaction that RLS confines to `user`, and commits if it succeeds.
-    async fn scoped<T>(
+    pub(crate) async fn scoped<T>(
         &self,
         user: Option<Uuid>,
         f: impl AsyncFnOnce(&Transaction<'_>) -> Result<T, DbError>,
@@ -300,7 +304,7 @@ impl Db {
         self.scoped(Some(user), async |tx| {
             let rows = tx
                 .query(
-                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor
+                    "select id, toolkit, composio_account_id, status, last_synced_at, last_error, sync_cursor, trigger_id
                      from public.connections where user_id = $1 order by created_at",
                     &[&user],
                 )
@@ -342,6 +346,35 @@ impl Db {
                    next_sync_at = now() + make_interval(secs => $5)
                  where user_id = $1 and id = $2",
                 &[&user, &id, &cursor, &error, &secs],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn set_trigger(&self, user: Uuid, id: Uuid, trigger: &str) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "update public.connections set trigger_id = $3 where user_id = $1 and id = $2",
+                &[&user, &id, &trigger],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn set_connection_status(
+        &self,
+        user: Uuid,
+        id: Uuid,
+        status: &str,
+    ) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "update public.connections set status = $3 where user_id = $1 and id = $2",
+                &[&user, &id, &status],
             )
             .await?;
             Ok(())
@@ -470,6 +503,50 @@ impl Db {
                 tx.execute(&stmt, &[&user, &id, &ord, text, &emb]).await?;
             }
             Ok(if inserted { Upsert::Added } else { Upsert::Updated })
+        })
+        .await
+    }
+
+    /// Deletes items (and their chunks) by external id. Returns how many were stored.
+    pub async fn delete_items(
+        &self,
+        user: Uuid,
+        source: &str,
+        ids: &[String],
+    ) -> Result<u64, DbError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        self.scoped(Some(user), async |tx| {
+            Ok(tx
+                .execute(
+                    "delete from public.items where user_id = $1 and source = $2 and external_id = any($3)",
+                    &[&user, &source, &ids],
+                )
+                .await?)
+        })
+        .await
+    }
+
+    /// Deletes stored items in a completely listed window that the listing no longer has.
+    pub async fn reconcile(
+        &self,
+        user: Uuid,
+        source: &str,
+        w: &crate::apps::Window,
+    ) -> Result<u64, DbError> {
+        let kind = w.kind;
+        self.scoped(Some(user), async |tx| {
+            Ok(tx
+                .execute(
+                    "delete from public.items where user_id = $1 and source = $2
+                       and ($3::text is null or kind = $3)
+                       and starts_with(external_id, $4)
+                       and occurred_at >= $5
+                       and not (external_id = any($6))",
+                    &[&user, &source, &kind, &w.prefix, &w.since, &w.seen],
+                )
+                .await?)
         })
         .await
     }
@@ -644,6 +721,14 @@ impl Db {
             (
                 "messages",
                 "select conversation_id, role, content, citations, created_at from public.messages",
+            ),
+            (
+                "pending_actions",
+                "select id, kind, toolkit, status, summary, preview, risk, decision, created_at, decided_at, executed_at, error from public.pending_actions",
+            ),
+            (
+                "action_audit",
+                "select seq, action_id, event, detail, prev_hash, hash, created_at from public.action_audit order by seq",
             ),
             (
                 "usage_events",

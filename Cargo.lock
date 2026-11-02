@@ -4129,6 +4129,7 @@ dependencies = [
  "hmac 0.12.1",
  "http-body-util",
  "nugget-core",
+ "nugget-policy",
  "nugget-retrieve",
  "nugget-store",
  "reqwest",

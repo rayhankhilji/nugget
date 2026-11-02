@@ -15,12 +15,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::actions::store::Actions;
+use crate::apps::{self, RateLimiter};
 use crate::ask;
 use crate::auth::{AuthError, AuthProvider, AuthUser};
 use crate::composio::{Composio, ComposioError, Toolkit, map_status};
 use crate::db::{Db, DbError};
 use crate::gateway::{Gateway, GatewayError, Plan};
-use crate::ingest::{self, Ingest, SyncReport};
+use crate::ingest::{Ingest, SyncReport};
 use crate::webhook;
 
 const MAX_QUESTION_CHARS: usize = 2_000;
@@ -35,6 +37,9 @@ pub struct AppState {
     pub auth_configs: BTreeMap<String, String>,
     pub webhook_secret: Option<String>,
     pub connect_callback: String,
+    /// Shared by every sync, so per-account rate limits hold across requests and the scheduler.
+    pub limiter: RateLimiter,
+    pub actions: Actions,
     catalog: Mutex<Option<(Instant, Vec<Toolkit>)>>,
 }
 
@@ -48,6 +53,11 @@ impl AppState {
         webhook_secret: Option<String>,
         connect_callback: String,
     ) -> Self {
+        let actions = Actions {
+            db: db.clone(),
+            composio: composio.clone(),
+            policy: Arc::new(crate::actions::default_policy()),
+        };
         Self {
             db,
             auth,
@@ -56,6 +66,8 @@ impl AppState {
             auth_configs,
             webhook_secret,
             connect_callback,
+            limiter: RateLimiter::default(),
+            actions,
             catalog: Mutex::new(None),
         }
     }
@@ -65,6 +77,9 @@ impl AppState {
             db: self.db.clone(),
             composio: self.composio.clone()?,
             gateway: self.gateway.clone(),
+            limiter: self.limiter.clone(),
+            // A trigger is only useful if its webhook is accepted.
+            triggers: self.webhook_secret.is_some(),
         })
     }
 
@@ -180,6 +195,8 @@ async fn user(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthUser> {
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
+        .merge(apps_routes::routes())
+        .merge(actions_routes::routes())
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/me", get(me).delete(delete_me))
         .route("/v1/connections", get(list_connections).post(connect))
@@ -246,19 +263,20 @@ impl AppState {
                     Some((Instant::now(), list.clone()));
                 list
             }
-            None => ingest::SUPPORTED
+            None => apps::CATALOG
                 .iter()
-                .map(|s| Toolkit {
-                    slug: (*s).into(),
-                    name: (*s).into(),
-                    logo: None,
+                .map(|a| Toolkit {
+                    slug: a.slug.into(),
+                    name: a.name.into(),
+                    logo: Some(a.fallback_logo()),
                 })
                 .collect(),
         }
     }
 
+    /// An app this build supports and this deployment has a Composio auth config for.
     fn connectable(&self, slug: &str) -> bool {
-        ingest::SUPPORTED.contains(&slug) && self.auth_configs.contains_key(slug)
+        apps::spec(slug).is_some() && self.auth_configs.contains_key(slug)
     }
 }
 
@@ -268,10 +286,7 @@ async fn list_connections(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiRe
     if let Some(c) = &s.composio {
         match c.accounts(&u.id.to_string()).await {
             Ok(accounts) => {
-                for a in accounts
-                    .iter()
-                    .filter(|a| ingest::SUPPORTED.contains(&a.toolkit.as_str()))
-                {
+                for a in accounts.iter().filter(|a| apps::spec(&a.toolkit).is_some()) {
                     s.db.upsert_connection(u.id, &a.toolkit, &a.id, map_status(&a.status))
                         .await?;
                 }
@@ -437,10 +452,20 @@ async fn composio_webhook(
         .and_then(Value::as_str)
         && let Some((user, conn)) = s.db.connection_owner(acc).await?
     {
-        s.db.mark_due(user, Some(conn)).await?;
+        // The event names its Composio user too; it must be the account's owner.
+        let named = v.pointer("/metadata/user_id").and_then(Value::as_str);
+        if named.is_none_or(|n| n == user.to_string()) {
+            s.db.mark_due(user, Some(conn)).await?;
+        } else {
+            tracing::warn!("webhook names a user who does not own the account; ignored");
+        }
     }
     Ok(StatusCode::OK)
 }
 
+#[path = "api/actions.rs"]
+mod actions_routes;
+#[path = "api/apps.rs"]
+mod apps_routes;
 #[cfg(test)]
 mod tests;
