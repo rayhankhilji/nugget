@@ -43,8 +43,10 @@ pub struct GroundingReport {
     /// Sentences dropped for copying a credential-like value from a sensitive fact.
     pub secrets_dropped: u32,
     /// Sentences dropped for a link, email address, phone, account or card number that neither
-    /// the thread nor the user's own text has (QA GG1-1), or for claiming an attachment (GG1-17).
+    /// the thread nor the user's own text has (QA GG1-1), or a payee no source names.
     pub contacts_dropped: u32,
+    /// Sentences dropped for claiming an attachment the user did not mention (QA GG1-17).
+    pub attachments_dropped: u32,
     /// Sentences dropped for repeating a message from someone else, or signing as them (GG7-1).
     pub copies_dropped: u32,
     /// Sentences cut back to their leading clauses that passed (the rest was dropped).
@@ -1012,7 +1014,7 @@ impl Grounder {
             return false;
         }
         if !self.corpus.attachment_ok && claims_attachment(sentence) {
-            self.report.contacts_dropped += 1;
+            self.report.attachments_dropped += 1;
             return false;
         }
         if !self.values {
@@ -2476,8 +2478,13 @@ the signed SOW. Call me on +1 415 555 0142 or mail ravi.menon@northwind.example.
 ravi.menon@northwind.example.com.",
                 "{check:?}"
             );
-            assert_eq!(g.report().contacts_dropped, 3, "{check:?}");
+            assert_eq!(g.report().contacts_dropped, 2, "{check:?}");
+            assert_eq!(g.report().attachments_dropped, 1, "{check:?}");
         }
+        // Tax-form names are not contacts; an SSN or tax ID is.
+        assert!(contacts("I'll send the W-9 info, plus the W-2 and 1099-NEC forms.").is_empty());
+        assert!(!contacts("My SSN is 900-12-3456.").is_empty());
+        assert!(!contacts("Our EIN is 12-3456789.").is_empty());
     }
 
     /// QA GG7-1: a draft that repeats the other person's message, or signs as them, is dropped.
