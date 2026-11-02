@@ -6,6 +6,7 @@ import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, le
 import { formatList, useT, type MessageKey } from "./i18n";
 import { Wordmark } from "./components/Logo";
 import { Toaster } from "./components/Toast";
+import { APPROVALS_CHANGED, needsTotal, useHeldApprovals } from "./pages/today/approvals";
 import { TrialModal, TrialRow } from "./components/Trial";
 import { SyncPill } from "./components/SyncPill";
 import { Icon, type IconName } from "./components/Icon";
@@ -617,22 +618,31 @@ function useRecentChats(page: PageId): StoredConversation[] {
   return list;
 }
 
-/** How many cards wait in Needs you (0 while unknown or offline). */
+/** How many things wait in Needs you: cards plus pending approvals (0 while unknown or offline). */
 function useNeedsCount(connected: boolean, page: PageId): number {
   const cloud = useCloudSignedIn();
   const [n, setN] = useState(0);
+  const [pending, setPending] = useState<readonly { id: string }[]>([]);
+  const held = useHeldApprovals();
   const [tick, setTick] = useState(0);
   useEvent(proactiveEvents.onCardsChanged, () => setTick((x) => x + 1));
+  useEffect(() => {
+    const bump = () => setTick((x) => x + 1);
+    window.addEventListener(APPROVALS_CHANGED, bump);
+    return () => window.removeEventListener(APPROVALS_CHANGED, bump);
+  }, []);
   useEffect(() => {
     if (!cloud && !connected) return;
     let alive = true;
     const count = cloud ? cloudApi.cards().then((c) => c.cards.length) : proactiveApi.cardsList({}).then((l) => (l.enabled ? l.cards.length : 0));
     count.then((c) => alive && setN(c)).catch(() => {});
+    // Approvals are the most urgent items: they count too (the same total as the page header).
+    (cloud ? cloudApi.actions("pending").catch(() => []) : Promise.resolve([])).then((a) => alive && setPending(a));
     return () => {
       alive = false;
     };
   }, [cloud, connected, page, tick]);
-  return n;
+  return needsTotal(n, pending, held);
 }
 
 /** The account and settings entry at the foot of the sidebar (⌘,). */

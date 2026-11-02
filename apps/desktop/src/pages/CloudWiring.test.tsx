@@ -116,6 +116,8 @@ describe("signed in to Heed Cloud", () => {
     await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Draft reply")));
     await flush(5);
     expect(accepted).toEqual([{ id: "cc1", action: "accept", index: 0, body: null }]);
+    // The header counts the card and the approval: the same total as the sidebar badge (needsTotal).
+    expect(container.querySelector(".page-count")?.textContent).toBe("2");
     // The new action leads the one Needs you queue, and its preview is in the pane.
     expect(container.querySelector("[data-action]")?.textContent).toContain("Reply to Margaret");
     const queue = container.querySelector(".needs-split")!;

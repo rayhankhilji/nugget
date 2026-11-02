@@ -35,6 +35,7 @@ function fire(id: string): void {
   clearTimeout(h.timer);
   held.delete(id);
   emit();
+  approvalsChanged();
   cloudApi.approveAction(h.action.id, h.action.digest).then(
     (action) => h.onResult({ ok: true, action }),
     (error) => h.onResult({ ok: false, error }),
@@ -61,6 +62,18 @@ export function undoApproval(id: string): boolean {
 /** Send every held approval now. */
 export function flushApprovals(): void {
   for (const id of [...held.keys()]) fire(id);
+}
+
+/** How many things wait in Needs you: the cards plus the approvals not already held for Undo.
+ * The page header and the sidebar badge both count with this, so they always agree. */
+export function needsTotal(cards: number, pending: readonly { id: string }[], held: ReadonlySet<string>): number {
+  return cards + pending.filter((a) => !held.has(a.id)).length;
+}
+
+/** Fired when the approval queue changed (approved, rejected, edited, snoozed), for counts elsewhere. */
+export const APPROVALS_CHANGED = "heed:approvals-changed";
+export function approvalsChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(APPROVALS_CHANGED));
 }
 
 /** The ids being held, re-rendering when they change. */

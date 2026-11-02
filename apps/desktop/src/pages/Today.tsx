@@ -35,6 +35,7 @@ import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../c
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
 import { ActionPane, ApprovalRows, useApprovals } from "./today/ActionQueue";
+import { needsTotal, useHeldApprovals } from "./today/approvals";
 import { BriefProse } from "./today/BriefProse";
 import { cloudApi, type CloudBrief } from "../cloud";
 import { useCloudSignedIn } from "../cloudSignedIn";
@@ -204,11 +205,13 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
   const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden, ...acted]), [list, hidden, acted]);
   const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   const approvals = useApprovals(cloud && view === "needs", actionsTick, setStatus);
+  const held = useHeldApprovals();
   // One queue: approvals first, then cards. The pane shows whichever row is selected.
   const queue = useMemo(
     () => [...approvals.pending.map((a) => ({ kind: "action" as const, id: a.id })), ...visible.map((c) => ({ kind: "card" as const, id: c.id }))],
     [approvals.pending, visible],
   );
+  const total = needsTotal(visible.length, approvals.pending, held);
   const [pick, setPick] = useState<{ kind: "action" | "card"; id: string } | null>(null);
   const current = queue.find((q) => pick && q.kind === pick.kind && q.id === pick.id) ?? queue[0] ?? null;
   const selected = current?.kind === "card" ? visible.find((c) => c.id === current.id) : undefined;
@@ -268,7 +271,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
   return (
     <SourcesContext.Provider value={sourceMap}>
       <div className="page page-needs">
-        <PageHeader title={t("today.inbox")} count={queue.length > 0 ? formatNumber(queue.length) : undefined} description={t("needs.description")} actions={refreshButton} />
+        <PageHeader title={t("today.inbox")} count={total > 0 ? formatNumber(total) : undefined} description={t("needs.description")} actions={refreshButton} />
         <ErrorNote error={refreshError} />
         <p className="visually-hidden" role="status" aria-live="polite">
           {status}

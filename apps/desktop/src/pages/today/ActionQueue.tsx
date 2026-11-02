@@ -8,7 +8,7 @@ import { AppLogo } from "../../components/AppLogo";
 import { showToast } from "../../components/Toast";
 import { ErrorNote, Spinner } from "../../components/ui";
 import { useT, type MessageKey } from "../../i18n";
-import { holdApproval, undoApproval, useHeldApprovals } from "./approvals";
+import { approvalsChanged, holdApproval, undoApproval, useHeldApprovals } from "./approvals";
 import { parseSnooze, snoozePresets, type SnoozePreset } from "./snooze";
 
 const KIND: Record<CloudActionKind, MessageKey> = {
@@ -138,6 +138,7 @@ export function useApprovals(enabled: boolean, tick: number, onDone: (status: st
       await cloudApi.cancelAction(a.id);
       onDone(t("needs.actions.rejected", { summary: a.summary }));
       list.reload();
+      approvalsChanged();
     } catch (e) {
       setError(e);
       onDone(t("today.feedbackFailed", { error: errorMessage(e) }));
@@ -170,6 +171,7 @@ export function useApprovals(enabled: boolean, tick: number, onDone: (status: st
       await cloudApi.snoozeAction(a.id, until.toISOString());
       showToast({ message: t("today.snoozed", { title: a.summary, until: formatTime(until.toISOString()) }) });
       list.reload();
+      approvalsChanged();
     } catch (e) {
       setError(e);
     } finally {
