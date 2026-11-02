@@ -1,0 +1,188 @@
+---
+import Logo from "./Logo.astro";
+interface Props {
+  minimal?: boolean;
+}
+const { minimal = false } = Astro.props;
+const path = Astro.url.pathname;
+const links = [
+  { href: "/#product", label: "Product" },
+  { href: "/#how", label: "How it works" },
+  { href: "/#privacy", label: "Privacy" },
+  { href: "/pricing", label: "Pricing" },
+  { href: "/download", label: "Download" },
+];
+---
+<header class="hdr">
+  <div class="wrap bar">
+    <a href="/" class="home" aria-label="Heed home"><Logo size={22} /></a>
+    {
+      !minimal && (
+        <nav class="links" aria-label="Main">
+          {links.map((l) => (
+            <a href={l.href} aria-current={path === l.href ? "page" : undefined}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
+      )
+    }
+    <div class="cta">
+      <a href="/signin" class="btn btn-ghost btn-sm signin" data-auth-swap>Sign in</a>
+      {!minimal && <a href="/pricing" class="btn btn-primary btn-sm trial">Start free trial</a>}
+      {
+        !minimal && (
+          <details class="menu">
+            <summary aria-label="Menu">
+              <span aria-hidden="true" />
+            </summary>
+            <nav aria-label="Mobile">
+              {links.map((l) => (
+                <a href={l.href}>{l.label}</a>
+              ))}
+              <a href="/signin" data-auth-swap>Sign in</a>
+            </nav>
+          </details>
+        )
+      }
+    </div>
+  </div>
+</header>
+
+<script is:inline>
+  // A Supabase session in storage means "Sign in" should read "Account". No SDK needed for this.
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && /^sb-.*-auth-token$/.test(k)) {
+        document.querySelectorAll("[data-auth-swap]").forEach(function (a) {
+          a.textContent = "Account";
+          a.setAttribute("href", "/account");
+        });
+        break;
+      }
+    }
+  } catch { /* storage blocked */ }
+</script>
+
+<style>
+  .hdr {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: color-mix(in srgb, var(--bg) 78%, transparent);
+    backdrop-filter: blur(16px) saturate(1.6);
+    -webkit-backdrop-filter: blur(16px) saturate(1.6);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    height: 60px;
+  }
+  .home {
+    text-decoration: none;
+    display: inline-flex;
+    padding: 4px 0;
+  }
+  .links {
+    display: flex;
+    gap: 4px;
+    margin-inline: auto;
+  }
+  .links a {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text-2);
+    text-decoration: none;
+    transition: color 0.15s, background-color 0.15s;
+  }
+  .links a:hover,
+  .links a[aria-current="page"] {
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .cta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .links + .cta {
+    margin-left: 0;
+  }
+  .menu {
+    display: none;
+    position: relative;
+  }
+  .menu summary {
+    list-style: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .menu summary::-webkit-details-marker {
+    display: none;
+  }
+  .menu summary span,
+  .menu summary span::before {
+    display: block;
+    width: 16px;
+    height: 1.5px;
+    background: var(--text);
+    border-radius: 2px;
+    transition: transform 0.2s var(--ease);
+  }
+  .menu summary span {
+    transform: translateY(-3px);
+  }
+  .menu summary span::before {
+    content: "";
+    transform: translateY(5px);
+  }
+  .menu[open] summary span {
+    transform: rotate(45deg);
+  }
+  .menu[open] summary span::before {
+    transform: rotate(-90deg);
+  }
+  .menu nav {
+    position: absolute;
+    right: 0;
+    top: 44px;
+    display: grid;
+    min-width: 200px;
+    padding: 6px;
+    border-radius: var(--r-3);
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+  }
+  .menu nav a {
+    padding: 10px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-size: 15px;
+  }
+  .menu nav a:hover {
+    background: var(--surface-2);
+  }
+  @media (max-width: 880px) {
+    .links {
+      display: none;
+    }
+    .cta {
+      margin-left: auto !important;
+    }
+    .menu {
+      display: block;
+    }
+    .signin {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,488 @@
+---
+/**
+ * The hero demo: Heed writing as inline ghost text in three different apps, looping.
+ * Pure HTML and CSS; a small script drives the typing. Without JS (or with reduced motion)
+ * the first scene renders in its "accepted" state.
+ */
+import AppIcon from "./AppIcon.astro";
+
+interface Scene {
+  id: string;
+  app: string;
+  title: string;
+  meta: [string, string][];
+  before?: string;
+  typed: string;
+  ghost: string;
+  sources: string[];
+  from: string;
+}
+
+const scenes: Scene[] = [
+  {
+    id: "mail",
+    app: "Mail",
+    title: "Re: Moorland kickoff",
+    meta: [
+      ["To", "Margaret Osei"],
+      ["Subject", "Re: Moorland kickoff"],
+    ],
+    before: "Hi Margaret,",
+    typed: "Thursday ",
+    ghost: "at 2pm works. I've moved the design review to Friday so we get the full hour, and I'll send the agenda tonight.",
+    sources: ["googlecalendar", "gmail"],
+    from: "your calendar and mail",
+  },
+  {
+    id: "chat",
+    app: "Team chat",
+    title: "# launch",
+    meta: [["Channel", "#launch · 14 members"]],
+    before: "Ines: is the freeze still Friday?",
+    typed: "Yes, Friday ",
+    ghost: "18:00. Dev signed off on cursor pagination this morning; the decision is in the RFC.",
+    sources: ["notion", "linear"],
+    from: "the RFC and Linear",
+  },
+  {
+    id: "doc",
+    app: "Docs",
+    title: "Q4 board update",
+    meta: [["Section", "Customers"]],
+    before: "Customers",
+    typed: "We closed ",
+    ghost: "three new accounts in October, led by Lumen Health at £84k ARR, and renewals are tracking at 97%.",
+    sources: ["googlesheets", "hubspot"],
+    from: "your pipeline sheet and HubSpot",
+  },
+];
+---
+<figure class="demo" data-demo aria-label="Heed suggesting text as you type in mail, chat and docs">
+  <div class="window">
+    <div class="chrome">
+      <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="tabs" role="presentation">
+        {
+          scenes.map((s, i) => (
+            <span class="tab" data-tab={s.id} data-on={i === 0 ? "" : undefined}>
+              {s.app}
+            </span>
+          ))
+        }
+      </span>
+    </div>
+
+    <div class="stage">
+      {
+        scenes.map((s, i) => (
+          <div class="scene" data-scene={s.id} data-on={i === 0 ? "" : undefined} aria-hidden={i === 0 ? undefined : "true"}>
+            <dl class="meta">
+              {s.meta.map(([k, v]) => (
+                <div>
+                  <dt>{k}</dt>
+                  <dd>{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <div class:list={["body", `body-${s.id}`]}>
+              {s.before && <p class="before">{s.before}</p>}
+              <p class="line">
+                <span class="typed">{s.typed}</span><span class="caret" aria-hidden="true" /><span class="ghost" data-state="accepted">{s.ghost}</span>
+                <span class="chip" data-state="accepted">
+                  <span class="chip-tab">
+                    <span class="d" aria-hidden="true" />
+                    <span class="kbd">Tab</span>
+                  </span>
+                  <span class="chip-src">
+                    <span class="stack" aria-hidden="true">
+                      {s.sources.map((src) => (
+                        <AppIcon slug={src} size={14} tile />
+                      ))}
+                    </span>
+                    2 sources
+                  </span>
+                </span>
+              </p>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+    <div class="status-bar">
+      <span class="hd"><span class="dot pulse" aria-hidden="true"></span>Heed</span>
+      <span class="st" data-status>Wrote this from your calendar and mail</span>
+    </div>
+  </div>
+  <figcaption class="keys">
+    <span><kbd>Tab</kbd> accept</span>
+    <span><kbd>⌥</kbd><kbd>→</kbd> one word</span>
+    <span><kbd>Esc</kbd> dismiss</span>
+  </figcaption>
+  <script type="application/json" data-scenes set:html={JSON.stringify(scenes.map((s) => ({ id: s.id, typed: s.typed, ghost: s.ghost, from: s.from })))} />
+  <noscript><style>.demo .caret { display: none; }</style></noscript>
+</figure>
+
+<script>
+  interface SceneData {
+    id: string;
+    typed: string;
+    ghost: string;
+    from: string;
+  }
+  const root = document.querySelector<HTMLElement>("[data-demo]");
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (root && !reduce) {
+    const data = JSON.parse(root.querySelector("[data-scenes]")?.textContent ?? "[]") as SceneData[];
+    const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    let visible = true;
+    new IntersectionObserver(([e]) => {
+      visible = !!e?.isIntersecting;
+    }).observe(root);
+    const ready = async () => {
+      while (!visible || document.hidden) await wait(400);
+    };
+
+    const show = (id: string) => {
+      root.querySelectorAll<HTMLElement>("[data-scene]").forEach((el) => {
+        const on = el.dataset["scene"] === id;
+        el.toggleAttribute("data-on", on);
+        if (on) el.removeAttribute("aria-hidden");
+        else el.setAttribute("aria-hidden", "true");
+      });
+      root.querySelectorAll<HTMLElement>("[data-tab]").forEach((el) => el.toggleAttribute("data-on", el.dataset["tab"] === id));
+    };
+
+    const play = async (s: SceneData) => {
+      const scene = root.querySelector<HTMLElement>(`[data-scene="${s.id}"]`);
+      const typed = scene?.querySelector<HTMLElement>(".typed");
+      const ghost = scene?.querySelector<HTMLElement>(".ghost");
+      const chip = scene?.querySelector<HTMLElement>(".chip");
+      if (!scene || !typed || !ghost || !chip) return;
+      const status = root.querySelector<HTMLElement>("[data-status]");
+      const say = (t: string) => {
+        if (status) status.textContent = t;
+      };
+      say("Watching the field you're typing in");
+      typed.textContent = "";
+      ghost.textContent = "";
+      ghost.dataset["state"] = "idle";
+      chip.dataset["state"] = "idle";
+      show(s.id);
+      await wait(500);
+      for (const ch of s.typed) {
+        await ready();
+        typed.textContent += ch;
+        await wait(55 + Math.random() * 60);
+      }
+      await wait(350);
+      ghost.dataset["state"] = "streaming";
+      say(`Writing from ${s.from}…`);
+      const words = s.ghost.split(/(?<= )/);
+      for (const [i, w] of words.entries()) {
+        await ready();
+        const span = document.createElement("span");
+        span.textContent = w;
+        span.className = "w";
+        ghost.append(span);
+        if (i === 1) chip.dataset["state"] = "suggesting";
+        await wait(38 + Math.random() * 40);
+      }
+      ghost.dataset["state"] = "suggesting";
+      say("Press Tab to accept");
+      await wait(1300);
+      await ready();
+      chip.dataset["state"] = "pressed";
+      await wait(160);
+      ghost.dataset["state"] = "accepted";
+      chip.dataset["state"] = "accepted";
+      say(`Accepted · from ${s.from}`);
+      await wait(3200);
+    };
+
+    (async () => {
+      for (;;) {
+        for (const s of data) await play(s);
+      }
+    })();
+  }
+</script>
+
+<style>
+  .demo {
+    margin: 0;
+    width: 100%;
+  }
+  .window {
+    position: relative;
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-3), var(--hi);
+    overflow: hidden;
+  }
+  .chrome {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 44px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .lights {
+    display: flex;
+    gap: 8px;
+  }
+  .lights i {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--line-2);
+  }
+  .tabs {
+    display: flex;
+    gap: 2px;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .tab {
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: color 0.3s, background-color 0.3s;
+  }
+  .tab[data-on] {
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
+  }
+
+  .stage {
+    position: relative;
+    display: grid;
+    min-height: 236px;
+  }
+  .scene {
+    grid-area: 1 / 1;
+    padding: 6px 22px 24px;
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+      opacity 0.45s var(--ease),
+      transform 0.45s var(--ease);
+    pointer-events: none;
+  }
+  .scene[data-on] {
+    opacity: 1;
+    transform: none;
+  }
+  .meta {
+    margin: 0 0 18px;
+  }
+  .meta div {
+    display: flex;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+  }
+  .meta dt {
+    width: 64px;
+    color: var(--text-3);
+  }
+  .meta dd {
+    margin: 0;
+    color: var(--text);
+  }
+  .body {
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  .before {
+    margin-bottom: 10px;
+    color: var(--text);
+  }
+  .body-chat .before {
+    color: var(--text-2);
+    font-size: 15px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    display: inline-block;
+    margin-bottom: 14px;
+  }
+  .body-doc .before {
+    font-weight: 600;
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .line {
+    position: relative;
+  }
+  .typed {
+    white-space: pre-wrap;
+  }
+  .caret {
+    display: inline-block;
+    width: 1.5px;
+    height: 1.15em;
+    margin: 0 1px -0.2em 0;
+    background: var(--brand);
+    animation: blink 1.1s steps(1) infinite;
+  }
+  .line:has(.ghost[data-state="accepted"]) .caret {
+    display: none;
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  /* Ghost text */
+  .ghost {
+    color: var(--ghost);
+    transition:
+      color 0.5s var(--ease),
+      background-color 0.6s;
+    border-radius: 3px;
+  }
+  .ghost[data-state="idle"] {
+    color: transparent;
+  }
+  .ghost[data-state="streaming"] :global(.w:nth-last-child(-n + 3)) {
+    background: linear-gradient(90deg, var(--ghost), var(--brand) 60%, transparent);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .ghost[data-state="accepted"] {
+    color: var(--text);
+    text-decoration: underline 1.5px color-mix(in srgb, var(--accent) 70%, transparent);
+    text-underline-offset: 4px;
+    animation: wash 2.4s var(--ease) forwards;
+  }
+  @keyframes wash {
+    0% {
+      background: var(--accent-soft);
+    }
+    100% {
+      background: transparent;
+      text-decoration-color: transparent;
+    }
+  }
+
+  /* Hint chip: dot + Tab while suggesting, then "2 sources". */
+  .chip {
+    display: inline-flex;
+    vertical-align: 0.05em;
+    margin-left: 6px;
+    height: 22px;
+    padding: 0 8px 0 7px;
+    border-radius: 999px;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+    box-shadow: 0 0 0 0.5px var(--line-2), 0 2px 8px -2px rgb(0 0 0 / 0.15);
+    transition:
+      opacity 0.2s,
+      transform 0.15s var(--ease);
+    white-space: nowrap;
+  }
+  .chip[data-state="idle"] {
+    opacity: 0;
+  }
+  .chip[data-state="pressed"] {
+    transform: scale(0.92);
+  }
+  .chip-tab,
+  .chip-src {
+    display: none;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip[data-state="suggesting"] .chip-tab,
+  .chip[data-state="pressed"] .chip-tab {
+    display: inline-flex;
+  }
+  .chip[data-state="accepted"] .chip-src {
+    display: inline-flex;
+  }
+  .chip .kbd {
+    height: 16px;
+    font-size: 10.5px;
+    vertical-align: 0;
+  }
+  .chip[data-state="pressed"] .kbd {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  .d {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand);
+  }
+  .stack {
+    display: inline-flex;
+  }
+  .stack :global(.app + .app) {
+    margin-left: -4px;
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 40px;
+    padding: 0 16px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+    font-size: 12.5px;
+    color: var(--text-2);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .hd {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .hd .dot {
+    width: 7px;
+    height: 7px;
+  }
+  .st {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px 20px;
+    margin-top: 18px;
+    font-size: 13px;
+    color: var(--text-2);
+  }
+  .keys span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .keys kbd + kbd {
+    margin-left: -3px;
+  }
+  @media (max-width: 520px) {
+    .stage {
+      min-height: 268px;
+    }
+    .scene {
+      padding: 4px 16px 20px;
+    }
+    .body {
+      font-size: 16px;
+    }
+  }
+</style>

@@ -1,0 +1,45 @@
+---
+interface Props {
+  title: string;
+  lede?: string;
+  wide?: boolean;
+}
+const { title, lede, wide = false } = Astro.props;
+---
+<section class="panel-wrap wrap">
+  <div class:list={["panel", { wide }]}>
+    <span class="dot pulse" aria-hidden="true"></span>
+    <h1>{title}</h1>
+    {lede && <p class="lede">{lede}</p>}
+    <slot />
+  </div>
+</section>
+
+<style>
+  .panel-wrap {
+    display: grid;
+    place-items: center;
+    min-height: calc(100vh - 60px - 120px);
+    padding-block: 56px;
+  }
+  .panel {
+    width: 100%;
+    max-width: 420px;
+    display: grid;
+    gap: 14px;
+  }
+  .panel.wide {
+    max-width: 720px;
+  }
+  .dot {
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 34px);
+    letter-spacing: -0.035em;
+  }
+  .lede {
+    color: var(--text-2);
+    margin-bottom: 10px;
+  }
+</style>
