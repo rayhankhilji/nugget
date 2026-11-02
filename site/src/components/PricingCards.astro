@@ -1,5 +1,5 @@
 ---
-import { PLANS, TRIAL_DAYS } from "../lib/plans";
+import { loadPlans } from "../lib/plans";
 
 interface Props {
   /** Heading level for plan names, so the page outline stays in order. */
@@ -7,9 +7,11 @@ interface Props {
 }
 const { level = "h3" } = Astro.props;
 const H = level;
+const { plans, source } = await loadPlans();
+const TRIAL_DAYS = plans[0]?.trial_days ?? 14;
 const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
 ---
-<div class="pricing">
+<div class="pricing" data-plans-source={source}>
   <fieldset class="toggle">
     <legend class="sr-only">Billing period</legend>
     <label><input type="radio" name="interval" value="month" checked /><span>Monthly</span></label>
@@ -20,7 +22,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
 
   <div class="cards">
     {
-      PLANS.map((p) => (
+      plans.map((p) => (
         <article class:list={["plan", { hl: p.highlight }]} aria-labelledby={`plan-${p.id}`}>
           <div class="plan-top">
             <H id={`plan-${p.id}`} class="name">
@@ -32,16 +34,16 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
           <p class="pitch">{p.pitch}</p>
           <div class="price">
             <p class="m">
-              <span class="amt">{gbp(p.monthly)}</span>
+              <span class="amt">{gbp(p.monthly_gbp)}</span>
               <span class="per">/ month</span>
             </p>
             <p class="y">
-              <span class="amt">{gbp(p.annual)}</span>
+              <span class="amt">{gbp(p.annual_gbp)}</span>
               <span class="per">/ year</span>
             </p>
             <p class="sub m">Billed monthly. Cancel any time.</p>
             <p class="sub y">
-              {gbp(p.annual / 12)} a month, billed yearly. Save {gbp(p.monthly * 12 - p.annual)}.
+              {gbp(p.annual_gbp / 12)} a month, billed yearly. Save {gbp(p.monthly_gbp * 12 - p.annual_gbp)}.
             </p>
           </div>
           <a class:list={["btn", "btn-lg", "go", "m", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=month`}>

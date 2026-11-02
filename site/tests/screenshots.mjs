@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
 import { buildTestSite, signedIn, CLOUD } from "./mocks.mjs";
 
-buildTestSite();
+await buildTestSite();
 const { serve, ROUTES } = await import("./serve.mjs");
 // Playwright is pre-installed globally (with its Chromium), so it is resolved via require.
 const { chromium } = createRequire(import.meta.url)("playwright");

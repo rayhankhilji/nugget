@@ -3,7 +3,7 @@
 import { createRequire } from "node:module";
 import { buildTestSite, signedIn, SB, CLOUD } from "./mocks.mjs";
 
-buildTestSite();
+await buildTestSite();
 const { serve, ROUTES } = await import("./serve.mjs");
 const { chromium } = createRequire(import.meta.url)("playwright");
 
@@ -46,6 +46,7 @@ for (const scheme of ["light", "dark"]) {
 {
   const page = await browser.newPage();
   await page.goto(base + "/pricing");
+  check((await page.getAttribute(".pricing", "data-plans-source")) === "api", "pricing rendered from GET /v1/billing/plans");
   const firstPrice = () => page.locator(".plan .amt:visible").first().textContent();
   check((await firstPrice()) === "£39", "pricing shows £39 monthly");
   await page.locator('input[value="year"]').check();
@@ -104,7 +105,7 @@ for (const scheme of ["light", "dark"]) {
   await page.goto(base + "/checkout?plan=heed_max&interval=year");
   await page.waitForURL("https://checkout.stripe.test/**");
   const co = calls.find((c) => c.path === "/v1/billing/checkout");
-  check(co?.method === "POST" && co.body === '{"plan":"heed_max","interval":"year"}' && co.auth === "Bearer test-access-token", `checkout POST ${co?.body}`);
+  check(co?.method === "POST" && co.body === JSON.stringify({ plan: "heed_max", interval: "year", return_url: `${base}/account?billing=done` }) && co.auth === "Bearer test-access-token", `checkout POST ${co?.body}`);
 
   await page.goto(base + "/account");
   await page.locator("[data-plan]").filter({ hasText: "Heed Max" }).waitFor();
@@ -112,7 +113,10 @@ for (const scheme of ["light", "dark"]) {
   check((await page.textContent("[data-dev-limit]")) === "1 of 3", "account shows device count");
   await page.click("[data-portal]");
   await page.waitForURL("https://billing.stripe.test/**");
-  check(calls.some((c) => c.path === "/v1/billing/portal" && c.method === "POST"), "portal POST");
+  check(
+    calls.some((c) => c.path === "/v1/billing/portal" && c.method === "POST" && JSON.parse(c.body ?? "{}").return_url === `${base}/account?billing=done`),
+    "portal POST with return_url",
+  );
 
   await page.goto(base + "/account");
   await page.locator("[data-plan]").filter({ hasText: "Heed Max" }).waitFor();

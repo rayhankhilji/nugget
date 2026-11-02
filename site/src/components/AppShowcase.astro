@@ -1,0 +1,138 @@
+---
+/**
+ * Real screenshots of the desktop app (docs/book/src/images/screenshots on ds/brand, taken by
+ * apps/desktop/e2e/screenshots.mjs against a fictional corpus). Each shot has a light and a dark
+ * version; CSS shows the one matching the site theme. Tabs are radio inputs, so no script is needed.
+ */
+const shots = [
+  { id: "needs", label: "Needs you", caption: "What needs a reply, a decision or an action, and why each one is there." },
+  { id: "today", label: "Home", caption: "Ask anything across your apps, with the morning brief underneath." },
+  { id: "chat", label: "Answers", caption: "Answers that cite the exact email, event or doc they came from." },
+  { id: "connections", label: "Connections", caption: "Connect each app in one click, and see when it last synced." },
+];
+---
+<div class="show">
+  <div class="tabs" role="radiogroup" aria-label="App screens">
+    {
+      shots.map((s, i) => (
+        <label>
+          <input type="radio" name="shot" value={s.id} checked={i === 0} />
+          <span>{s.label}</span>
+        </label>
+      ))
+    }
+  </div>
+  <div class="frame">
+    {
+      shots.map((s) => (
+        <figure class="shot" data-shot={s.id}>
+          <img class="l" src={`/app/${s.id}-light.webp`} alt={`Heed ${s.label} screen`} width="1280" height="800" loading="lazy" decoding="async" />
+          <img class="d" src={`/app/${s.id}-dark.webp`} alt={`Heed ${s.label} screen`} width="1280" height="800" loading="lazy" decoding="async" />
+          <figcaption>{s.caption}</figcaption>
+        </figure>
+      ))
+    }
+  </div>
+  <p class="note">Real screenshots from the app, showing a fictional workspace.</p>
+</div>
+
+<style>
+  .show {
+    display: grid;
+    gap: 20px;
+    justify-items: center;
+  }
+  .tabs {
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+  label {
+    position: relative;
+    cursor: pointer;
+  }
+  input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  label span {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 9px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-2);
+    transition: background-color 0.2s, color 0.2s;
+  }
+  input:checked + span {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-1);
+  }
+  input:focus-visible + span {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .frame {
+    width: 100%;
+    max-width: 1040px;
+  }
+  .shot {
+    display: none;
+    margin: 0;
+  }
+  .shot img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1280 / 800;
+    border-radius: 12px;
+    box-shadow: var(--shadow-3);
+    background: var(--surface);
+  }
+  figcaption {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 15px;
+    color: var(--text-2);
+  }
+  .note {
+    font-size: 13px;
+    color: var(--text-3);
+  }
+
+  .show:has(input[value="needs"]:checked) [data-shot="needs"],
+  .show:has(input[value="today"]:checked) [data-shot="today"],
+  .show:has(input[value="chat"]:checked) [data-shot="chat"],
+  .show:has(input[value="connections"]:checked) [data-shot="connections"] {
+    display: block;
+  }
+
+  /* Pick the screenshot that matches the site theme (system, or the footer switch). */
+  .d {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .l {
+      display: none;
+    }
+    :global(:root:not([data-theme="light"])) .d {
+      display: block;
+    }
+  }
+  :global(:root[data-theme="dark"]) .l {
+    display: none;
+  }
+  :global(:root[data-theme="dark"]) .d {
+    display: block;
+  }
+</style>

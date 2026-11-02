@@ -1,8 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
+import { loadPlans } from "../lib/plans";
+const { plans } = await loadPlans();
+const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entitlements.devices])));
 ---
 <Base title="Account" description="Your Heed plan, billing and devices." noindex>
-  <section class="wrap acct" data-account aria-busy="true">
+  <section class="wrap acct" data-account data-limits={limits} aria-busy="true">
     <header class="head">
       <div>
         <h1>Account</h1>
@@ -152,7 +155,8 @@ import Base from "../layouts/Base.astro";
     }
     if (subs.error) say("We couldn't load your plan. Refresh to try again.", true);
 
-    const limit = live ? (sub.plan === "heed_max" ? 3 : 1) : 0;
+    const limits = JSON.parse($("[data-account]").dataset["limits"] ?? "{}") as Record<string, number>;
+    const limit = live ? (limits[sub.plan] ?? 1) : 0;
     const list = $("[data-devices]");
     const devices = (devs.data ?? []) as Device[];
     $("[data-dev-limit]").textContent = live ? `${devices.length} of ${limit}` : "";

@@ -29,7 +29,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 | Route | What it does |
 | --- | --- |
 | `/` | The hero, with a looping ghost-text demo in HTML and CSS (mail, chat, docs), plus the app logos, the four features, how it works, privacy and security, pricing, FAQ and the CTA. There are no testimonials, on purpose. |
-| `/pricing` | The two plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. |
+| `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. |
 | `/download` | The macOS builds, from env vars. It leads with the Intel build when the browser reports x86. Windows and Linux show as "Coming soon". |
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
@@ -43,9 +43,10 @@ in `robots.txt`.
 
 These come from `crates/nugget-cloud` on `ar/cloud` (`src/api/billing.rs`, `plans.toml`):
 
-- `POST {CLOUD_URL}/v1/billing/checkout` with `{"plan": "heed" | "heed_max", "interval": "month" | "year"}`
+- `GET {CLOUD_URL}/v1/billing/plans` is public. The site reads it at build time; see below.
+- `POST {CLOUD_URL}/v1/billing/checkout` with `{"plan": "heed" | "heed_max", "interval": "month" | "year", "return_url"}`
   returns `{"url"}`. A `409 already_subscribed` sends the user to Manage billing.
-- `POST {CLOUD_URL}/v1/billing/portal` returns `{"url"}`.
+- `POST {CLOUD_URL}/v1/billing/portal` with `{"return_url"}` returns `{"url"}`.
 - `DELETE {CLOUD_URL}/v1/me` deletes the account. It revokes the Composio connections first, then
   the auth user, and the delete cascades.
 - Errors look like `{"error": code, "message"}`. Every call sends `Authorization: Bearer <Supabase access token>`.
@@ -53,17 +54,26 @@ These come from `crates/nugget-cloud` on `ar/cloud` (`src/api/billing.rs`, `plan
   limits both tables to the signed-in user. Going through Supabase means it doesn't call `/v1/me`,
   which would register the browser as a device.
 
+### Prices come from the API
+
+`src/lib/plans.ts` fetches the public `GET /v1/billing/plans` **at build time**. It writes the
+prices, the trial length, the feature bullets, the comparison table and the device limits from
+the plans' entitlements. Pages stay static, so this doesn't depend on CORS. If the API can't be
+reached, or the cloud URL isn't set, the build logs a warning and uses a built-in copy of
+`plans.toml`. `.pricing[data-plans-source]` records which one was used. **Redeploy after changing
+prices.** A Cloudflare Pages deploy hook called from the cloud's release step keeps the two in step.
+
 ### What the cloud and Supabase need for the site to work
 
-1. **CORS.** The cloud service must allow the site's origin for `POST /v1/billing/*` and
-   `DELETE /v1/me`, including preflight with `Authorization` and `Content-Type`. Without that, the
-   browser blocks these calls.
+1. **CORS.** The cloud service must allow the site's origin (`NUGGET_SITE_ORIGINS`, being added by
+   AR1) for `POST /v1/billing/*` and `DELETE /v1/me`, including preflight with `Authorization` and
+   `Content-Type`. Without that, the browser blocks these calls.
 2. **Supabase Auth → URL configuration.** Set the Site URL to the site, and add
    `https://<site>/**` to the redirect allow-list. Enable the Google provider.
-3. After checkout, Stripe returns to `{NUGGET_PUBLIC_URL}/billing/done`, which opens the desktop app
-   (`heed://billing/done`). That's the right place for someone who signed up from the app. For a
-   web-first signup, the cloud could accept a `return_url` and send them to `/account?billing=done`
-   instead. The account page already shows a "Thanks" message for that parameter.
+3. **Return URL.** Checkout and portal requests send `return_url: {site}/account?billing=done`, and
+   the account page shows a "Thanks" message for that parameter. Until the cloud allow-lists and
+   uses the field, it ignores it, and Stripe returns to `{NUGGET_PUBLIC_URL}/billing/done`, which
+   hands over to the app.
 
 ## Environment
 
@@ -116,8 +126,9 @@ are resolved with `require("playwright")`, so nothing has to be downloaded.
   - the pricing toggle;
   - the redirects for signed-out users;
   - the magic-link request and its redirect;
-  - checkout (`POST /v1/billing/checkout` with the right body and bearer token, then following the
-    returned URL);
+  - pricing is rendered from a local `/v1/billing/plans` stub served during the build;
+  - checkout (`POST /v1/billing/checkout` with the right body, `return_url` and bearer token, then
+    following the returned URL);
   - the account page: trial status, device count, the portal, and deleting the account.
 
 ## Deploy (Cloudflare Pages, free)
@@ -146,10 +157,19 @@ unknown paths. Any static host that does the same will work, for example Vercel 
 
 ## Brand
 
-- **Colours:** Graphite `#16171B`, Chalk `#F7F7F5`, Coral `#FF5A3C` (the only accent) and Mist
-  `#9AA3AE`. In light mode, Coral text uses a deeper `#C2381C` and Mist secondary text uses
-  `#4F5661`, so both meet WCAG AA.
-- **Logo:** the mark is a placeholder, a pulsing Coral attention dot next to a Geist "heed"
-  wordmark (`src/components/Logo.astro`, `public/favicon.svg`). Swap in DS1's final icon and
-  wordmark from `design/` on `ds/brand` when they land. When this was built, that branch had concept
-  mockups only.
+These match the desktop app (`ds/brand`):
+- **Mark:** `public/favicon.svg` is `packaging/icons/nugget.svg`: a coral attention dot above a
+  chalk line, on a graphite tile. `src/components/Logo.astro` inlines it, and the dot's glow pulses
+  unless reduced motion is on. The wordmark is "heed" in Geist 600 at -0.04em. The Geist woff2 is
+  byte-identical to `apps/desktop/src/fonts`.
+- **Tokens:** the same two as `apps/desktop/src/tokens.css`:
+  - `--brand` is `#FF5A3C`, for the mark, dots and the ghost-text shimmer;
+  - `--accent` is for actions: `#BC3416` with white text in light mode (meets AA), and coral with
+    graphite text in dark mode;
+  - the rest of the palette is Graphite `#16171B`, Chalk `#F7F7F5` and Mist `#9AA3AE`. In light mode,
+    secondary text uses a deeper Mist, `#4F5661`, to meet AA.
+- **App screenshots:** `public/app/*.webp` are converted from `docs/book/src/images/screenshots/` on
+  `ds/brand`, which are taken from the real app running against a fictional corpus. The landing
+  page shows them in tabs (Needs you, Home, Answers, Connections), and switches light and dark with
+  the site theme. To refresh them, regenerate the app screenshots and convert again with sharp
+  (WebP, quality 82).

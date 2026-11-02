@@ -1,21 +1,26 @@
 ---
 import Base from "../layouts/Base.astro";
 import PricingCards from "../components/PricingCards.astro";
+import { loadPlans, ai, apps, sync, history, type Plan } from "../lib/plans";
 
+const { plans } = await loadPlans();
+const [a, b] = plans as [Plan, Plan];
+const yes = (v: boolean) => (v ? "Yes" : "No");
 const rows: [string, string, string][] = [
-  ["AI", "Fast model, plus 300 deep answers a month", "Most capable model by default"],
-  ["Connected apps", "10", "Unlimited"],
-  ["Sync", "Every 30 minutes", "Every 5 minutes"],
-  ["History", "12 months", "Everything"],
-  ["Ghost text anywhere on your Mac", "Yes", "Yes"],
-  ["Needs you and the daily brief", "Yes", "Yes"],
-  ["Actions with your approval", "Yes", "Yes"],
-  ["Agent tasks and computer use", "No", "Yes"],
-  ["Devices", "1", "3"],
-  ["Support", "Standard", "Priority"],
+  ["AI", ai(a.entitlements), ai(b.entitlements)],
+  ["Connected apps", apps(a.entitlements).replace(" connected apps", ""), apps(b.entitlements).replace(" connected apps", "").replace(" apps", "")],
+  ["Sync", sync(a.entitlements).replace("Sync every", "Every"), sync(b.entitlements).replace("Sync every", "Every")],
+  ["History", history(a.entitlements).replace(" of history", ""), history(b.entitlements).replace(" of history", "").replace("Full history", "Everything")],
+  ["Ghost text anywhere on your Mac", yes(a.entitlements.ghost_text), yes(b.entitlements.ghost_text)],
+  ["Needs you and the daily brief", yes(a.entitlements.needs_you_inbox && a.entitlements.daily_brief), yes(b.entitlements.needs_you_inbox && b.entitlements.daily_brief)],
+  ["Actions with your approval", yes(a.entitlements.actions_with_approval), yes(b.entitlements.actions_with_approval)],
+  ["Agent tasks and computer use", yes(a.entitlements.agent_tasks && a.entitlements.computer_use), yes(b.entitlements.agent_tasks && b.entitlements.computer_use)],
+  ["Devices", String(a.entitlements.devices), String(b.entitlements.devices)],
+  ["Support", a.entitlements.priority_support ? "Priority" : "Standard", b.entitlements.priority_support ? "Priority" : "Standard"],
 ];
+const description = `Heed is £${a.monthly_gbp} a month, or £${b.monthly_gbp} for ${b.name}. Both start with a ${a.trial_days}-day free trial; annual plans get two months free.`;
 ---
-<Base title="Pricing" description="Heed is £39 a month, or £99 for Heed Max. Both start with a 14-day free trial; annual plans get two months free.">
+<Base title="Pricing" description={description}>
   <section class="wrap top">
     <p class="eyebrow">Pricing</p>
     <h1>Pay for the hours it gives back.</h1>
@@ -30,7 +35,7 @@ const rows: [string, string, string][] = [
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th scope="col"><span class="sr-only">Feature</span></th><th scope="col">Heed</th><th scope="col">Heed Max</th></tr>
+          <tr><th scope="col"><span class="sr-only">Feature</span></th><th scope="col">{a.name}</th><th scope="col">{b.name}</th></tr>
         </thead>
         <tbody>
           {rows.map(([k, a, b]) => (

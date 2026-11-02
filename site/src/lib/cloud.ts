@@ -34,9 +34,13 @@ export async function cloud<T>(path: string, token: string, init: { method: stri
   return data as T;
 }
 
-export const billingCheckout = (token: string, plan: string, interval: string) =>
-  cloud<{ url: string }>("/v1/billing/checkout", token, { method: "POST", body: { plan, interval } });
+/** Where Stripe should send the browser back to. The cloud allow-lists it (NUGGET_SITE_ORIGINS). */
+const returnUrl = () => `${location.origin}/account?billing=done`;
 
-export const billingPortal = (token: string) => cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST" });
+export const billingCheckout = (token: string, plan: string, interval: string) =>
+  cloud<{ url: string }>("/v1/billing/checkout", token, { method: "POST", body: { plan, interval, return_url: returnUrl() } });
+
+export const billingPortal = (token: string) =>
+  cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST", body: { return_url: returnUrl() } });
 
 export const deleteAccount = (token: string) => cloud<void>("/v1/me", token, { method: "DELETE" });

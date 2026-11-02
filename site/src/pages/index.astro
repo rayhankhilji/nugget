@@ -3,6 +3,7 @@ import Base from "../layouts/Base.astro";
 import GhostDemo from "../components/GhostDemo.astro";
 import AppIcon from "../components/AppIcon.astro";
 import PricingCards from "../components/PricingCards.astro";
+import AppShowcase from "../components/AppShowcase.astro";
 import { FAQ } from "../lib/faq";
 
 const apps: [string, string][] = [
@@ -72,8 +73,20 @@ const faqLd = {
     </div>
   </section>
 
+  <!-- The real app -->
+  <section class="section showcase" aria-labelledby="app-h">
+    <div class="wrap">
+      <div class="section-head center">
+        <p class="eyebrow">The app</p>
+        <h2 id="app-h">Calm on the surface. Paying attention underneath.</h2>
+        <p>A Mac app that keeps one list of what needs you, answers with sources, and does nothing until you approve it.</p>
+      </div>
+      <AppShowcase />
+    </div>
+  </section>
+
   <!-- Product -->
-  <section id="product" class="section">
+  <section id="product" class="section product">
     <div class="wrap">
       <div class="section-head">
         <p class="eyebrow">What Heed does</p>
@@ -490,7 +503,7 @@ const faqLd = {
   .agenda li.key {
     color: var(--text);
     background: var(--surface);
-    box-shadow: inset 2px 0 0 var(--accent), var(--shadow-1);
+    box-shadow: inset 2px 0 0 var(--brand), var(--shadow-1);
   }
   .agenda time {
     font-family: var(--mono);
@@ -621,6 +634,12 @@ const faqLd = {
     text-underline-offset: 3px;
   }
 
+  .showcase {
+    padding-bottom: clamp(40px, 6vw, 72px);
+  }
+  .product {
+    padding-top: clamp(40px, 6vw, 72px);
+  }
   .section-head.center {
     margin-inline: auto;
     text-align: center;
