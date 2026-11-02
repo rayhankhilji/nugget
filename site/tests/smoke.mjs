@@ -77,6 +77,22 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1e. Each page's social card exists and is a 1200x630 PNG; the manifest is linked.
+{
+  const page = await browser.newPage();
+  for (const [route, slug] of [["/", "home"], ["/pricing", "pricing"], ["/legal/privacy", "privacy"]]) {
+    await page.goto(base + route);
+    const og = await page.getAttribute('meta[property="og:image"]', "content");
+    const tw = await page.getAttribute('meta[name="twitter:image"]', "content");
+    const res = await page.request.get(base + new URL(og ?? "/").pathname);
+    const buf = await res.body();
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    check(og?.endsWith(`/og/${slug}.png`) && tw === og && res.ok() && w === 1200 && h === 630, `${route} social card ${og} (${w}x${h})`);
+  }
+  check((await page.locator('link[rel="manifest"]').count()) === 1, "manifest linked");
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

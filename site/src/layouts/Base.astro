@@ -3,6 +3,7 @@ import "../styles/heed/fonts.css";
 import "../styles/heed/tokens.css";
 import "../styles/global.css";
 import tokensCss from "../styles/heed/tokens.css?raw";
+import { OG_PAGES, ogSlug } from "../lib/og";
 
 // tokens.css follows the system theme (data-theme="light" opts out). The footer switch can also force
 // dark, so reuse tokens.css's own dark block under :root[data-theme="dark"]; no values are duplicated.
@@ -26,7 +27,9 @@ const { title, description, noindex = false, minimal = false, footerCta = true }
 const cleanPath = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/";
 const canonical = new URL(cleanPath, Astro.site);
 const fullTitle = title === "Heed" ? "Heed: your always-on chief of staff" : `${title} · Heed`;
-const og = new URL("/og.png", Astro.site);
+const slug = ogSlug(Astro.url.pathname);
+const og = new URL(`/og/${slug}.png`, Astro.site);
+const ogAlt = `${OG_PAGES[slug]?.line ?? "Heed"} (Heed, over a dithered blue sky)`;
 ---
 <!doctype html>
 <html lang="en-GB">
@@ -50,7 +53,15 @@ const og = new URL("/og.png", Astro.site);
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={og} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={ogAlt} />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={og} />
+    <meta name="twitter:image:alt" content={ogAlt} />
+    <link rel="manifest" href="/site.webmanifest" />
     <script is:inline>
       // Apply the saved theme before first paint so there is no flash.
       document.documentElement.classList.add("js");

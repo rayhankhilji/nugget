@@ -251,6 +251,11 @@ The footer's theme switch can force dark on a light system. To support that, `Ba
 The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
 them once they exist. Sources and licences are in `CREDITS.md`.
 
+**Social cards:** each page gets a 1200×630 Open Graph and Twitter image: a Fraunces line over the
+dithered sky, with the wordmark. They are rendered once at build time by
+`src/pages/og/[slug].png.ts`, using satori and resvg-js with the static TTF instances in `src/og/`.
+The lines live in `src/lib/og.ts`. `site.webmanifest` lists the app icons.
+
 **Performance:**
 - CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within
   200px of the viewport.
