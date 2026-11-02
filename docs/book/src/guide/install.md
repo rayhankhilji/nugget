@@ -193,8 +193,8 @@ cargo build --release -p nugget-desktop --features tauri/custom-protocol
 ```
 
 `NUGGET_TRUST_DEV_MANIFEST_KEY=1` is optional (see below); the last two lines build the desktop app
-and can be skipped. `--features tauri/custom-protocol` embeds the frontend: a release build without
-it would open on a white window, so it stops with an error instead.
+and can be skipped. `--features tauri/custom-protocol` embeds the interface; without it the window
+would stay blank, so a release build without it stops with an error instead.
 
 Both binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
 `./target/release/nugget-desktop` (it starts the daemon), or `./target/release/nuggetd` in the
