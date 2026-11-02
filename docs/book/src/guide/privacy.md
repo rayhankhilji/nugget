@@ -1,10 +1,10 @@
 # Privacy
 
-Nugget is built so you can answer "what left my machine?" from the app itself.
+Heed is built so you can answer "what left my machine?" from the app itself.
 
 ## The defaults
 
-- **No Nugget servers and no telemetry.** Nothing is ever sent to the Nugget project.
+- **No Heed servers and no telemetry.** Nothing is ever sent to the Heed project.
 - **No update checks until you choose** (Stable, Beta or Off, in setup or on the Status page). A
   check fetches a small signed JSON feed from GitHub with no identifiers.
 - **Local models by default.** A cloud provider is used only if you add one.
@@ -14,7 +14,7 @@ Nugget is built so you can answer "what left my machine?" from the app itself.
 
 ## The egress ledger
 
-Every request Nugget sends off this device is recorded with its time, host, feature, bytes sent and
+Every request Heed sends off this device is recorded with its time, host, feature, bytes sent and
 received, and the items whose content was included. The **Privacy** page shows it, newest first
 (IPC: [`egress.page`](../reference/ipc.md), or `egress.recent`). Requests to this device are not
 recorded; requests to your local network are.
@@ -34,7 +34,7 @@ recorded; requests to your local network are.
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
 | `update_check`, `update_download` | Update checks and downloads (see [Install: Updates](install.md#updates)) |
 
-**Limits:** the ledger covers Nugget's own traffic, not what an [MCP](mcp.md) app or your browser
+**Limits:** the ledger covers Heed's own traffic, not what an [MCP](mcp.md) app or your browser
 does with your data. A crash mid-request can leave no row. Update rows come from the desktop app and
 can be lost if it quits while the daemon is stopped. A "local" server that forwards to the cloud
 (such as Ollama's `-cloud` models) looks local: mark it `locality = "cloud"` in [`config.toml`](../reference/config.md#providers).

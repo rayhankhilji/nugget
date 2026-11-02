@@ -198,7 +198,7 @@ function Launch([string]$logName) {
     $script:app = Start-Process -FilePath (App-Exe) -WorkingDirectory $installDir -PassThru `
         -RedirectStandardOutput $script:appLog -RedirectStandardError ($script:appLog + '.stderr')
     $null = $script:app.Handle
-    return (Wait-Until $windowTimeout { $script:app.HasExited -or [NuggetRehearsalWin32]::Find($script:app.Id, 'Nugget') -ne 0 }) -and -not $script:app.HasExited
+    return (Wait-Until $windowTimeout { $script:app.HasExited -or [NuggetRehearsalWin32]::Find($script:app.Id, 'Heed') -ne 0 }) -and -not $script:app.HasExited
 }
 
 function Logged([string]$text) { (Read-Shared $script:appLog).Contains($text) }
@@ -213,7 +213,7 @@ function First-Line([string]$text) {
 
 # WM_CLOSE, as the title bar's close button sends; returns the exit code or 'timeout'.
 function Close-App {
-    $h = [NuggetRehearsalWin32]::Find($script:app.Id, 'Nugget')
+    $h = [NuggetRehearsalWin32]::Find($script:app.Id, 'Heed')
     if ($h -ne 0) { $null = [NuggetRehearsalWin32]::Close($h) }
     if (-not $script:app.WaitForExit($quitTimeout * 1000)) { return 'timeout' }
     $script:app.WaitForExit()
@@ -329,7 +329,7 @@ function Case-Update {
         Record "${c}: installed nugget-desktop.exe has the new version" 'PASS' "ProductVersion $NewVersion (was $OldVersion)"
     } else {
         Record "${c}: installed nugget-desktop.exe has the new version" 'FAIL' "ProductVersion is $(Installed-Version)"
-        Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'nugget|Nugget|setup' } |
+        Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'nugget|Heed|setup' } |
             Format-Table ProcessId, ParentProcessId, Name, ExecutablePath -AutoSize | Out-String -Width 250 | Write-Host
     }
     # The passive installer restarts the app when it finishes (Tauri's /R); informational.

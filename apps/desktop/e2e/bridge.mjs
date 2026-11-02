@@ -385,7 +385,7 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
       msg = await daemon.call(method, paramsFor(cmd, args));
     } catch (e) {
       calls.push({ cmd, via: "daemon", ok: false, message: e.message });
-      return { err: { kind: "disconnected", message: "lost the connection to Nugget" } };
+      return { err: { kind: "disconnected", message: "lost the connection to Heed" } };
     }
     if (msg.error) {
       const { code, message } = msg.error;

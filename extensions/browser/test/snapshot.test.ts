@@ -170,7 +170,7 @@ describe("overlay", () => {
     expect(overlay.visible).toBe(true);
     const s = snap(doc);
     expect(s.elements.map((e) => e.name)).toEqual(["Page"]);
-    expect(s.text).not.toContain("Nugget");
+    expect(s.text).not.toContain("Heed");
     overlay.hide();
     expect(overlay.visible).toBe(false);
     expect(stopped).toBe(0);

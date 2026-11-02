@@ -1,4 +1,4 @@
-// Wire protocol between the Nugget native-messaging host (`crates/nugget-browser`) and this
+// Wire protocol between the Heed native-messaging host (`crates/nugget-browser`) and this
 // extension. Field names are snake_case to match the Rust serde types one to one; keep the two
 // in step (`crates/nugget-browser/src/protocol.rs`, `snapshot.rs`, `action.rs`).
 

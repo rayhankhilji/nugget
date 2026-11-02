@@ -1,4 +1,4 @@
-//! Local IPC between the Nugget app and `nuggetd`.
+//! Local IPC between the Heed app and `nuggetd`.
 //!
 //! JSON-RPC 2.0, one JSON object per line (newline-delimited), over a local socket: a Unix
 //! domain socket in a user-private 0700 directory on macOS/Linux, a per-user named pipe on

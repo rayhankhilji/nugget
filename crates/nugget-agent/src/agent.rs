@@ -40,7 +40,7 @@ const NUDGE: &str = "No tool was called. Call one tool now, or `finish` with out
 
 /// The system prompt, before [`AgentConfig::instructions`]. Nothing run-specific (the fence nonce
 /// goes in the first user message), so a local server can cache the prefix across runs.
-const SYSTEM_PROMPT: &str = "You are Nugget's task agent. You do one task for the user on their \
+const SYSTEM_PROMPT: &str = "You are Heed's task agent. You do one task for the user on their \
 computer by calling tools.
 
 - Call one tool per turn.

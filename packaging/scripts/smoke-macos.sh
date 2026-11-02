@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Smoke-test a macOS .dmg: mount it, copy Nugget.app out, launch it, check that the main window
+# Smoke-test a macOS .dmg: mount it, copy Heed.app out, launch it, check that the main window
 # appears and that the app connects to the nuggetd sidecar bundled next to it, then close the
 # window the way a user would (its close button) and stop the daemon.
-# Usage: packaging/scripts/smoke-macos.sh path/to/Nugget.dmg
+# Usage: packaging/scripts/smoke-macos.sh path/to/Heed.dmg
 #
 # Runs on a logged-in macOS session (GitHub's macos-* runners have one). Everything runs against
 # throwaway HOME/NUGGET_HOME directories, never the user's own data.
@@ -17,12 +17,12 @@
 #   SMOKE_ARTIFACTS          copy the logs (and a screenshot) here, pass or fail
 #   SMOKE_CONNECT_TIMEOUT    seconds to wait for "connected to nuggetd" (default 90)
 #   SMOKE_SPAWN_GRACE        seconds to wait for the app to start nuggetd itself (default 30)
-#   SMOKE_QUIT               the "When you quit Nugget" choice to test (platform.json quit_daemon):
+#   SMOKE_QUIT               the "When you quit Heed" choice to test (platform.json quit_daemon):
 #                            stop (default) - quitting stops the nuggetd the app started, cleanly;
 #                            keep - nuggetd outlives the app and stops cleanly on SIGTERM
 set -euo pipefail
 
-usage() { echo "usage: $0 path/to/Nugget.dmg" >&2; exit 2; }
+usage() { echo "usage: $0 path/to/Heed.dmg" >&2; exit 2; }
 [ $# -eq 1 ] || usage
 dmg="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 [ -f "$dmg" ] || { echo "smoke: no such file: $1" >&2; exit 2; }
@@ -46,7 +46,7 @@ export NUGGET_HOME="$work/nh"
 export HOME="$work/home"
 mkdir -p "$NUGGET_HOME" "$HOME"
 unset XDG_RUNTIME_DIR
-# Answer "When you quit Nugget" up front, so quitting doesn't stop to ask (platform.rs).
+# Answer "When you quit Heed" up front, so quitting doesn't stop to ask (platform.rs).
 app_config="$HOME/Library/Application Support/dev.nugget.desktop"
 mkdir -p "$app_config"
 printf '{"quit_daemon":"%s"}\n' "$quit_mode" > "$app_config/platform.json"
@@ -56,7 +56,7 @@ export NUGGET_LOG=info
 export NO_COLOR=1
 
 mnt="$work/mnt"
-app="$work/Nugget.app"
+app="$work/Heed.app"
 app_log="$work/app.log"
 probe_log="$work/window-probe.log"
 daemon_log_dir="$NUGGET_HOME/data/logs" # crates/nuggetd/src/logging.rs: <data>/logs/nuggetd.<date>.log
@@ -172,22 +172,22 @@ wait_until() { # timeout description cmd...
 }
 
 # nuggetd processes that belong to this run: the app starts the sidecar by its absolute path,
-# which is inside this run's copy of Nugget.app.
+# which is inside this run's copy of Heed.app.
 find_daemons() {
   [ -n "$daemon_exe" ] || return 0
   ps -axo pid=,command= | awk -v exe="$daemon_exe" '{ pid = $1; $1 = ""; if (substr($0, 2) == exe) print pid }'
 }
 
-# A layer-0 (normal) window of the app titled exactly "Nugget", seen by either source.
+# A layer-0 (normal) window of the app titled exactly "Heed", seen by either source.
 have_window() {
   local cg se
   cg="$(cg_windows "$app_pid" || true)"
-  if printf '%s\n' "$cg" | awk -F'\t' '$2 == 0 && $3 == 1 && $4 == "Nugget" { found = 1 } END { exit !found }'; then
+  if printf '%s\n' "$cg" | awk -F'\t' '$2 == 0 && $3 == 1 && $4 == "Heed" { found = 1 } END { exit !found }'; then
     title_source="window server (CGWindowList)"
     return 0
   fi
   se="$(se_windows "$app_pid" || true)"
-  if printf '%s\n' "$se" | tr ',' '\n' | sed 's/^ *//' | grep -qxF Nugget; then
+  if printf '%s\n' "$se" | tr ',' '\n' | sed 's/^ *//' | grep -qxF Heed; then
     title_source="System Events (accessibility)"
     return 0
   fi
@@ -223,13 +223,13 @@ mkdir -p "$mnt"
 hdiutil attach -nobrowse -noautoopen -readonly -mountpoint "$mnt" "$dmg" >/dev/null ||
   fail "hdiutil could not attach $dmg"
 mounted=1
-[ -d "$mnt/Nugget.app" ] || { ls -la "$mnt"; fail "no Nugget.app at the root of the disk image"; }
+[ -d "$mnt/Heed.app" ] || { ls -la "$mnt"; fail "no Heed.app at the root of the disk image"; }
 [ -L "$mnt/Applications" ] || log "note: the disk image has no Applications link"
-ditto "$mnt/Nugget.app" "$app" || fail "could not copy Nugget.app out of the disk image"
+ditto "$mnt/Heed.app" "$app" || fail "could not copy Heed.app out of the disk image"
 hdiutil detach "$mnt" >/dev/null || fail "hdiutil could not detach $mnt"
 mounted=0
 t_copy=$(elapsed "$t_mount")
-log "copied Nugget.app out of the disk image in ${t_copy}s ($(du -sh "$app" | cut -f1))"
+log "copied Heed.app out of the disk image in ${t_copy}s ($(du -sh "$app" | cut -f1))"
 
 exe_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")" ||
   fail "Info.plist has no CFBundleExecutable"
@@ -237,7 +237,7 @@ exe="$app/Contents/MacOS/$exe_name"
 daemon_exe="$app/Contents/MacOS/nuggetd"
 [ -x "$exe" ] || fail "no executable $exe"
 [ -x "$daemon_exe" ] || fail "no nuggetd sidecar at $daemon_exe"
-codesign --verify --deep --strict "$app" 2>&1 || fail "codesign does not verify Nugget.app"
+codesign --verify --deep --strict "$app" 2>&1 || fail "codesign does not verify Heed.app"
 log "app: $exe_name; signature: $(codesign -dv "$app" 2>&1 | sed -n 's/^Signature=//p')"
 
 # ---- launch ---------------------------------------------------------------------------------
@@ -251,9 +251,9 @@ app_alive_required=1
 log "launched (pid $app_pid)"
 
 wait_until "$window_timeout" "the main window" have_window ||
-  fail "no window titled 'Nugget' within ${window_timeout}s (see the window probes: a title the window server reports as <no title> needs Screen Recording; System Events needs Accessibility)"
+  fail "no window titled 'Heed' within ${window_timeout}s (see the window probes: a title the window server reports as <no title> needs Screen Recording; System Events needs Accessibility)"
 t_window=$(elapsed "$t_launch")
-log "window 'Nugget' is up after ${t_window}s (title read from the $title_source)"
+log "window 'Heed' is up after ${t_window}s (title read from the $title_source)"
 
 # ---- daemon: spawned by the app, connected ---------------------------------------------------
 
@@ -290,7 +290,7 @@ fi
 # The window's red close button, pressed through accessibility, as a user's click would.
 t_quit=$(ms)
 close_out="$(bounded 20 osascript -e "tell application \"System Events\" to tell (first process whose unix id is $app_pid)
-  click (first button of window \"Nugget\" whose subrole is \"AXCloseButton\")
+  click (first button of window \"Heed\" whose subrole is \"AXCloseButton\")
 end tell" 2>&1)" ||
   fail "could not press the window's close button through System Events: $close_out"
 app_alive_required=0
@@ -330,7 +330,7 @@ cat <<EOF
 
 PASS: macOS dmg smoke test ($(basename "$dmg"))
   dmg mount + copy           ${t_copy}s
-  window 'Nugget' shown      ${t_window}s after launch (title via ${title_source})
+  window 'Heed' shown      ${t_window}s after launch (title via ${title_source})
   connected to nuggetd       ${t_connect}s after launch (daemon started by: ${started_by})
   app exit after close       ${t_exit}s (status 0)
   nuggetd stopped            ${t_stop}s ${stop_how} (quit_daemon=${quit_mode})

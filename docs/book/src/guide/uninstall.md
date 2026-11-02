@@ -10,8 +10,8 @@ To keep a copy first, use `nuggetd backup` or `nuggetd export --to DIR` (see
 
 ## 1. Stop the login service, then quit
 
-On the Status page turn off **Start the Nugget background service at login** and **Open Nugget in the
-tray when I log in**, then quit Nugget. Or run:
+On the Status page turn off **Start the Heed background service at login** and **Open Heed in the
+tray when I log in**, then quit Heed. Or run:
 
 ```sh
 nuggetd uninstall-service
@@ -22,8 +22,8 @@ The `setup.exe` uninstaller does this for you. If the app is already gone, see
 
 ## 2. Remove the app
 
-- **macOS:** drag `/Applications/Nugget.app` to the Trash.
-- **Windows:** **Settings → Apps → Installed apps → Nugget → Uninstall**.
+- **macOS:** drag `/Applications/Heed.app` to the Trash.
+- **Windows:** **Settings → Apps → Installed apps → Heed → Uninstall**.
 - **Linux:** `sudo apt remove nugget`, `sudo dnf remove nugget` or `sudo zypper remove nugget`; for an
   AppImage, delete the file.
 
@@ -41,13 +41,13 @@ Data, models, cache and settings are in `%LOCALAPPDATA%\Nugget\Nugget` and
 the two `dev.nugget.desktop` folders; saved keys are Credential Manager generic credentials ending in
 `.dev.nugget.Nugget`; the vault is `%USERPROFILE%\Nugget Vault`.
 
-The `setup.exe` uninstaller shows a **Your Nugget data** page with two unticked boxes:
-**Remove models and Nugget's data** (everything above except the vault, including saved keys) and,
+The `setup.exe` uninstaller shows a **Your Heed data** page with two unticked boxes:
+**Remove models and Heed's data** (everything above except the vault, including saved keys) and,
 after that, **Also delete my Nugget Vault** (asks again; a vault in a folder you chose is never
-deleted). Updates never remove data. Silent options for `%LOCALAPPDATA%\Nugget\uninstall.exe`:
+deleted). Updates never remove data. Silent options for `%LOCALAPPDATA%\Heed\uninstall.exe`:
 `/S` (app only), `/S /REMOVEDATA` (plus data), `/S /REMOVEDATA /REMOVEVAULT` (plus the vault).
 
-After an `.msi` uninstall, or to do it by hand, quit Nugget and in PowerShell remove app data and
+After an `.msi` uninstall, or to do it by hand, quit Heed and in PowerShell remove app data and
 models:
 
 ```powershell
@@ -60,7 +60,7 @@ cmd /c rmdir /s /q "%LOCALAPPDATA%\dev.nugget.desktop"
 Saved keys (or remove them in **Credential Manager → Windows Credentials**):
 
 ```powershell
-cmdkey /list | Select-String 'target=(.+\.dev\.nugget\.Nugget)\s*$' |
+cmdkey /list | Select-String 'target=(.+\.dev\.nugget\.Heed)\s*$' |
   ForEach-Object { cmdkey "/delete:$($_.Matches[0].Groups[1].Value)" }
 ```
 
@@ -158,6 +158,6 @@ bash remove-nugget-data.sh --yes              # delete app data, models, saved k
 bash remove-nugget-data.sh --yes --include-vault   # also the vault; asks you to type "delete"
 ```
 
-It refuses to run while Nugget is running, never deletes a vault you placed with `[vault] path`,
+It refuses to run while Heed is running, never deletes a vault you placed with `[vault] path`,
 and leaves `NUGGET_HOME` alone. (The manual commands above remove every key under
 `dev.nugget.Nugget`, including other data directories' store keys; the script keeps those.)

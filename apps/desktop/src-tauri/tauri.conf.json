@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Nugget",
+  "productName": "Heed",
   "version": "0.0.1",
   "identifier": "dev.nugget.desktop",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Nugget",
+        "title": "Heed",
         "width": 1080,
         "height": 720,
         "minWidth": 640,
@@ -49,18 +49,18 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "Nugget contributors",
-    "copyright": "Copyright Nugget contributors. Licensed under Apache-2.0.",
+    "publisher": "Heed contributors",
+    "copyright": "Copyright Heed contributors. Licensed under Apache-2.0.",
     "license": "Apache-2.0",
     "homepage": "https://github.com/rayhankhilji/nugget",
-    "longDescription": "Nugget is a local-first personal AI. A background service (nuggetd) keeps your knowledge on this device; the desktop app talks to it over local IPC.",
+    "longDescription": "Heed is a local-first personal AI. A background service (nuggetd) keeps your knowledge on this device; the desktop app talks to it over local IPC.",
     "fileAssociations": [
       {
         "ext": [
           "nuggetplugin"
         ],
-        "name": "Nugget plugin",
-        "description": "Nugget plugin package",
+        "name": "Heed plugin",
+        "description": "Heed plugin package",
         "role": "Viewer",
         "mimeType": "application/x-nuggetplugin",
         "exportedType": {
@@ -115,6 +115,7 @@
     "deep-link": {
       "desktop": {
         "schemes": [
+          "heed",
           "nugget"
         ]
       }

@@ -1,5 +1,5 @@
 // Background service worker (event page on Firefox). Owns the native-messaging port to the
-// Nugget host, consent checks and the kill switch. No network access of its own: the only way
+// Heed host, consent checks and the kill switch. No network access of its own: the only way
 // out is the native host.
 
 import type { ContentRequest, ContentResponse } from "./content";
@@ -87,7 +87,7 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse) => {
       void stop(m.reason ?? "user").then(() => sendResponse({ ok: true }));
       return true;
     case "resume":
-      // Resuming is a popup-only action: a page cannot un-stop Nugget.
+      // Resuming is a popup-only action: a page cannot un-stop Heed.
       if (sender.tab) return false;
       void router.resume().then(() => sendResponse({ ok: true }));
       return true;

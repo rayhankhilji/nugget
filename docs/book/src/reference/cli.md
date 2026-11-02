@@ -27,7 +27,7 @@ the data directory, it says so and exits 0.
 | `--home DIR` | every command | Keep all data, config and cache under `DIR` (as `DIR/data`, `DIR/config`, `DIR/cache`). Overrides `NUGGET_HOME`. A relative path is made absolute |
 | `--json` | `status` | Print the raw status object (the [`status`](ipc.md#status-providers-and-models) IPC result) instead of the summary |
 | `--client ID` or `--client APP` | `mcp`, `mcp install` | For the bridge, the MCP client id to serve. For `mcp install`, the app to set up: `claude-desktop`, `claude-code` or `cursor` |
-| `--name NAME` | `mcp install` | Name of the new client in Nugget (default: the app's name) |
+| `--name NAME` | `mcp install` | Name of the new client in Heed (default: the app's name) |
 | `--config PATH` | `mcp install` | The app's config file to merge into (default: its usual location) |
 | `--yes`, `-y` | `mcp install` | Do not ask for confirmation. Required when standard input is not a terminal |
 | `--to DIR` | `backup`, `export` | Where to write: for `backup`, instead of the configured folder; for `export`, required |

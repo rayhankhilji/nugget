@@ -109,7 +109,7 @@ impl AppState {
             composio: None,
             auth_configs: BTreeMap::new(),
             webhook_secret: None,
-            connect_callback: "nugget://connections/callback".into(),
+            connect_callback: "heed://connections/callback".into(),
             stripe: None,
             stripe_webhook_secret: None,
             public_url: None,

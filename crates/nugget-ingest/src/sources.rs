@@ -120,7 +120,7 @@ pub(crate) fn save(file: &Path, entries: &[SourceEntry]) -> Result<()> {
     }
     let text = toml::to_string(&repr).map_err(|e| Error::Other(format!("sources.toml: {e}")))?;
     let header =
-        "# Nugget sources. Managed by nuggetd; secrets live in the OS keychain, never here.\n";
+        "# Heed sources. Managed by nuggetd; secrets live in the OS keychain, never here.\n";
     write_atomic(file, format!("{header}{text}").as_bytes())
 }
 

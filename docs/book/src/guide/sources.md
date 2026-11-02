@@ -58,10 +58,10 @@ says what is wrong and what to do (over IPC, `health` in `sources.list`):
 |---|---|---|
 | `ok` | Up to date | Nothing |
 | `disabled` | You turned it off | Turn it on; it resumes where it stopped |
-| `reconnect` | The service no longer accepts Nugget's sign-in | Sign in again, or set a new password or token |
-| `rate_limited` | The service asked Nugget to slow down | Nothing: Nugget waits |
-| `offline` | Nugget couldn't reach the service | Check your connection, VPN or proxy |
-| `server_error` | The service returned a server error | Nothing: Nugget retries |
+| `reconnect` | The service no longer accepts Heed's sign-in | Sign in again, or set a new password or token |
+| `rate_limited` | The service asked Heed to slow down | Nothing: Heed waits |
+| `offline` | Heed couldn't reach the service | Check your connection, VPN or proxy |
+| `server_error` | The service returned a server error | Nothing: Heed retries |
 | `too_large` | A response or item was over the size limit | Nothing: it is skipped |
 | `config` | The service rejected the source's settings | Check the account, folders or paths |
 | `item_errors` | Some items couldn't be read and were skipped | Nothing, unless you need them |

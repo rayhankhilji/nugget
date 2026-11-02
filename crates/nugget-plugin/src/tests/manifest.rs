@@ -29,7 +29,7 @@ fn malicious_manifests_are_rejected() {
         // Unknown fields cannot sneak in capabilities the user never sees.
         ok("hosts = []\nfilesystem = \"/\""),
         manifest_toml("../../etc", "1.0.0", "[\"tool\"]", ""),
-        manifest_toml("Dev.Nugget", "1.0.0", "[\"tool\"]", ""),
+        manifest_toml("Dev.Heed", "1.0.0", "[\"tool\"]", ""),
         manifest_toml("single", "1.0.0", "[\"tool\"]", ""),
         manifest_toml("dev.nugget.test", "latest", "[\"tool\"]", ""),
         manifest_toml("dev.nugget.test", "1.0.0", "[]", ""),

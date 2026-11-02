@@ -16,9 +16,9 @@ use nugget_vault::VaultConfig;
 use serde::{Deserialize, Serialize};
 
 /// Written to `Paths::config_file()` when no config exists.
-pub const DEFAULT_CONFIG: &str = r#"# Nugget daemon (nuggetd) configuration.
+pub const DEFAULT_CONFIG: &str = r#"# Heed daemon (nuggetd) configuration.
 #
-# Nugget is local-first. Out of the box every tier below is served by the on-device runtime
+# Heed is local-first. Out of the box every tier below is served by the on-device runtime
 # (a model running on this machine), so nothing leaves the device until you add a cloud provider.
 #
 # Never put secrets in this file. Providers reference API keys as "env:VAR" (an environment
@@ -214,7 +214,7 @@ pub struct VaultSection {
     /// Render and watch the vault (default true).
     pub enabled: bool,
     /// Vault directory; a leading `~` is the home directory. Unset: `~/Nugget Vault` for a normal
-    /// install, `<data>/vault` when Nugget runs with `--home`/`NUGGET_HOME`.
+    /// install, `<data>/vault` when Heed runs with `--home`/`NUGGET_HOME`.
     pub path: Option<String>,
     #[serde(flatten)]
     pub render: VaultConfig,
@@ -527,7 +527,7 @@ const CURRENT_DEFAULT_MARKER: &str = "# --- On-device: Ollama (uncomment to use)
 
 /// Written above the commented-out block by [`migrate_old_default_provider`].
 const MIGRATION_NOTE: [&str; 2] = [
-    "# Turned off by Nugget: earlier versions enabled this example Ollama provider by default.",
+    "# Turned off by Heed: earlier versions enabled this example Ollama provider by default.",
     "# Remove the leading \"# \" from the lines below if you do run Ollama with this model.",
 ];
 

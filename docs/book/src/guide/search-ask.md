@@ -32,7 +32,7 @@ the on-device model stopped), **Retry** asks again; see
 </picture>
 
 **What citations promise.** Every `[n]` refers to a real passage sent to the model, and the list of
-passages is shown with the answer. Nugget does not yet check that each sentence is supported by the
+passages is shown with the answer. Heed does not yet check that each sentence is supported by the
 passage it cites.
 
 **Sensitive items and cloud models.** With a cloud model, items marked

@@ -34,7 +34,7 @@ Double Tap. Every step can be skipped; **Run setup again** in Settings brings it
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/welcome-dark.png">
-  <img src="../images/screenshots/welcome-light.png" alt="The first step of setup, Welcome to Nugget: what stays on this device and what leaves only when you choose" loading="lazy">
+  <img src="../images/screenshots/welcome-light.png" alt="The first step of setup, Welcome to Heed: what stays on this device and what leaves only when you choose" loading="lazy">
 </picture>
 
 Then:

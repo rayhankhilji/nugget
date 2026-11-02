@@ -14,7 +14,7 @@ use nugget_proactive::CreateEvent;
 use time::OffsetDateTime;
 
 /// Product identifier written into every calendar object.
-const PRODID: &str = "-//Nugget//Proactive//EN";
+const PRODID: &str = "-//Heed//Proactive//EN";
 /// Longest line, in octets, before folding (RFC 5545 §3.1).
 const FOLD_AT: usize = 75;
 /// Longest summary / description kept (characters).

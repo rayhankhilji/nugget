@@ -103,7 +103,7 @@ impl Config {
             model_fast: opt("NUGGET_MODEL_FAST"),
             model_smart: opt("NUGGET_MODEL_SMART"),
             connect_callback: opt("NUGGET_CONNECT_CALLBACK")
-                .unwrap_or_else(|| "nugget://connections/callback".into()),
+                .unwrap_or_else(|| "heed://connections/callback".into()),
             log_format: opt("NUGGET_LOG_FORMAT").unwrap_or_else(|| "json".into()),
             metrics_bind: match opt("NUGGET_METRICS_BIND").as_deref() {
                 Some("off") => None,
@@ -142,7 +142,7 @@ impl Config {
             site_origins: parse_origins(&opt("NUGGET_SITE_ORIGINS").unwrap_or_default()),
             app_scheme: opt("NUGGET_APP_SCHEME")
                 .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
-                .unwrap_or_else(|| "nugget".into()),
+                .unwrap_or_else(|| "heed".into()),
         })
     }
 }

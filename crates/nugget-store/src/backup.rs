@@ -278,7 +278,7 @@ pub fn read_backup_files(path: &Path, key: &StoreKey) -> Result<Vec<(String, Vec
         .db("look up backup files")?;
     if exists.is_none() {
         return Err(Error::Integrity(format!(
-            "{} is not a Nugget backup (it holds no backup files)",
+            "{} is not a Heed backup (it holds no backup files)",
             path.display()
         )));
     }

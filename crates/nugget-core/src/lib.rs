@@ -1,4 +1,4 @@
-//! Shared types and contracts for Nugget crates.
+//! Shared types and contracts for Heed crates.
 //!
 //! Everything that crosses a crate boundary lives here so crates can be built in parallel
 //! against a stable contract.

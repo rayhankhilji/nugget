@@ -1556,7 +1556,7 @@ async fn start_once(
                 StartFailure::Foreign(who) => (
                     format!("start failed: another process answered on the port: {who}"),
                     Error::Provider(
-                        "Another program answered on the model server's port, so Nugget \
+                        "Another program answered on the model server's port, so Heed \
                          refused to use it."
                             .into(),
                     ),
@@ -1827,7 +1827,7 @@ async fn restart(
             rs.set(|st| {
                 st.state = Some(RuntimeState::Failed);
                 st.error = Some(format!(
-                    "The {what} keeps stopping, so Nugget stopped restarting it. Open Status to \
+                    "The {what} keeps stopping, so Heed stopped restarting it. Open Status to \
                      retry or to see its log."
                 ));
                 st.config = None;

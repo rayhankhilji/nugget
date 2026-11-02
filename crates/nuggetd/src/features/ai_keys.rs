@@ -60,7 +60,7 @@ const ANTHROPIC_DEFAULT_BASE: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// First line of the comment written above each table `ai.key.save` appends.
-const MARKER: &str = "# Added by Nugget's AI setup.";
+const MARKER: &str = "# Added by Heed's AI setup.";
 
 /// Which API the provider speaks (the `kind` of a `[[providers]]` table).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,9 +169,9 @@ pub(crate) enum Reason {
     /// `ai.key.update` / `ai.key.remove`: no provider with this id in config.toml.
     NotFound,
     /// `ai.key.update` / `ai.key.remove`: the provider does not use a key (a local server) or is
-    /// managed by Nugget.
+    /// managed by Heed.
     NotEditable,
-    /// `ai.key.save`: the name belongs to Nugget itself (`local-*`, or a provider the daemon has
+    /// `ai.key.save`: the name belongs to Heed itself (`local-*`, or a provider the daemon has
     /// that is not in config.toml, such as an on-device runtime slot).
     Reserved,
 }
@@ -393,7 +393,7 @@ impl AiKeys {
             return Ok(KeySaveResult::fail(
                 Reason::Reserved,
                 format!(
-                    "Nugget uses the name \"{}\" for its own models. Pick another name.",
+                    "Heed uses the name \"{}\" for its own models. Pick another name.",
                     req.name
                 ),
             ));
@@ -533,7 +533,7 @@ impl AiKeys {
             "kind": kind.as_str(), "base_url": base_url,
             "model": cfg.model, "key": new_ref.kind(),
         });
-        let msg = "Key checked and replaced. Nugget uses the new key now.";
+        let msg = "Key checked and replaced. Heed uses the new key now.";
         Ok(self
             .saved_ok("ai.key.updated", req.name, detail, msg, checked.models)
             .await)
@@ -601,7 +601,7 @@ impl AiKeys {
                     env_var,
                     available,
                     error: error.or_else(|| {
-                        (!available).then(|| "Not in use yet: restart Nugget.".to_owned())
+                        (!available).then(|| "Not in use yet: restart Heed.".to_owned())
                     }),
                 }
             })
@@ -717,7 +717,7 @@ fn editable<'a>(
     Ok(cfg)
 }
 
-/// Whether `ai.key.save` must not take `name` (not in config.toml): Nugget's own `local-*`
+/// Whether `ai.key.save` must not take `name` (not in config.toml): Heed's own `local-*`
 /// names, or one the daemon already routes (`known`).
 fn reserved(name: &str, known: impl Fn(&str) -> bool) -> bool {
     name.starts_with("local-") || known(name)
@@ -770,14 +770,14 @@ const PROVIDER_ENV: &[&str] = &[
     "XAI_API_KEY",
 ];
 
-/// Nugget's own secrets in `NUGGET_*_KEY` variables, never usable as a provider key.
+/// Heed's own secrets in `NUGGET_*_KEY` variables, never usable as a provider key.
 const INTERNAL_ENV: &[&str] = &[
     "NUGGET_MANIFEST_SIGNING_KEY",
     "NUGGET_PLUGIN_SIGNING_KEY",
     "NUGGET_TRUST_DEV_MANIFEST_KEY",
 ];
 
-/// Whether `key_ref: "env:VAR"` may read `var`: `NUGGET_…_KEY` (not one of Nugget's own
+/// Whether `key_ref: "env:VAR"` may read `var`: `NUGGET_…_KEY` (not one of Heed's own
 /// secrets, nor the runtime's `NUGGET_RUNTIME_…` keys) or a provider's usual variable.
 ///
 /// Compared in upper case: Windows looks variables up ignoring case, so
@@ -849,7 +849,7 @@ impl KeySpec {
                 _ => Err(KeyTestResult::fail(
                     Reason::EnvMissing,
                     format!(
-                        "Nugget can't use the environment variable {var}. Use a variable whose name starts with NUGGET_ and ends with _KEY (or a provider's usual one, such as OPENAI_API_KEY), set it where Nugget starts, then restart Nugget."
+                        "Heed can't use the environment variable {var}. Use a variable whose name starts with NUGGET_ and ends with _KEY (or a provider's usual one, such as OPENAI_API_KEY), set it where Heed starts, then restart Heed."
                     ),
                 )),
             },
@@ -1026,7 +1026,7 @@ pub(crate) async fn check_key(http: &MeteredHttp, req: &Check, timeout: Duration
             tracing::debug!(error = %e, "key check failed");
             return KeyTestResult::fail(
                 Reason::ServerError,
-                "The provider sent an answer Nugget could not read. Try again later.",
+                "The provider sent an answer Heed could not read. Try again later.",
             );
         }
         Ok(Ok(r)) => r,

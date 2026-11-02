@@ -1,4 +1,4 @@
-//! Safety policy for actions Nugget takes on the user's behalf (computer use, sending, booking).
+//! Safety policy for actions Heed takes on the user's behalf (computer use, sending, booking).
 //! Every executor asks a [`PolicyGate`] ([`PolicyEngine`]) before acting.
 //!
 //! - [`PolicyEngine`]: rules per app and site ([`Rule`], [`default_rules`]), per-task approvals,

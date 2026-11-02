@@ -1,4 +1,4 @@
-# Authenticode signing command for Nugget's Windows bundles (Tauri `bundle.windows.signCommand`).
+# Authenticode signing command for Heed's Windows bundles (Tauri `bundle.windows.signCommand`).
 #
 # Tauri runs this once per file it signs: the app exe (again for each bundle type after patching
 # it), the `nuggetd.exe` sidecar, the NSIS plugin DLLs and uninstaller, the WiX extension DLLs, and
@@ -32,7 +32,7 @@
 #                                      its cert there, or the throwaway cert of the dry-run proof)
 #     NUGGET_SIGN_TIMESTAMP_URL        RFC 3161 server (default http://timestamp.digicert.com)
 #
-# Optional: NUGGET_SIGN_DESCRIPTION (default "Nugget"), NUGGET_SIGNTOOL (signtool.exe to use;
+# Optional: NUGGET_SIGN_DESCRIPTION (default "Heed"), NUGGET_SIGNTOOL (signtool.exe to use;
 # TAURI_WINDOWS_SIGNTOOL_PATH is honoured too), NUGGET_SIGN_DRY_RUN=1 (same as -DryRun: print the
 # signtool command line and metadata and exit 0 without signing or contacting any service),
 # NUGGET_SIGN_LOG (append each signed file's path to this file).
@@ -109,7 +109,7 @@ if (-not $File) { Fail 'usage: sign.ps1 <file> [-DryRun] | sign.ps1 -InstallDlib
 if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { Fail "no such file: $File" }
 $File = (Resolve-Path -LiteralPath $File).Path
 
-$description = if ($env:NUGGET_SIGN_DESCRIPTION) { $env:NUGGET_SIGN_DESCRIPTION } else { 'Nugget' }
+$description = if ($env:NUGGET_SIGN_DESCRIPTION) { $env:NUGGET_SIGN_DESCRIPTION } else { 'Heed' }
 
 # ---- signtool -----------------------------------------------------------------------------------
 

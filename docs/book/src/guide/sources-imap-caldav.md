@@ -2,7 +2,7 @@
 
 The `imap` and `caldav` sources work with almost any mail or calendar provider. They sign in with a
 username and a password, which for most providers should be an **app password**: a separate,
-revocable password for Nugget that also works with two-factor authentication. Where the provider lets
+revocable password for Heed that also works with two-factor authentication. Where the provider lets
 you choose, give it only IMAP or only CalDAV access. The password is kept in your OS keychain.
 
 Both only read (nothing is marked as read). IMAP requires TLS: implicit (port 993, the default) or
@@ -23,7 +23,7 @@ through IMAP IDLE on the inbox.
 ## Add a calendar
 
 1. On **Sources**, choose **Add source → CalDAV calendar**.
-2. Enter the server URL (the root, your principal, your calendar home or one calendar: Nugget
+2. Enter the server URL (the root, your principal, your calendar home or one calendar: Heed
    discovers the rest) and username.
 3. Enter the app password when asked.
 
@@ -43,7 +43,7 @@ Calendar, prefer the [Google sources](sources-google.md), which use OAuth and sy
 
 ### Proton Mail Bridge: the certificate
 
-Bridge uses a **self-signed certificate**, which Nugget rejects until you trust it:
+Bridge uses a **self-signed certificate**, which Heed rejects until you trust it:
 
 1. In Bridge, **Settings → Advanced settings → Export TLS certificates**.
 2. Add it to your OS trust store:

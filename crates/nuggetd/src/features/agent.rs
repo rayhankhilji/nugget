@@ -865,7 +865,7 @@ struct Runs {
     hub: Arc<Hub>,
     safety: Arc<Safety>,
     tasks: Mutex<HashMap<String, TaskEntry>>,
-    /// The browser tools' controller: its "Nugget is acting" overlay is hidden once no task is
+    /// The browser tools' controller: its "Heed is acting" overlay is hidden once no task is
     /// running.
     browser: Option<Arc<nugget_browser::BrowserController>>,
 }

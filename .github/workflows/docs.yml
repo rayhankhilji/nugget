@@ -47,7 +47,7 @@ jobs:
       - name: Test the benchmark scripts
         run: python3 -m unittest discover -s scripts/bench-tests -v
 
-      # mdBook (MPL-2.0) is a build tool only; it is not linked into Nugget. Prebuilt, pinned.
+      # mdBook (MPL-2.0) is a build tool only; it is not linked into Heed. Prebuilt, pinned.
       - name: Install mdBook and mdbook-linkcheck
         uses: taiki-e/install-action@v2
         with:

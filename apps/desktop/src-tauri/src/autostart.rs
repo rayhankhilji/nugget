@@ -1,4 +1,4 @@
-//! "Open Nugget at login": starts the desktop app itself, hidden in the tray (`--minimized`).
+//! "Open Heed at login": starts the desktop app itself, hidden in the tray (`--minimized`).
 //! Separate from `login.rs`, which registers the `nuggetd` background service.
 //!
 //! The OS entry is the source of truth, so turning it off in the system's own settings sticks:
@@ -40,7 +40,7 @@ fn target_exe() -> Result<PathBuf, String> {
     if let Some(appimage) = std::env::var_os("APPIMAGE") {
         return Ok(PathBuf::from(appimage));
     }
-    let exe = std::env::current_exe().map_err(|e| format!("can't locate Nugget: {e}"))?;
+    let exe = std::env::current_exe().map_err(|e| format!("can't locate Heed: {e}"))?;
     // A copy run from the disk image or a translocated path won't be there after a reboot.
     if let Some(why) = crate::login::transient_location(&exe, false) {
         return Err(why.into());
@@ -70,7 +70,7 @@ pub fn desktop_exec_arg(arg: &str) -> String {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn desktop_entry(exe: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=Nugget\nComment=Open Nugget in the tray at login\nExec={} {HIDDEN_ARG}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
+        "[Desktop Entry]\nType=Application\nName=Heed\nComment=Open Heed in the tray at login\nExec={} {HIDDEN_ARG}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
         desktop_exec_arg(&exe.to_string_lossy())
     )
 }
@@ -309,15 +309,15 @@ mod tests {
     fn desktop_exec_quotes_and_escapes() {
         assert_eq!(desktop_exec_arg("/usr/bin/nugget"), r#""/usr/bin/nugget""#);
         assert_eq!(
-            desktop_exec_arg("/home/a b/Nugget 100%.AppImage"),
-            r#""/home/a b/Nugget 100%%.AppImage""#
+            desktop_exec_arg("/home/a b/Heed 100%.AppImage"),
+            r#""/home/a b/Heed 100%%.AppImage""#
         );
         // `$` and `"` get one backslash for the argument, which is then doubled for the string.
         assert_eq!(desktop_exec_arg(r#"/x/$HOME"q"#), r#""/x/\\$HOME\\"q""#);
         assert_eq!(desktop_exec_arg(r"/x\y"), r#""/x\\\\y""#);
-        let entry = desktop_entry(Path::new("/opt/Nugget/nugget"));
+        let entry = desktop_entry(Path::new("/opt/Heed/nugget"));
         assert!(entry.starts_with("[Desktop Entry]\n"));
-        assert!(entry.contains("\nExec=\"/opt/Nugget/nugget\" --minimized\n"));
+        assert!(entry.contains("\nExec=\"/opt/Heed/nugget\" --minimized\n"));
         assert!(!entry.contains("Hidden=true"));
     }
 

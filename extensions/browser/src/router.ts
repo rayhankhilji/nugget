@@ -24,7 +24,7 @@ export interface TabInfo {
 export interface BrowserDeps {
   activeTab(): Promise<TabInfo | undefined>;
   getTab(id: number): Promise<TabInfo | undefined>;
-  /** Whether the user granted Nugget access to `origin` (e.g. `https://example.com`). */
+  /** Whether the user granted Heed access to `origin` (e.g. `https://example.com`). */
   hasPermission(origin: string): Promise<boolean>;
   inject(tabId: number): Promise<void>;
   sendToTab(tabId: number, msg: ContentRequest): Promise<ContentResponse>;
@@ -105,7 +105,7 @@ export class Router {
         return {};
       case "snapshot": {
         // Stop means stop: no reading pages either until the user resumes from the popup.
-        if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
+        if (this.halted) throw new ProtocolError("halted", "Heed was stopped by the user");
         const tab = await this.grantedTab(req.tab_id);
         const snap = (await this.toTab(tab.id, { nugget: "snapshot", options: req.options })) as PageSnapshot;
         await this.checkSnapshotOrigin(snap);
@@ -113,14 +113,14 @@ export class Router {
         return snap;
       }
       case "overlay": {
-        // Showing "Nugget is acting" over "Nugget stopped" would tell the user the opposite of
+        // Showing "Heed is acting" over "Heed stopped" would tell the user the opposite of
         // the truth; hiding it is always fine.
-        if (this.halted && req.active) throw new ProtocolError("halted", "Nugget was stopped by the user");
+        if (this.halted && req.active) throw new ProtocolError("halted", "Heed was stopped by the user");
         const tab = await this.grantedTab(req.tab_id);
         return this.toTab(tab.id, { nugget: "overlay", active: req.active, label: req.label });
       }
       case "act": {
-        if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
+        if (this.halted) throw new ProtocolError("halted", "Heed was stopped by the user");
         if (req.action.kind === "navigate") return this.navigate(req.tab_id, req.action.url);
         const tab = await this.grantedTab(req.tab_id);
         const result = (await this.toTab(tab.id, {
@@ -140,9 +140,9 @@ export class Router {
   private async navigate(tabId: number | undefined, rawUrl: string): Promise<ActResult> {
     const tab = await this.tab(tabId);
     const url = checkNavigateUrl(rawUrl, tab.url);
-    // Nugget only takes the user to sites they have opted in to.
+    // Heed only takes the user to sites they have opted in to.
     if (!(await this.deps.hasPermission(url.origin))) {
-      throw new ProtocolError("permission_required", `Nugget has no access to ${url.origin}; grant it from the toolbar button`);
+      throw new ProtocolError("permission_required", `Heed has no access to ${url.origin}; grant it from the toolbar button`);
     }
     const before = this.latest.get(tab.id);
     await this.deps.navigate(tab.id, url.href);
@@ -169,7 +169,7 @@ export class Router {
       origin = undefined;
     }
     if (!origin || !/^https?:/.test(origin) || !(await this.deps.hasPermission(origin))) {
-      throw new ProtocolError("permission_required", "Nugget has no access to this site; grant it from the toolbar button");
+      throw new ProtocolError("permission_required", "Heed has no access to this site; grant it from the toolbar button");
     }
     return tab;
   }
@@ -188,7 +188,7 @@ export class Router {
       origin = undefined;
     }
     if (!origin || !(await this.deps.hasPermission(origin))) {
-      throw new ProtocolError("permission_required", "the page moved to a site Nugget has no access to");
+      throw new ProtocolError("permission_required", "the page moved to a site Heed has no access to");
     }
   }
 

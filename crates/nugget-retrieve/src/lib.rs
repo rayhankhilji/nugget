@@ -1,4 +1,4 @@
-//! `nugget-retrieve`: precise, cited retrieval over the Nugget store.
+//! `nugget-retrieve`: precise, cited retrieval over the Heed store.
 
 mod config;
 pub mod dates;

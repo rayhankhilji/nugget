@@ -10,7 +10,7 @@ use crate::auth::{Callback, Provider, SupabaseAuth, TokenResponse, authorize_url
 use crate::pkce::Pkce;
 use crate::{CloudConfig, CloudError, Result};
 
-/// How long a sign-in started in Nugget may take to come back.
+/// How long a sign-in started in Heed may take to come back.
 pub const PENDING_TTL_SECS: i64 = 10 * 60;
 /// The access token is refreshed this long before it expires.
 pub const REFRESH_MARGIN_SECS: i64 = 60;

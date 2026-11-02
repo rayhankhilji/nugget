@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: What would you like Nugget to do?
+      description: What would you like Heed to do?
     validations:
       required: true
   - type: textarea

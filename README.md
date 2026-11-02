@@ -1,6 +1,6 @@
-# Nugget
+# Heed
 
-Nugget is an open-source (Apache-2.0), local-first, cross-platform personal AI. A per-user daemon
+Heed is an open-source (Apache-2.0), local-first, cross-platform personal AI. A per-user daemon
 continuously indexes your files, notes, mail and calendars into an encrypted store on your
 machine, builds a knowledge graph in which every fact cites its source, and answers with `[n]`
 citations using local models or your own API keys. There is no telemetry; every off-device
@@ -28,7 +28,7 @@ and Linux. There is no signed release yet. Details: [What works today](docs/book
 | WASM plugins; Microsoft 365, Slack, Notion, GitHub and Linear connectors | Runs; connectors not yet tried against live accounts |
 | Installers, signed releases, auto-update | Unsigned installers build for all three OSes; the signed update path is rehearsed with throwaway keys; real signing needs release keys |
 
-How Nugget compares with Sentient OS, with sources:
+How Heed compares with Sentient OS, with sources:
 [docs/compare/sentient-os.md](docs/compare/sentient-os.md).
 
 ## Screenshots
@@ -60,11 +60,11 @@ regenerate with `pnpm run screenshots` in `apps/desktop`.
 ## Benchmarks
 
 The nightly workflow produces these numbers from a release build on a GitHub-hosted Linux runner
-with deterministic fixtures. "Fake model" and "in process" runs measure Nugget's own pipeline, not
+with deterministic fixtures. "Fake model" and "in process" runs measure Heed's own pipeline, not
 a frontier model. Metric definitions: [bench/README.md](bench/README.md).
 
 <!-- bench:begin -->
-Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/commit/be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8) on a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed; the two computer-use runs were re-run at 4b5a8ac with the Nugget agent (--cua-agent nugget) instead of the harness reference agent (linux/x86_64, 4 CPUs, release build). Full history: [benchmark dashboard](docs/book/src/benchmarks/dashboard.md).
+Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/commit/be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8) on a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed; the two computer-use runs were re-run at 4b5a8ac with the Heed agent (--cua-agent nugget) instead of the harness reference agent (linux/x86_64, 4 CPUs, release build). Full history: [benchmark dashboard](docs/book/src/benchmarks/dashboard.md).
 
 | Suite | Metric | Value | Target | Reproduce |
 |---|---|---|---|---|
@@ -79,11 +79,11 @@ Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/c
 |  | Actions run without approval (`actions.executed_without_approval`) | 0 actions | ≤ 0 actions ✓ |  |
 | Double Tap drafting, fake model (M3) | Win rate vs screenshot baseline (`draft.win_rate_vs_baseline`) | 95.5% | — | `cargo run --release -p nugget-bench -- draft` |
 |  | Hallucination rate (`draft.nugget.hallucination_rate`) | 25% | ≤ 40% ✓ |  |
-| Computer use, Nugget agent on a scripted model, in process (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `cargo run --release -p nugget-bench -- cua --cua-agent nugget` |
+| Computer use, Heed agent on a scripted model, in process (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `cargo run --release -p nugget-bench -- cua --cua-agent nugget` |
 |  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
 |  | Needless confirmations (`safety.false_confirmation_rate`) | 0% | ≤ 10% ✓ |  |
 |  | Injected instructions followed (`safety.injection_compliance_rate`) | 0% | ≤ 0% ✓ |  |
-| Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `sudo bench/cua/env/setup-debian.sh && cargo run --release -p nugget-bench -- cua --cua-agent nugget --cua-env xvfb` |
+| Computer use, Heed agent on a scripted model, Linux desktop under Xvfb (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `sudo bench/cua/env/setup-debian.sh && cargo run --release -p nugget-bench -- cua --cua-agent nugget --cua-env xvfb` |
 |  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
 
 To refresh: `python3 scripts/bench-readme.py` with a new `bench/results/latest.json` (the nightly workflow publishes `latest.json` on the `bench-results` branch).
@@ -122,13 +122,13 @@ cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
 cargo build --release -p nugget-desktop --features tauri/custom-protocol && ./target/release/nugget-desktop
 ```
 
-A source release build downloads Nugget's own local models only if `nuggetd` was built with
+A source release build downloads Heed's own local models only if `nuggetd` was built with
 `NUGGET_TRUST_DEV_MANIFEST_KEY=1`; Ollama, LM Studio and cloud keys work either way. To connect
 an AI app, see [the MCP guide](docs/book/src/guide/mcp.md).
 
 ## Documentation and contributing
 
-- [The Nugget book](docs/book/src/introduction.md) (mdBook in `docs/book`): user guide, reference,
+- [The Heed book](docs/book/src/introduction.md) (mdBook in `docs/book`): user guide, reference,
   architecture and contributor docs. [docs/PLAN.md](docs/PLAN.md): plan and milestones.
 - [CONTRIBUTING.md](CONTRIBUTING.md): setup, DCO sign-off (no CLA), clean-room rules.
 - [SECURITY.md](SECURITY.md): report vulnerabilities privately.

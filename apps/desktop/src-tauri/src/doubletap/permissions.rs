@@ -4,7 +4,7 @@
 //!   prompt). The trigger itself uses NSEvent modifier monitors or a Carbon hot key; Input
 //!   Monitoring is read with `CGPreflightListenEventAccess` (`nugget_hotkey::input_monitoring`).
 //!   Full Disk Access is reported too: the Messages source needs it (nuggetd, started by the app,
-//!   reads `~/Library/Messages`, and macOS attributes that to Nugget.app), and the page shows it
+//!   reads `~/Library/Messages`, and macOS attributes that to Heed.app), and the page shows it
 //!   only when such a source is set up.
 //! - **Linux:** AT-SPI must be enabled for the session (`doubletap.hint.atspi`). Wayland cannot
 //!   observe modifier double taps, so a double-tap trigger there gets
@@ -57,7 +57,7 @@ pub struct DoubleTapStatus {
     pub trigger_error: Option<String>,
     pub accessibility: PermissionState,
     pub input_monitoring: PermissionState,
-    /// macOS only (`not_required` elsewhere): whether Nugget can read the folders macOS keeps
+    /// macOS only (`not_required` elsewhere): whether Heed can read the folders macOS keeps
     /// behind Full Disk Access (Messages, Mail, Safari).
     pub full_disk_access: PermissionState,
     pub hint: Option<&'static str>,

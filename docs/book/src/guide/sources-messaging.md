@@ -31,15 +31,15 @@ exports give saved contacts by name only, so those match by name).
 Reads `~/Library/Messages/chat.db`: everything Messages shows on this Mac, including SMS if your
 iPhone forwards them. Turn on **Messages in iCloud** for your full history.
 
-### Give Nugget Full Disk Access
+### Give Heed Full Disk Access
 
-In **System Settings → Privacy & Security → Full Disk Access**, turn on **Nugget** (and **nuggetd**
-if listed; press **+** to add Nugget if it is missing). Reopen Nugget if macOS asks, then press
+In **System Settings → Privacy & Security → Full Disk Access**, turn on **Heed** (and **nuggetd**
+if listed; press **+** to add Heed if it is missing). Reopen Heed if macOS asks, then press
 **Add** or **Sync now**.
 
-Without access, the source fails with "Nugget needs Full Disk Access to read your Messages". If Nugget
+Without access, the source fails with "Heed needs Full Disk Access to read your Messages". If Heed
 is already on in the list, turn it off and on again: after an update macOS sometimes keeps a stale
-permission. Nugget uses the access only for Messages and, with **Show names from Contacts** on, your
+permission. Heed uses the access only for Messages and, with **Show names from Contacts** on, your
 Contacts database. Each pass reads a temporary copy of the database, never the live file.
 
 ### Options
@@ -57,7 +57,7 @@ platform. The app has no field for it; set it over IPC (see
 
 ## WhatsApp
 
-WhatsApp offers no way for other apps to read chats, only **Export chat**. Nugget watches a folder of
+WhatsApp offers no way for other apps to read chats, only **Export chat**. Heed watches a folder of
 these exports.
 
 1. Export each chat:
@@ -94,4 +94,4 @@ iMessage, except Contacts.
 ## Signal
 
 Not supported. Signal has no export, and its database and backups are encrypted; reading them would
-mean bypassing Signal's encryption, which Nugget will not do. A documented export would change that.
+mean bypassing Signal's encryption, which Heed will not do. A documented export would change that.

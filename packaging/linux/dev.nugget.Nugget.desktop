@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Nugget
+Name=Heed
 Comment=Local-first personal AI
 Exec=/usr/bin/nugget-desktop
 Icon=nugget-desktop

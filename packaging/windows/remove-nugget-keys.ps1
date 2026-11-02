@@ -1,8 +1,8 @@
-# Removes Nugget's saved keys from Windows Credential Manager. Run by the NSIS uninstaller
-# (uninstall-data.nsh) when the user ticks "Remove models and Nugget's data"; also usable by hand:
+# Removes Heed's saved keys from Windows Credential Manager. Run by the NSIS uninstaller
+# (uninstall-data.nsh) when the user ticks "Remove models and Heed's data"; also usable by hand:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File remove-nugget-keys.ps1
 #
-# Nugget keeps every secret under the keychain service "dev.nugget.Nugget" (nugget-core secrets.rs).
+# Heed keeps every secret under the keychain service "dev.nugget.Nugget" (nugget-core secrets.rs).
 # keyring-rs stores each one as a generic credential whose target name is "<account>.<service>":
 #   store-key-<16 hex>.dev.nugget.Nugget   the store's database key, one per data folder
 #   provider:<name>.dev.nugget.Nugget      API keys
@@ -14,7 +14,7 @@
 # of other data folders (NUGGET_HOME, --home) are kept, because those stores are kept too and are
 # unreadable without them.
 #
-# Exit code: the number of Nugget credentials that should have been removed but are still there.
+# Exit code: the number of Heed credentials that should have been removed but are still there.
 
 $ErrorActionPreference = 'Continue'
 $suffix = '.dev.nugget.Nugget'
@@ -52,7 +52,7 @@ $removed = 0
 $kept = 0
 foreach ($name in @(Get-NuggetTargets | Sort-Object -Unique)) {
     if (-not (Test-ShouldRemove $name)) {
-        Write-Output ('Kept ' + $name + ' (the key of another Nugget data folder)')
+        Write-Output ('Kept ' + $name + ' (the key of another Heed data folder)')
         $kept++
         continue
     }

@@ -84,7 +84,7 @@ impl RefusalLog {
     }
 }
 
-/// Nugget's MCP server. Cheap to clone; one instance serves every client and transport.
+/// Heed's MCP server. Cheap to clone; one instance serves every client and transport.
 #[derive(Clone)]
 pub struct McpServer {
     inner: Arc<Inner>,
@@ -420,7 +420,7 @@ impl McpServer {
                 tracing::warn!(error = %e, "mcp resource listing failed");
                 ToolFailure {
                     outcome: Outcome::Error,
-                    message: "Nugget could not list resources; try again later.".into(),
+                    message: "Heed could not list resources; try again later.".into(),
                 }
             })?;
         let more = list.len() == RESOURCE_PAGE;
@@ -506,7 +506,7 @@ impl McpHandler {
 fn access_error(e: AccessError) -> ErrorData {
     match e {
         AccessError::Revoked => {
-            ErrorData::invalid_request("this MCP client has been revoked in Nugget", None)
+            ErrorData::invalid_request("this MCP client has been revoked in Heed", None)
         }
         AccessError::RateLimited { retry_after_secs } => ErrorData::invalid_request(
             format!("rate limited; retry after {retry_after_secs} s"),
@@ -540,7 +540,7 @@ fn parse_cursor(cursor: &str) -> Option<usize> {
 
 fn instructions() -> String {
     format!(
-        "Nugget is the user's local, private knowledge base: their files, mail, calendar and \
+        "Heed is the user's local, private knowledge base: their files, mail, calendar and \
          notes, plus a knowledge graph of the people, organizations, projects and commitments in \
          them. Use get_context to gather cited passages for a question, search to find items, \
          find_entities/get_entity for facts about people and things (every fact cites its \
@@ -557,7 +557,7 @@ impl ServerHandler for McpHandler {
                 .build(),
         )
         .with_server_info(
-            Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")).with_title("Nugget"),
+            Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")).with_title("Heed"),
         )
         .with_instructions(instructions())
     }

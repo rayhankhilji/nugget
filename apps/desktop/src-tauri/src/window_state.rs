@@ -4,7 +4,7 @@
 //! Geometry is in physical pixels: outer position, inner size. It is tracked in memory as the
 //! window moves and resizes (never while minimized; while maximized only the flag changes, so
 //! un-maximizing returns to the last normal size) and written when the window closes and when
-//! Nugget exits. On start it is clamped onto a connected monitor, so a window last seen on an
+//! Heed exits. On start it is clamped onto a connected monitor, so a window last seen on an
 //! unplugged display comes back fully visible. Wayland doesn't let apps read or set their
 //! position, so there only size and maximized persist.
 

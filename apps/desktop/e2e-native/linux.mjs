@@ -112,7 +112,7 @@ export const linux = {
   async overlayWindows() {
     let ids = [];
     try {
-      ids = xdotool("search", "--onlyvisible", "--name", "^Nugget Double Tap$").split("\n").filter(Boolean);
+      ids = xdotool("search", "--onlyvisible", "--name", "^Heed Double Tap$").split("\n").filter(Boolean);
     } catch {
       return [];
     }
@@ -123,7 +123,7 @@ export const linux = {
           .map((l) => l.split("="))
           .filter((p) => p.length === 2),
       );
-      return { id, title: "Nugget Double Tap", visible: true, x: +g.X, y: +g.Y, w: +g.WIDTH, h: +g.HEIGHT };
+      return { id, title: "Heed Double Tap", visible: true, x: +g.X, y: +g.Y, w: +g.WIDTH, h: +g.HEIGHT };
     });
   },
 

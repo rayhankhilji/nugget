@@ -1,6 +1,6 @@
-# Nugget: build plan
+# Heed: build plan
 
-**Nugget** (working name) is an Apache-2.0, local-first, cross-platform personal AI. It learns your work and life
+**Heed** (renamed from Nugget) is an Apache-2.0, local-first, cross-platform personal AI. It learns your work and life
 continuously, drafts in your voice, prepares work for your approval, and operates your computer, with every step
 inspectable and owned by you.
 
@@ -94,7 +94,7 @@ Numbers: [bench/README.md](../bench/README.md); QA findings above override bench
 - **Team:** one or two humans directing Claude agents.
 - **Triage:** on by default and local only; items nobody has judged count as sensitive (`[ingest] assume_unflagged_safe = false`).
 - **Quick ask:** the global shortcut stays on by default.
-- **`nugget://search`:** fills in Search and waits for Enter; a link never runs a search.
+- **`heed://search`:** fills in Search and waits for Enter; a link never runs a search.
 - **Vault and graph:** show items nobody has judged and hide only confirmed-sensitive ones.
 - **Multilingual search:** existing indexes get a one-time, opt-in offer to re-index with the multilingual embedder (Models page); never automatic.
 - **AppArmor sysctl:** dropped; it was only for a CI job that no longer exists.
@@ -103,4 +103,44 @@ Numbers: [bench/README.md](../bench/README.md); QA findings above override bench
 ## Risks and open questions
 
 - Risks: the v1 scope is very large (gate on benchmarks, not dates; cut connectors before quality); accessibility APIs differ, especially on Wayland (one trait, per-OS flags, screenshot fallback); private Apple formats change (schema-backed parsers, fuzzing); local models are weak for agentic work (tier routing, bring-your-own key, per-tier numbers); Google restricted-scope verification (users bring their own OAuth client).
-- Open questions: keep the name "Nugget"? Business model: Apache core plus a paid hosted team tier later?
+- Open questions: business model: Apache core plus a paid hosted team tier later?
+
+## Rename follow-ups
+
+The product is now called Heed everywhere a user reads the name: the app and window titles,
+`Heed.app`, the installers and AppImage, the tray, notifications, CLI help, error messages, the
+cloud service and the docs. `heed://` is the deep-link scheme (`heed://auth/callback`,
+`heed://connections/callback`); `nugget://` stays registered and accepted as an alias so links
+already shared keep working. These internal names still say nugget, each for a reason:
+
+- **Bundle identifier `dev.nugget.desktop`** (and the Wayland app id and desktop file
+  `dev.nugget.Nugget`, the plugin type `dev.nugget.plugin`). macOS ties privacy permissions
+  (Accessibility, Input Monitoring, Full Disk Access) and the keychain to the identifier, and the
+  desktop app's own settings, history and WebView data live in folders named after it. A new id
+  orphans all of that and needs a domain we own. Migration: pick the id once a Heed domain is
+  registered, move the app folders on first launch, and walk users through granting permissions
+  again.
+- **Data and config directories** (`ProjectDirs("dev", "Nugget", "Nugget")`, `~/Nugget Vault`,
+  keychain service `dev.nugget.Nugget`, the "Nugget Daemon" task, the launchd and systemd service
+  names, the `NuggetDesktop` Run value). Renaming loses the store, its key, the vault and the
+  login service. Migration: on first start look in the old places, move with a crash-safe copy
+  (the backup code already does this), move keychain entries, re-register the service under the
+  new name and remove the old one, and only then switch the default paths.
+- **Binary names `nuggetd`, `nugget-desktop`, `nugget-browser-host`.** Scripts, service
+  definitions, MCP client configs (`nuggetd mcp`) and docs call them by name; the `nugget` MCP
+  server key and `serverInfo.name` (shown as "Heed" through its title) and the `nugget://entity/`
+  and `nugget://item/` resource URIs stay for the same reason. Migration: ship `heedd`/`heed` with
+  the old names as shims for a release, rewrite the MCP entries `nuggetd install` made, then drop
+  the shims.
+- **`NUGGET_*` environment variables** (`NUGGET_HOME`, `NUGGET_*_KEY`, the cloud service's
+  `NUGGET_CONNECT_CALLBACK`, ...). Users and deployments set them. Migration: read `HEED_*` first
+  and fall back to `NUGGET_*` with a deprecation warning, for at least one release.
+- **Crate names (`nugget-*`, `nuggetd`) and the repository name `rayhankhilji/nugget`.** Purely
+  internal, but renaming touches every import, the release workflows, attestation (`gh attestation
+  verify -R`), the updater feed URLs and links in shipped docs. Migration: rename the repository
+  first (GitHub redirects the old URL), then the crates in one mechanical commit.
+- **Package and file names that follow the product name.** The `.deb`/`.rpm` package and the
+  Windows install folder (`%LOCALAPPDATA%\Heed`) are new names, so a Nugget package or install is
+  not upgraded in place. Before the first release this needs no action; after one, the packages
+  need `Replaces`/`Conflicts: nugget` and the NSIS installer must remove the old install. The
+  `.nuggetplugin` file type is unchanged.

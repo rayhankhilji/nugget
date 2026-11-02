@@ -1,6 +1,6 @@
-# The Nugget book, built with mdBook (https://rust-lang.github.io/mdBook/).
+# The Heed book, built with mdBook (https://rust-lang.github.io/mdBook/).
 #
-# mdBook is MPL-2.0. It is a documentation build tool only: it is not a dependency of any Nugget
+# mdBook is MPL-2.0. It is a documentation build tool only: it is not a dependency of any Heed
 # crate and nothing it produces is linked into the product.
 #
 #   mdbook build docs/book          # writes docs/book/build/
@@ -10,9 +10,9 @@
 # CI (.github/workflows/docs.yml) pins the mdBook and mdbook-linkcheck versions.
 
 [book]
-title = "Nugget"
+title = "Heed"
 description = "Local-first personal AI: user guide, reference, architecture and contributor docs."
-authors = ["The Nugget contributors"]
+authors = ["The Heed contributors"]
 language = "en"
 src = "src"
 

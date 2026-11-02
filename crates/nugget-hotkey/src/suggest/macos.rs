@@ -132,9 +132,9 @@ impl Drop for MacTap {
     }
 }
 
-const REFUSED: &str = "macOS refused the event tap for ghost-text suggestion keys. Grant Nugget \
+const REFUSED: &str = "macOS refused the event tap for ghost-text suggestion keys. Grant Heed \
      Accessibility (and Input Monitoring) in System Settings > Privacy & Security, then restart \
-     Nugget.";
+     Heed.";
 
 #[allow(unsafe_code)]
 fn run(
