@@ -32,7 +32,7 @@ import { cloudOpen } from "../lib/config";
     msg.hidden = false;
     document.querySelector<HTMLElement>("[data-progress]")!.hidden = true;
     document.querySelector<HTMLElement>("[data-actions]")!.hidden = false;
-    document.querySelector("h1")!.textContent = "Checkout didn't start";
+    document.querySelector("h1")!.textContent = "Checkout didn’t start";
     document.querySelector(".lede")?.remove();
   };
 
@@ -42,7 +42,7 @@ import { cloudOpen } from "../lib/config";
     const plan = params.get("plan");
     const interval = params.get("interval") ?? "month";
     if (!isPlanId(plan) || !isInterval(interval)) {
-      fail("That plan doesn't exist. Pick one on the pricing page.");
+      fail("That plan doesn’t exist. Pick one on the pricing page.");
       return;
     }
     const session = await currentSession();

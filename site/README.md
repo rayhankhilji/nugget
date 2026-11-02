@@ -257,6 +257,12 @@ dithered sky, with the wordmark. They are rendered once at build time by
 `src/pages/og/[slug].png.ts`, using satori and resvg-js with the static TTF instances in `src/og/`.
 The lines live in `src/lib/og.ts`. `site.webmanifest` lists the app icons.
 
+**Typography:** copy uses typographic quotes (’ ‘ ’ “ ”). `integrations/smartquotes.mjs` rewrites the
+text of every built page after the build, leaving code, scripts and attributes alone.
+`src/lib/smartquotes.mjs` handles the head, the social cards and the FAQ structured data, and the
+client-side messages are written with ’ in source. The smoke test fails on straight apostrophes in
+visible text.
+
 **Performance:**
 - CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within
   200px of the viewport.

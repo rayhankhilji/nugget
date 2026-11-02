@@ -149,7 +149,7 @@ const facts = JSON.stringify(
     if (!document.querySelector("[data-account]")) return; // Heed Cloud isn't configured for this build
     const sb = supabase();
     if (!sb) {
-      say("Accounts aren't configured for this build.", true);
+      say("Accounts aren’t configured for this build.", true);
       $("[data-email]").textContent = "";
       return;
     }
@@ -184,10 +184,10 @@ const facts = JSON.stringify(
         b.disabled = false;
         say(
           err instanceof CloudError && err.code === "no_customer"
-            ? "There's no billing account yet. Choose a plan to start your free trial."
+            ? "There’s no billing account yet. Choose a plan to start your free trial."
             : err instanceof Error
               ? err.message
-              : "We couldn't open billing.",
+              : "We couldn’t open billing.",
           true,
         );
       }
@@ -209,7 +209,7 @@ const facts = JSON.stringify(
       $("[data-when]").textContent = live ? date(trial ? sub.trial_end : sub.current_period_end) : "–";
       const detail = $("[data-plan-detail]");
       if (trial) {
-        detail.innerHTML = `Your free trial ends on <strong></strong>. ${sub.cancel_at_period_end ? "It won't renew." : "Your first payment is taken then."}`;
+        detail.innerHTML = `Your free trial ends on <strong></strong>. ${sub.cancel_at_period_end ? "It won’t renew." : "Your first payment is taken then."}`;
         detail.querySelector("strong")!.textContent = date(sub.trial_end);
       } else {
         detail.textContent =
@@ -234,7 +234,7 @@ const facts = JSON.stringify(
       $("[data-choose]").hidden = false;
       $("[data-compare]").hidden = true;
     }
-    if (subs.error) say("We couldn't load your plan. Refresh to try again.", true);
+    if (subs.error) say("We couldn’t load your plan. Refresh to try again.", true);
 
     // Usage meter: ink, amber from 80%, red at 100%.
     const allowance = me?.entitlements?.smart_asks_per_month ?? 0;
@@ -279,7 +279,7 @@ const facts = JSON.stringify(
           const { error } = await sb.from("devices").delete().eq("device_id", d.device_id);
           if (error) {
             rm.disabled = false;
-            say("We couldn't remove that device.", true);
+            say("We couldn’t remove that device.", true);
             return;
           }
           const rest = items.filter((x) => x !== d);
@@ -309,7 +309,7 @@ const facts = JSON.stringify(
           a.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch (err) {
-          say(err instanceof Error ? err.message : "We couldn't export your data.", true);
+          say(err instanceof Error ? err.message : "We couldn’t export your data.", true);
         } finally {
           b.disabled = false;
         }
@@ -340,7 +340,7 @@ const facts = JSON.stringify(
       } catch (err) {
         confirmBtn.disabled = false;
         dlg.close();
-        say(err instanceof CloudError ? err.message : "We couldn't delete your account. Try again.", true);
+        say(err instanceof CloudError ? err.message : "We couldn’t delete your account. Try again.", true);
       }
     });
   })();

@@ -15,7 +15,7 @@ route            form     perf a11y best  seo
 /checkout        desktop   100  100  100   69  is-crawlable
 /legal/privacy   mobile    100  100  100  100 
 /legal/privacy   desktop   100  100  100  100 
-/legal/terms     mobile     99  100  100  100 
+/legal/terms     mobile    100  100  100  100 
 /legal/terms     desktop   100  100  100  100 
 /docs/self-host  mobile    100  100  100  100 
 /docs/self-host  desktop   100  100  100  100 

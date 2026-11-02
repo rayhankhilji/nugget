@@ -9,6 +9,7 @@ import { join } from "node:path";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
 import { OG_PAGES } from "../../lib/og";
+import { smart } from "../../lib/smartquotes.mjs";
 
 // Resolved from the project root: the build runs in site/ (also on Vercel, with Root Directory = site).
 const here = (p: string) => join(process.cwd(), p);
@@ -45,7 +46,7 @@ export const GET: APIRoute = async ({ params }) => {
           h(
             "div",
             { marginTop: 16, fontFamily: "Fraunces", fontSize: 70, lineHeight: 1.02, letterSpacing: -2, color: "#F6F3EC", maxWidth: 1000 },
-            page.line,
+            smart(page.line),
           ),
         ],
       ),
