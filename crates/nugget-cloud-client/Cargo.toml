@@ -10,6 +10,28 @@ description = "Desktop client for Nugget Cloud: Supabase sign-in (PKCE + deep li
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+# The workspace's single HTTP/TLS stack (rustls + aws-lc-rs); only the non-TLS `json` feature.
+reqwest = { workspace = true, features = ["json"] }
+# PKCE: verifier from the OS CSPRNG, S256 challenge, base64url without padding.
+getrandom = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+
+# OS keychain for the refresh token: the same backends as nugget-store (see the root Cargo.toml).
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
+
+[dev-dependencies]
+wiremock = "0.6"
 
 [lints]
 workspace = true
