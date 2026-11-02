@@ -74,6 +74,8 @@ export function TodayPage() {
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   /** Cards acted on this visit: kept out of the brief even if its copy is older than the action. */
   const [acted, setActed] = useState<ReadonlySet<string>>(new Set());
+  /** The card that moved up into the place of the last one acted on: it settles in (decorative only). */
+  const [settling, setSettling] = useState<string | null>(null);
   const [action, setAction] = useState<{ card: CardView; action: CardActionView } | null>(null);
   const seen = useRef(new Set<string>());
   const inboxRef = useRef<HTMLHeadingElement>(null);
@@ -127,6 +129,7 @@ export function TodayPage() {
     try {
       await proactiveApi.cardsFeedback({ card_id: card.id, ...request });
       setHidden((h) => new Set(h).add(card.id));
+      setSettling(visible[visible.findIndex((v) => v.id === card.id) + 1]?.id ?? null);
       setActed((h) => new Set(h).add(card.id));
       setStatus(done);
       inboxRef.current?.focus();
@@ -199,6 +202,7 @@ export function TodayPage() {
                 <CardItem
                   key={c.id}
                   card={c}
+                  settling={c.id === settling}
                   onAccept={() => void feedback(c, { feedback: "accept" }, t("today.accepted", { title: localText(c.title_text, c.title) }))}
                   onDismiss={(reason, text) =>
                     void feedback(c, { feedback: "dismiss", reason, reason_text: reason === "other" ? text || null : null }, t("today.dismissed", { title: localText(c.title_text, c.title) }))
@@ -385,6 +389,7 @@ function cardDomId(id: string): string {
 
 function CardItem({
   card,
+  settling,
   onAccept,
   onDismiss,
   onSnooze,
@@ -392,6 +397,7 @@ function CardItem({
   onForget,
 }: {
   card: CardView;
+  settling: boolean;
   onAccept: () => void;
   onDismiss: (reason: DismissReason, text: string) => void;
   onSnooze: (choice: SnoozeChoice) => void;
@@ -411,7 +417,7 @@ function CardItem({
   const title = localText(card.title_text, card.title);
 
   return (
-    <li className="card today-card" id={cardDomId(card.id)} tabIndex={-1} aria-labelledby={titleId}>
+    <li className={settling ? "card today-card today-card-settle" : "card today-card"} id={cardDomId(card.id)} tabIndex={-1} aria-labelledby={titleId}>
       <div className="card-head">
         <h3 id={titleId} className="card-title today-card-title" dir="auto">
           {title}

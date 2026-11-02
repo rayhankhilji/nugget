@@ -10,10 +10,10 @@ body.quickask-body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-3);
   /* Frameless and often over a busy desktop: a stronger edge than a plain --border. */
-  border: 1px solid color-mix(in srgb, var(--control-border) 55%, var(--border));
+  border: var(--hairline) solid color-mix(in srgb, var(--control-border) 55%, var(--border));
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
@@ -21,15 +21,15 @@ body.quickask-body {
 
 .quickask-form {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   align-items: center;
 }
 
 .quickask-input {
   flex: 1;
   min-inline-size: 0;
-  block-size: calc(var(--control-h) + 8px);
-  padding-inline: 12px;
+  block-size: calc(var(--control-h) + var(--space-2));
+  padding-inline: var(--space-3);
   font-size: var(--fs-lg);
 }
 
@@ -45,15 +45,15 @@ body.quickask-body {
 }
 
 .quickask-sub {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
   font-size: var(--fs-sm);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .quickask-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.5;
+  line-height: var(--lh-normal);
   font-size: var(--fs-md);
 }
 
@@ -63,21 +63,21 @@ body.quickask-body {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .quickask-source {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1);
   border-radius: var(--radius-small);
   font-size: var(--fs-sm);
 }
 
 .quickask-source:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .quickask-source-title {
@@ -90,10 +90,10 @@ body.quickask-body {
 
 .quickask-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
-  border-block-start: 1px solid var(--border);
-  padding-block-start: 8px;
+  border-block-start: var(--hairline) solid var(--border);
+  padding-block-start: var(--space-2);
 }
 
 .quickask-close {

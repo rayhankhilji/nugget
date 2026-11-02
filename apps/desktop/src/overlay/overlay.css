@@ -3,7 +3,7 @@
    past the maximum the draft, the editor and the history list scroll inside. */
 
 body.overlay-body {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   background: var(--surface);
   overflow: hidden;
 }
@@ -13,33 +13,36 @@ body.overlay-body {
   max-height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
   /* The window is frameless and often sits over white: a plain --border nearly vanishes. */
-  border: 1px solid color-mix(in srgb, var(--control-border) 55%, var(--border));
+  border: var(--hairline) solid color-mix(in srgb, var(--control-border) 55%, var(--border));
   border-radius: var(--radius);
   background: var(--surface);
+  /* Appears with a short fade and rise (styles.css); a translate leaves the measured height, which
+     sizes the window, alone. */
+  animation: enter-rise var(--dur-2) var(--ease-out) backwards;
 }
 
 .overlay-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .overlay-phase {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 600;
+  gap: var(--space-1);
+  font-weight: var(--fw-semibold);
   font-size: var(--fs-xs);
   color: var(--muted);
 }
 
 .overlay-phase .spinner {
-  width: 12px;
-  height: 12px;
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
 }
 
 /* Error and refused are the states that need attention: full-strength text plus a status glyph. */
@@ -53,12 +56,12 @@ body.overlay-body {
   content: "!";
   display: inline-grid;
   place-items: center;
-  inline-size: 16px;
-  block-size: 16px;
+  inline-size: var(--size-icon);
+  block-size: var(--size-icon);
   border-radius: 50%;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-none);
   color: var(--surface);
   background: var(--warn);
 }
@@ -69,7 +72,7 @@ body.overlay-body {
 
 .overlay-badges {
   display: inline-flex;
-  gap: 4px;
+  gap: var(--space-1);
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -91,26 +94,26 @@ body.overlay-body {
 }
 
 .overlay-text:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .overlay-editor {
   flex: 0 1 auto;
-  min-height: 60px;
+  min-height: var(--editor-min-h);
   width: 100%;
   resize: none;
   font: inherit;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
   background: var(--bg);
   color: var(--text);
 }
 
 .overlay-editor:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .overlay-msg {
@@ -133,7 +136,7 @@ body.overlay-body {
 .overlay-meta {
   margin: 0;
   display: flex;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -142,7 +145,7 @@ body.overlay-body {
 .overlay-refine {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: var(--space-1);
   align-items: center;
 }
 
@@ -151,12 +154,12 @@ body.overlay-body {
 }
 
 .overlay-tools .btn-small {
-  padding-inline: 6px;
+  padding-inline: var(--space-1);
 }
 
 .overlay-tools kbd,
 .overlay-tools kbd {
-  margin-inline-start: 4px;
+  margin-inline-start: var(--space-1);
   color: var(--muted);
 }
 
@@ -165,23 +168,23 @@ body.overlay-body {
   margin: 0;
   padding: 0;
   flex: 0 1 auto;
-  min-height: 48px;
+  min-height: var(--space-7);
   overflow-y: auto;
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
 }
 
 .overlay-history li + li {
-  border-block-start: 1px solid var(--border);
+  border-block-start: var(--hairline) solid var(--border);
 }
 
 .overlay-history-item {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 2px;
+  gap: var(--space-half);
   inline-size: 100%;
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 0;
   background: transparent;
   color: var(--text);
@@ -195,8 +198,8 @@ body.overlay-body {
 }
 
 .overlay-history-item:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline: var(--focus-ring-width) solid var(--focus);
+  outline-offset: var(--focus-ring-inset);
 }
 
 /* Truncated on screen only: the whole draft stays in the accessible name. */
@@ -211,12 +214,12 @@ body.overlay-body {
 /* Pinned to the bottom in every phase, so the buttons (and Esc) never move around. */
 .overlay-foot {
   display: flex;
-  gap: 6px;
+  gap: var(--space-1);
   justify-content: flex-end;
   flex-wrap: wrap;
   flex-shrink: 0;
   margin-block-start: auto;
-  padding-block-start: 4px;
+  padding-block-start: var(--space-1);
 }
 
 /* On the amber button a pale chip with muted text is barely legible: outline it in the label colour. */

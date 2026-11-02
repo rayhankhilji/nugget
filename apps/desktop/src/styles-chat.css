@@ -4,7 +4,7 @@
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .chat-pane {
@@ -16,19 +16,19 @@
 
 .chat-history {
   flex: none;
-  width: 220px;
+  width: var(--panel-w);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-height: 0;
-  padding-inline-end: 12px;
-  border-inline-end: 1px solid var(--border);
+  padding-inline-end: var(--space-3);
+  border-inline-end: var(--hairline) solid var(--border);
 }
 
 .chat-history-title {
   margin: 0;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -40,16 +40,16 @@
   overflow-y: auto;
   list-style: none;
   margin: 0;
-  padding: 2px;
+  padding: var(--space-half);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-half);
 }
 
 .chat-history-item {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-half);
   border-radius: var(--radius-small);
 }
 
@@ -62,13 +62,13 @@
   flex: 1;
   min-width: 0;
   text-align: start;
-  padding: 6px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 0;
   border-radius: var(--radius-small);
   background: none;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -76,7 +76,7 @@
 }
 
 .chat-history-open[aria-current="true"] {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .chat-history-open:disabled,
@@ -87,8 +87,8 @@
 
 .chat-history-delete {
   flex: none;
-  width: 26px;
-  height: 26px;
+  width: var(--control-h-small);
+  height: var(--control-h-small);
   border: 0;
   border-radius: var(--radius-small);
   background: none;
@@ -106,16 +106,16 @@
 .md pre:focus-visible,
 .md-table-wrap:focus-visible,
 .md-link:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--focus);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .chat-history-foot {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .chat-history-foot p {
@@ -125,18 +125,18 @@
 .chat-history-confirm {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
   align-items: center;
 }
 
 .chat-status {
-  margin: 6px 0 0;
+  margin: var(--space-1) 0 0;
 }
 
 .msg-actions {
   margin-inline-start: auto;
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 @media (max-width: 760px) {
@@ -148,9 +148,9 @@
     width: auto;
     max-height: 30vh;
     padding-inline-end: 0;
-    padding-bottom: 8px;
+    padding-bottom: var(--space-2);
     border-inline-end: 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--hairline) solid var(--border);
   }
 }
 
@@ -189,7 +189,7 @@
 
 .md-heading {
   margin: 0.9em 0 0.4em;
-  line-height: 1.3;
+  line-height: var(--lh-snug);
 }
 
 h3.md-heading {
@@ -206,14 +206,14 @@ h6.md-heading {
 }
 
 .md blockquote {
-  padding-inline-start: 12px;
-  border-inline-start: 3px solid var(--border);
+  padding-inline-start: var(--space-3);
+  border-inline-start: var(--border-heavy) solid var(--border);
   color: var(--muted);
 }
 
 .md hr {
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
   margin: 1em 0;
 }
 
@@ -224,14 +224,14 @@ h6.md-heading {
 }
 
 .md-inline-code {
-  padding: 1px 4px;
-  border-radius: 4px;
+  padding: var(--space-half) var(--space-1);
+  border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   overflow-wrap: anywhere;
 }
 
 .md-code {
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--text) 4%, var(--surface));
   overflow: hidden;
@@ -241,26 +241,26 @@ h6.md-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding-block: 2px;
-  padding-inline: 10px 4px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  gap: var(--space-2);
+  padding-block: var(--space-half);
+  padding-inline: var(--space-2) var(--space-1);
+  border-bottom: var(--hairline) solid var(--border);
+  font-size: var(--fs-xs);
   color: var(--muted);
 }
 
 .md pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--space-2) var(--space-3);
   overflow-x: auto;
   white-space: pre;
-  line-height: 1.45;
+  line-height: var(--lh-normal);
 }
 
 .md-link {
   color: var(--accent-strong);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: var(--space-half);
   overflow-wrap: anywhere;
 }
 
@@ -279,8 +279,8 @@ h6.md-heading {
 
 .md th,
 .md td {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2);
+  border: var(--hairline) solid var(--border);
   text-align: start;
 }
 
@@ -291,41 +291,41 @@ h6.md-heading {
 /* ---- Replies from the user's sources ---- */
 
 .chat-rewrite {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   font-style: italic;
 }
 
 .chat-sources {
-  margin-top: 8px;
+  margin-top: var(--space-2);
 }
 
 .chat-sources-title {
-  margin: 0 0 4px;
+  margin: 0 0 var(--space-1);
   font-size: inherit;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 /* Answer check: "not found" note and claims not backed by a cited item. */
 
 .chat-not-found {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
 }
 
 .chat-check {
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .chat-check-list {
-  margin: 4px 0 0;
-  padding-inline-start: 20px;
+  margin: var(--space-1) 0 0;
+  padding-inline-start: var(--list-indent);
 }
 
 .chat-check-claim + .chat-check-claim {
-  margin-top: 2px;
+  margin-top: var(--space-half);
 }
 
 .chat-check-reason {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 /* A failed reply's Retry and Status details. */

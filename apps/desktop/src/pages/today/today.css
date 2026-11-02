@@ -1,26 +1,26 @@
 /* Today page (morning brief, card inbox, action preview). Uses the app's tokens only. */
 
 .today-brief {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .today-brief-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr));
+  gap: var(--space-3);
 }
 
 .today-brief-block {
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius);
 }
 
 .today-brief-block h3 {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 600;
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
   color: var(--muted);
 }
 
@@ -34,23 +34,23 @@
 
 .today-brief-list {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .today-brief-title {
   display: block;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   overflow-wrap: anywhere;
 }
 
 .today-cards {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .today-card-title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .today-card-summary,
@@ -63,7 +63,7 @@
 .today-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--space-1) var(--space-3);
   margin: 0;
 }
 
@@ -75,7 +75,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-1);
 }
 
 .today-row-start {
@@ -121,41 +121,41 @@
 }
 
 .today-dismiss fieldset {
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
-  margin: 0 0 8px;
-  padding: 8px 12px;
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .today-dismiss legend {
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
 }
 
 .today-preview-summary {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-2);
   overflow-wrap: anywhere;
 }
 
 .today-diff {
   list-style: none;
-  margin: 8px 0 0;
-  padding: 8px 0;
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 0;
   max-height: 40vh;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 12px;
-  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
   background: var(--surface);
 }
 
 .today-diff li {
   display: flex;
-  gap: 8px;
-  padding: 0 10px;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -177,20 +177,20 @@
 }
 
 .today-draft {
-  margin: 8px 0;
-  padding: 10px 12px;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
   max-height: 40vh;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   background: color-mix(in srgb, var(--text) 4%, transparent);
   border-radius: var(--radius-small);
 }
 
 .today-artifact code.block {
-  margin: 6px 0;
+  margin: var(--space-1) 0;
   overflow-wrap: anywhere;
 }
 
@@ -207,7 +207,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: var(--space-1) var(--space-2);
 }
 
 .today-learned-less,
@@ -216,34 +216,34 @@
 }
 
 .today-learning {
-  margin-top: 16px;
+  margin-top: var(--space-4);
 }
 
 .today-learning-list {
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 
 .today-learning-entry {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  padding: 8px 12px;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius);
 }
 
 .today-learning-what {
   display: flex;
   flex-direction: column;
-  flex: 1 1 200px;
+  flex: 1 1 var(--field-min);
   min-width: 0;
 }
 
 .today-learning-name {
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   overflow-wrap: anywhere;
 }

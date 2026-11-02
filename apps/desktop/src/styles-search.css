@@ -67,7 +67,7 @@
   padding: 0;
   border: 0;
   display: grid;
-  gap: 2px;
+  gap: var(--space-half);
   min-inline-size: 0;
 }
 
@@ -75,7 +75,7 @@
   padding: 0;
   margin-block-end: var(--space-1);
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--muted);
 }
 
@@ -83,7 +83,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-block-size: 28px;
+  min-block-size: var(--control-h-small);
   cursor: pointer;
   min-inline-size: 0;
 }
@@ -130,7 +130,7 @@
 
 .sr-date {
   display: grid;
-  gap: 2px;
+  gap: var(--space-half);
   font-size: var(--fs-xs);
 }
 
@@ -138,7 +138,7 @@
    input itself does not reliably match; a field you type into may show its ring on any focus. */
 .sr-date input:focus,
 .sr-date input:focus-within {
-  outline: 2px solid var(--focus);
+  outline: var(--focus-ring-width) solid var(--focus);
   outline-offset: 0;
   border-color: transparent;
 }
@@ -149,14 +149,14 @@
   padding: 0;
   display: flex;
   align-items: flex-end;
-  gap: 2px;
-  block-size: 48px;
+  gap: var(--space-half);
+  block-size: var(--space-7);
 }
 
 .sr-months li {
   flex: 1 1 0;
   block-size: 100%;
-  min-inline-size: 6px;
+  min-inline-size: var(--size-dot);
 }
 
 .sr-month {
@@ -173,7 +173,7 @@
 .sr-month-bar {
   display: block;
   inline-size: 100%;
-  border-radius: 2px 2px 0 0;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
   background: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
@@ -182,8 +182,8 @@
 }
 
 .sr-month:focus-visible {
-  outline: 2px solid var(--accent-strong);
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid var(--accent-strong);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* ---- results ---- */
@@ -194,7 +194,7 @@
   background: none;
   color: inherit;
   font: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-align: start;
   cursor: pointer;
 }
@@ -205,7 +205,7 @@
 
 .result.sr-selected {
   border-color: var(--accent);
-  border-inline-start-width: 4px;
+  border-inline-start-width: var(--border-heavy);
 }
 
 .sr-meta {
@@ -251,7 +251,7 @@
 .sr-saved-item {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-half);
 }
 
 .sr-save-form {
@@ -268,7 +268,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 2px;
+  gap: var(--space-half);
 }
 
 .nav-saved-item {
@@ -292,7 +292,7 @@
   overflow-y: auto;
   padding: var(--space-3) var(--space-4);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius);
   min-inline-size: 0;
 }
@@ -321,7 +321,7 @@
 .sr-tl-evidence blockquote {
   margin: var(--space-1) 0;
   padding-inline-start: var(--space-3);
-  border-inline-start: 3px solid var(--border);
+  border-inline-start: var(--border-heavy) solid var(--border);
   overflow-wrap: anywhere;
 }
 
@@ -336,18 +336,18 @@
   max-block-size: 50vh;
   overflow-y: auto;
   padding: var(--space-2);
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
   border-radius: var(--radius-small);
   font-size: 0.9rem;
 }
 
 .sr-preview mark,
 .sr-passage mark {
-  padding: 0 1px;
-  border-radius: 2px;
+  padding: 0 var(--space-half);
+  border-radius: var(--radius-xs);
   background: var(--accent-soft);
   color: inherit;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 @media (max-width: 760px) {
@@ -389,7 +389,7 @@
   padding: 0;
   display: grid;
   gap: var(--space-2);
-  border-inline-start: 2px solid var(--border);
+  border-inline-start: var(--border-strong) solid var(--border);
 }
 
 .sr-tl-event {
@@ -401,12 +401,12 @@
 
 .sr-tl-item {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--hairline) solid var(--border);
 }
 
 .sr-tl-fact {
   background: var(--accent-soft);
-  border: 1px dashed var(--accent);
+  border: var(--hairline) dashed var(--accent);
 }
 
 .sr-tl-meta {
@@ -423,7 +423,7 @@
 }
 
 .sr-tl-title {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .sr-tl-evidence {
@@ -435,6 +435,6 @@
 @media (prefers-contrast: more) {
   .sr-date input:focus,
   .sr-date input:focus-within {
-    outline-width: 3px;
+    outline-width: var(--focus-ring-width);
   }
 }
