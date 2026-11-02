@@ -1,4 +1,4 @@
-//! Supabase Auth over PKCE: the authorize URL (Google, Apple), the magic link, the token
+//! Supabase Auth over PKCE: the authorize URL (Google; Apple is not in M1), the magic link, the token
 //! exchange and refresh, logout, and the `nugget://auth/callback` deep link.
 
 use std::collections::BTreeMap;
@@ -18,21 +18,22 @@ const MAX_ERROR_LEN: usize = 500;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     Google,
-    Apple,
 }
 
 impl Provider {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Google => "google",
-            Self::Apple => "apple",
         }
     }
 
     pub fn parse(s: &str) -> Result<Self> {
         match s {
             "google" => Ok(Self::Google),
-            "apple" => Ok(Self::Apple),
+            // Not in M1: needs an Apple Developer account first.
+            "apple" => Err(CloudError::Invalid(
+                "Sign in with Apple isn't available yet".into(),
+            )),
             other => Err(CloudError::Invalid(format!(
                 "unknown sign-in provider `{other}`"
             ))),
@@ -323,8 +324,10 @@ pub(crate) mod tests {
             url,
             "https://abc.supabase.co/auth/v1/authorize?provider=google&redirect_to=nugget%3A%2F%2Fauth%2Fcallback&code_challenge=CHAL&code_challenge_method=s256"
         );
-        let apple = authorize_url(&cfg("https://abc.supabase.co"), Provider::Apple, "C").unwrap();
-        assert!(apple.contains("provider=apple&"), "{apple}");
+        assert!(
+            matches!(Provider::parse("apple"), Err(CloudError::Invalid(m)) if m.contains("isn't available yet"))
+        );
+        assert_eq!(Provider::parse("google").unwrap(), Provider::Google);
         assert!(Provider::parse("github").is_err());
     }
 

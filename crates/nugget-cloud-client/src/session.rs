@@ -206,7 +206,7 @@ impl Session {
         Ok(pkce)
     }
 
-    /// Start a Google or Apple sign-in: the URL to open in the system browser.
+    /// Start a Google sign-in: the URL to open in the system browser.
     pub async fn begin_oauth(&self, provider: Provider) -> Result<String> {
         let mut inner = self.inner.lock().await;
         let pkce = self.start_pending(&mut inner)?;
@@ -448,14 +448,14 @@ pub(crate) mod tests {
         mount_pkce(&server, 10_000).await;
         let clock = Arc::new(FakeClock::default());
         let s = session(&server.uri(), Default::default(), clock.clone());
-        s.begin_oauth(Provider::Apple).await.unwrap();
+        s.begin_oauth(Provider::Google).await.unwrap();
         clock.set(PENDING_TTL_SECS + 1);
         assert!(matches!(
             s.complete(Callback::Code("c".into())).await,
             Err(CloudError::SignInExpired)
         ));
         // An error callback uses up the pending sign-in and reports Supabase's reason.
-        s.begin_oauth(Provider::Apple).await.unwrap();
+        s.begin_oauth(Provider::Google).await.unwrap();
         let err = s
             .complete(Callback::Error {
                 error: "access_denied".into(),

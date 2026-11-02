@@ -2,7 +2,7 @@
 //!
 //! - [`CloudConfig`]: where the cloud is (Supabase project and the `/v1` API base).
 //! - [`pkce`]: the PKCE verifier and S256 challenge.
-//! - [`auth`]: Supabase Auth endpoints (authorize URL, magic link, token exchange, refresh,
+//! - [`auth`]: Supabase Auth endpoints (authorize URL for Google, magic link, token exchange, refresh,
 //!   logout) and the strict parser for the `nugget://auth/callback` deep link.
 //! - [`session`]: the signed-in session. The verifier of a sign-in in progress lives only in
 //!   memory for 10 minutes and is single use; the refresh token is kept in a [`SessionStore`]
