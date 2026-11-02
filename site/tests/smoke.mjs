@@ -112,6 +112,25 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1g. Copy uses typographic quotes: no straight apostrophes in visible text outside code.
+{
+  const page = await browser.newPage();
+  for (const r of ["/", "/pricing", "/download", "/legal/privacy"]) {
+    await page.goto(base + r);
+    const straight = await page.evaluate(() => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const hits = [];
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.parentElement?.closest("script, style, pre, code, kbd")) continue;
+        if (/\w'\w|"/.test(n.textContent ?? "")) hits.push((n.textContent ?? "").trim().slice(0, 40));
+      }
+      return hits;
+    });
+    check(straight.length === 0, `${r} uses typographic quotes${straight.length ? `: ${straight.slice(0, 3).join(" | ")}` : ""}`);
+  }
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

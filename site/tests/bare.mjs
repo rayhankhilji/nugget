@@ -32,7 +32,7 @@ for (const r of ROUTES) {
 for (const r of ["/account", "/checkout?plan=heed&interval=month", "/signin", "/signup"]) {
   await page.goto(base + r, { waitUntil: "networkidle" });
   const closed = await page.locator("[data-cloud-closed] h1").textContent().catch(() => null);
-  check(closed === "Heed Cloud isn't open yet." && page.url() === base + r, `bare ${r} shows the calm closed state`);
+  check(closed === "Heed Cloud isn’t open yet." && page.url() === base + r, `bare ${r} shows the calm closed state`);
 }
 await page.goto(base + "/download");
 check((await page.locator('a[href$=".dmg"], [data-dl]').count()) === 0, "bare /download links to no binary");
