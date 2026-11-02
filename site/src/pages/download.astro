@@ -1,19 +1,30 @@
 ---
 import Base from "../layouts/Base.astro";
 import { config } from "../lib/config";
+import { GITHUB_URL } from "../lib/plans";
+import WaitlistForm from "../components/WaitlistForm.astro";
 
+// Direct downloads appear only once a release exists: set NEXT_PUBLIC_DOWNLOAD_MAC_ARM_URL and/or
+// NEXT_PUBLIC_DOWNLOAD_MAC_INTEL_URL. Until then the page says so plainly and explains how to build it.
 const arm = config.downloadMacArm;
 const intel = config.downloadMacIntel;
 const ready = Boolean(arm || intel);
+const INSTALL_GUIDE = `${GITHUB_URL}/blob/HEAD/docs/book/src/guide/install.md`;
 ---
-<Base title="Download" description="Download Heed for macOS. Windows and Linux are coming soon.">
-  <section class="wrap dl">
-    <div class="copy">
-      <p class="eyebrow">Download</p>
-      <h1>Heed for Mac</h1>
-      <p class="lede">macOS 11 Big Sur or later. Sign in with the account you started your trial with.</p>
-      {
-        ready ? (
+<Base
+  footerCta={false}
+  title="Download"
+  description={ready
+    ? "Download Heed for Mac. Free and open source; Windows and Linux are coming soon."
+    : "Heed for Mac: there's no signed release yet. Build it from source in one script, or get an email when the first release is out."}
+>
+  <section class="wrap top">
+    <p class="eyebrow">Download</p>
+    <h1>Heed for Mac</h1>
+    {
+      ready ? (
+        <>
+          <p class="lede">For macOS 11 Big Sur or later. Free and open source: bring your own AI, or sign in to Heed Cloud.</p>
           <div class="btns">
             {arm && (
               <a class="btn btn-primary btn-lg" href={arm} data-dl="arm">
@@ -26,158 +37,245 @@ const ready = Boolean(arm || intel);
               </a>
             )}
           </div>
-        ) : (
-          <div class="btns">
-            <span class="btn btn-secondary btn-lg" aria-disabled="true">
-              Download opens at launch
-            </span>
-            <a class="btn btn-primary btn-lg" href="/pricing">
-              Start your trial
-            </a>
-          </div>
-        )
-      }
-      {ready && <p class="small hint" data-hint>Not sure which? Open the Apple menu, then About This Mac. "Apple M…" means Apple silicon.</p>}
-      {!ready && <p class="small hint">We'll email your download link as soon as the first release is signed and notarised.</p>}
-    </div>
+          <p class="small">Not sure which? Open the Apple menu, then About This Mac. "Apple M…" means Apple silicon.</p>
+        </>
+      ) : (
+        <>
+          <p class="lede">
+            There's no signed release yet. You can build the app from source today with one script, or we can email you
+            when the first release is ready.
+          </p>
+          <WaitlistForm source="download" label="Email me when Heed for Mac is released" button="Notify me" />
+          <p class="small">Or build it today: <a href={GITHUB_URL} rel="noopener">view the source on GitHub</a>.</p>
+        </>
+      )
+    }
+    <dl class="specs">
+      <div><dt>System</dt><dd>macOS 11 Big Sur or later</dd></div>
+      <div><dt>Chips</dt><dd>Apple silicon and Intel</dd></div>
+      <div><dt>Licence</dt><dd>Apache-2.0 · free and open source</dd></div>
+      <div><dt>Status</dt><dd>{ready ? "Released" : "Not released yet · build from source"}</dd></div>
+      <div><dt>Windows, Linux</dt><dd>Coming soon</dd></div>
+    </dl>
+  </section>
 
-    <ol class="steps" aria-label="Getting started">
-      <li><span>1</span><div><b>Open the download</b> and drag Heed to Applications.</div></li>
-      <li><span>2</span><div><b>Sign in</b> with your email link or Google.</div></li>
-      <li><span>3</span><div><b>Connect your apps</b> and allow Accessibility so ghost text can follow your cursor.</div></li>
+  <section class="wrap steps-sec" aria-labelledby="src-h">
+    <h2 id="src-h">Build it from source</h2>
+    <p class="muted intro">
+      One script builds the app on an Intel or Apple silicon Mac, signs it ad hoc (no Apple Developer ID needed) and tells
+      you where it is. The first build takes a while. Full details are in the
+      <a href={INSTALL_GUIDE} rel="noopener">install guide</a>.
+    </p>
+    <ol class="steps">
+      <li>
+        <span class="n">01</span>
+        <div>
+          <b>Install the tools</b>
+          <p>The Xcode command line tools, Rust, Node.js 22 or newer, and pnpm. Open a new Terminal window after installing Rust.</p>
+          <pre><code>xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+npm install -g pnpm@10.28.0</code></pre>
+        </div>
+      </li>
+      <li>
+        <span class="n">02</span>
+        <div>
+          <b>Get the code and build</b>
+          <p>The script prints where <code>Heed.app</code> is when it's done.</p>
+          <pre><code>git clone https://github.com/rayhankhilji/nugget
+cd nugget
+scripts/build-macos-app.sh</code></pre>
+        </div>
+      </li>
+      <li>
+        <span class="n">03</span>
+        <div>
+          <b>Move it to Applications and open it</b>
+          <p>Drag <code>Heed.app</code> into Applications, or on Apple silicon:</p>
+          <pre><code>ditto target/aarch64-apple-darwin/release/bundle/macos/Heed.app /Applications/Heed.app
+open /Applications/Heed.app</code></pre>
+          <p class="small">On Intel, use <code>x86_64-apple-darwin</code> instead. Open it from Applications, not from Terminal, so macOS files its permissions under Heed.</p>
+        </div>
+      </li>
+      <li>
+        <span class="n">04</span>
+        <div>
+          <b>Choose your AI and turn on permissions</b>
+          <p>
+            Sign in with ChatGPT, add an API key or use a local model, or sign in to Heed Cloud. Then allow Accessibility (so ghost
+            text can follow your cursor) and Input Monitoring. Setup links straight to the right pages of System Settings.
+          </p>
+        </div>
+      </li>
     </ol>
   </section>
 
-  <section class="wrap other" aria-labelledby="other-h">
-    <h2 id="other-h">Other platforms</h2>
-    <div class="plats">
-      <div class="plat">
-        <b>Windows</b><span class="soon">Coming soon</span>
-      </div>
-      <div class="plat">
-        <b>Linux</b><span class="soon">Coming soon</span>
-      </div>
-    </div>
+  <section class="wrap steps-sec gate" aria-labelledby="gate-h">
+    <h2 id="gate-h">If macOS says "unidentified developer"</h2>
+    <p class="muted intro">
+      Heed isn't notarised by Apple yet, so the first time you open a build you didn't make yourself, macOS may block it.
+      This is expected:
+    </p>
+    <ul class="list">
+      <li>Control-click Heed in Applications, choose <b>Open</b>, then <b>Open</b> again.</li>
+      <li>On macOS 15 or later: try to open it once, then click <b>Open Anyway</b> in System Settings → Privacy &amp; Security.</li>
+      <li>If macOS says the app is damaged, use <b>Open Anyway</b>, or run <code>xattr -dr com.apple.quarantine /Applications/Heed.app</code>.</li>
+    </ul>
   </section>
 </Base>
 
 <script>
   // Lead with the build that matches this Mac when the browser can tell us.
   const ua = navigator as Navigator & { userAgentData?: { getHighEntropyValues(h: string[]): Promise<{ architecture?: string }> } };
-  ua.userAgentData?.getHighEntropyValues(["architecture"]).then(({ architecture }) => {
-    if (architecture !== "x86") return;
-    const intel = document.querySelector<HTMLElement>('[data-dl="intel"]');
-    const arm = document.querySelector<HTMLElement>('[data-dl="arm"]');
-    if (intel && arm) {
-      intel.classList.replace("btn-secondary", "btn-primary");
-      arm.classList.replace("btn-primary", "btn-secondary");
-      intel.parentElement?.prepend(intel);
-    }
-  }).catch(() => undefined);
+  ua.userAgentData
+    ?.getHighEntropyValues(["architecture"])
+    .then(({ architecture }) => {
+      if (architecture !== "x86") return;
+      const intel = document.querySelector<HTMLElement>('[data-dl="intel"]');
+      const arm = document.querySelector<HTMLElement>('[data-dl="arm"]');
+      if (intel && arm) {
+        intel.classList.replace("btn-secondary", "btn-primary");
+        arm.classList.replace("btn-primary", "btn-secondary");
+        intel.parentElement?.prepend(intel);
+      }
+    })
+    .catch(() => undefined);
 </script>
 
 <style>
-  .dl {
+  .top {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-    gap: 48px;
-    align-items: center;
-    padding-block: clamp(56px, 9vw, 112px) 64px;
-  }
-  .copy {
-    display: grid;
-    gap: 18px;
+    gap: 20px;
+    justify-items: start;
+    padding-block: clamp(56px, 9vw, 112px) clamp(40px, 5vw, 64px);
   }
   h1 {
-    font-size: clamp(40px, 6vw, 68px);
-    letter-spacing: -0.045em;
+    font-size: clamp(48px, 8vw, 104px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
   }
   .lede {
+    max-width: 36em;
+    font-size: clamp(17px, 1.5vw, 19px);
     color: var(--text-2);
-    font-size: 18px;
+  }
+  .top .small a {
+    color: var(--text);
+    text-underline-offset: 3px;
   }
   .btns {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
   }
-  .btns [aria-disabled="true"] {
-    opacity: 1;
-    color: var(--text-2);
+  .specs {
+    width: 100%;
+    max-width: 640px;
+    margin: 16px 0 0;
+    font-family: var(--mono);
+    font-size: 13.5px;
+  }
+  .specs div {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 16px;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .specs div:first-child {
+    border-top: 1px solid var(--text);
+  }
+  .specs dt {
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 12px;
+    padding-top: 1px;
+  }
+  .specs dd {
+    margin: 0;
+  }
+  .steps-sec {
+    padding-block: clamp(40px, 6vw, 72px);
+    border-top: 1px dashed var(--line-2);
+  }
+  .steps-sec h2 {
+    font-size: clamp(32px, 4.4vw, 56px);
+    margin-bottom: 14px;
+  }
+  .intro {
+    max-width: 40em;
+    margin-bottom: 28px;
+  }
+  .intro a,
+  .list a {
+    color: var(--text);
+    text-underline-offset: 3px;
   }
   .steps {
     list-style: none;
     margin: 0;
-    padding: 8px;
-    display: grid;
-    gap: 4px;
-    border-radius: var(--r-4);
-    background: var(--surface);
-    box-shadow: var(--shadow-2), var(--hi);
+    padding: 0;
+    border-top: 1px solid var(--text);
   }
   .steps li {
-    display: flex;
-    gap: 14px;
-    padding: 16px;
-    border-radius: 12px;
-    color: var(--text-2);
-  }
-  .steps li + li {
-    border-top: 1px solid var(--line);
-    border-radius: 0;
-  }
-  .steps b {
-    color: var(--text);
-    font-weight: 550;
-  }
-  .steps span {
     display: grid;
-    place-items: center;
-    flex: none;
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .n {
     font-family: var(--mono);
     font-size: 13px;
-    color: var(--accent-ink);
-    background: var(--accent-soft);
+    color: var(--text-3);
+    padding-top: 2px;
   }
-  .other {
-    padding-bottom: 120px;
+  .steps b {
+    display: block;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 6px;
   }
-  .other h2 {
-    font-size: 20px;
-    margin-bottom: 16px;
-  }
-  .plats {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-    max-width: 560px;
-  }
-  .plat {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 18px;
-    border-radius: var(--r-3);
-    box-shadow: inset 0 0 0 1px var(--line-2);
-  }
-  .soon {
-    font-family: var(--mono);
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .steps p {
     color: var(--text-2);
+    max-width: 42em;
   }
-  @media (max-width: 860px) {
-    .dl {
+  pre {
+    margin: 12px 0;
+    padding: 14px 16px;
+    max-width: 46em;
+    border-radius: 4px;
+    background: #0b0b1a;
+    color: #f3f1ec;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.92em;
+  }
+  .list {
+    margin: 0;
+    padding-left: 20px;
+    display: grid;
+    gap: 10px;
+    max-width: 44em;
+  }
+  .list code {
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 640px) {
+    .steps li {
       grid-template-columns: 1fr;
+      gap: 6px;
     }
-  }
-  @media (max-width: 420px) {
-    .plats {
+    .specs div {
       grid-template-columns: 1fr;
+      gap: 4px;
     }
   }
 </style>

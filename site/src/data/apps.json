@@ -1,0 +1,30 @@
+[
+  {
+    "slug": "gmail",
+    "name": "Gmail"
+  },
+  {
+    "slug": "googlecalendar",
+    "name": "Google Calendar"
+  },
+  {
+    "slug": "outlook",
+    "name": "Outlook"
+  },
+  {
+    "slug": "slack",
+    "name": "Slack"
+  },
+  {
+    "slug": "microsoft_teams",
+    "name": "Microsoft Teams"
+  },
+  {
+    "slug": "notion",
+    "name": "Notion"
+  },
+  {
+    "slug": "googledrive",
+    "name": "Google Drive"
+  }
+]

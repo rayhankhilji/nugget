@@ -12,7 +12,7 @@ export class CloudError extends Error {
 
 /** Calls the Heed cloud API (crates/nugget-cloud) as the signed-in user. */
 export async function cloud<T>(path: string, token: string, init: { method: string; body?: unknown }): Promise<T> {
-  if (!config.cloudUrl) throw new CloudError(0, "not_configured", "The Heed cloud URL isn't configured for this site.");
+  if (!config.cloudUrl) throw new CloudError(0, "not_configured", "The Heed cloud URL isn’t configured for this site.");
   let res: Response;
   try {
     res = await fetch(`${config.cloudUrl}${path}`, {
@@ -24,7 +24,7 @@ export async function cloud<T>(path: string, token: string, init: { method: stri
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
   } catch {
-    throw new CloudError(0, "network", "We couldn't reach Heed. Check your connection and try again.");
+    throw new CloudError(0, "network", "We couldn’t reach Heed. Check your connection and try again.");
   }
   if (res.status === 204) return undefined as T;
   const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
@@ -57,3 +57,14 @@ export const billingPortal = (token: string) =>
   withReturnUrl((body) => cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST", body }), {});
 
 export const deleteAccount = (token: string) => cloud<void>("/v1/me", token, { method: "DELETE" });
+
+export interface Me {
+  plan: string | null;
+  entitlements: { smart_asks_per_month: number; default_model: string } | null;
+  usage: { smart_asks_used: number; month_cost_micros: number };
+}
+/** The account, plan and this month's usage. Web calls carry no device header, so they take no device seat. */
+export const getMe = (token: string) => cloud<Me>("/v1/me", token, { method: "GET" });
+
+/** Everything Heed stores for the user, as JSON (GET /v1/export; rate-limited by the cloud). */
+export const exportData = (token: string) => cloud<unknown>("/v1/export", token, { method: "GET" });

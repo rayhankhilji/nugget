@@ -1,0 +1,3 @@
+*
+!target/release/nugget-cloud
+!target/debug/nugget-cloud

@@ -1,0 +1,19 @@
+# One origin for the desktop app: Auth under /auth/v1, the Heed API everywhere else.
+# SITE_ADDRESS ":8000" (the default) serves plain HTTP on port 8000, for local testing only.
+# For a real server set it to your domain ("heed.example.com"): Caddy then gets a TLS
+# certificate by itself (publish ports 80 and 443, see docker-compose.domain.yml).
+{$SITE_ADDRESS::8000} {
+	handle_path /auth/v1/* {
+		reverse_proxy auth:9999
+	}
+	handle {
+		reverse_proxy cloud:8080
+	}
+}
+
+# Internal only (not published): how nugget-cloud reaches Auth to check tokens.
+:8001 {
+	handle_path /auth/v1/* {
+		reverse_proxy auth:9999
+	}
+}

@@ -81,7 +81,7 @@ const configured = Boolean(config.supabaseUrl && config.supabaseAnonKey);
       if (error) {
         say(
           /signups? not allowed|not found/i.test(error.message)
-            ? "There's no Heed account for that email. Start a free trial instead."
+            ? "There’s no Heed account for that email. Start a free trial instead."
             : error.message,
           true,
         );

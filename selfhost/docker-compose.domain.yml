@@ -1,0 +1,8 @@
+# Add for a real server with a domain (SITE_ADDRESS=heed.example.com in .env):
+#   docker compose -f docker-compose.yml -f docker-compose.domain.yml up -d
+# Caddy answers on 80 (ACME challenge, redirect) and 443 (HTTPS) and renews certificates itself.
+services:
+  gateway:
+    ports:
+      - "80:80"
+      - "443:443"

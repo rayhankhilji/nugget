@@ -51,7 +51,20 @@ pub(super) async fn plans(State(s): State<Arc<AppState>>) -> Json<Value> {
             })
         })
         .collect();
-    Json(json!({"plans": plans}))
+    Json(json!({"plans": plans, "billing": s.plans.billing_enabled()}))
+}
+
+/// 404 when billing is off (`NUGGET_BILLING=off`): self-hosted servers have no Stripe.
+fn billing_on(s: &AppState) -> ApiResult<()> {
+    if s.plans.billing_enabled() {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "billing_disabled",
+            "billing is off on this server",
+        ))
+    }
 }
 
 fn stripe(s: &AppState) -> ApiResult<&Arc<dyn Stripe>> {
@@ -107,6 +120,7 @@ pub(super) async fn checkout(
     h: HeaderMap,
     Json(b): Json<CheckoutBody>,
 ) -> ApiResult<Json<Value>> {
+    billing_on(&s)?;
     let c = caller(&s, &h).await?;
     if c.subscription.is_some() {
         return Err(ApiError::new(
@@ -162,6 +176,7 @@ pub(super) async fn portal(
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Json<Value>> {
+    billing_on(&s)?;
     let b: PortalBody = if body.iter().all(u8::is_ascii_whitespace) {
         PortalBody::default()
     } else {
@@ -180,6 +195,61 @@ pub(super) async fn portal(
     };
     let url = stripe(&s)?.portal(&customer, &back).await?;
     Ok(Json(json!({"url": url})))
+}
+
+#[derive(Deserialize)]
+pub(super) struct PreviewQuery {
+    plan: String,
+    interval: String,
+}
+
+/// `GET /v1/billing/preview?plan=&interval=`: what moving the live subscription to that plan
+/// and interval would invoice next, with Stripe's default `create_prorations` as of now (the
+/// `proration_date` to pass when making the change, so the charge matches the preview). Read
+/// only: nothing changes in Stripe.
+pub(super) async fn preview(
+    State(s): State<Arc<AppState>>,
+    h: HeaderMap,
+    Query(q): Query<PreviewQuery>,
+) -> ApiResult<Json<Value>> {
+    billing_on(&s)?;
+    let interval = match q.interval.as_str() {
+        "month" => Interval::Month,
+        "year" => Interval::Year,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "bad_interval",
+                "interval must be month or year",
+            ));
+        }
+    };
+    let c = caller(&s, &h).await?;
+    let Some(sub) = c.subscription.as_ref() else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "no_subscription",
+            "there is no subscription to change; start a trial instead",
+        ));
+    };
+    let price = s.plans.price_id(&q.plan, interval).ok_or_else(|| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "unknown_plan",
+            "no Stripe price for that plan and interval",
+        )
+    })?;
+    let now = time::OffsetDateTime::now_utc();
+    let date = now.unix_timestamp();
+    let p = stripe(&s)?.preview_change(&sub.id, price, date).await?;
+    Ok(Json(json!({
+        "plan": q.plan,
+        "interval": q.interval,
+        "amount_due": p.amount_due,
+        "currency": p.currency,
+        "proration_date": now.replace_nanosecond(0).unwrap_or(now)
+            .format(&time::format_description::well_known::Rfc3339).ok(),
+    })))
 }
 
 /// Where Stripe sends the browser back: hands over to the app.
@@ -212,6 +282,7 @@ pub(super) async fn stripe_webhook(
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
+    billing_on(&s)?;
     let Some(secret) = &s.stripe_webhook_secret else {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,

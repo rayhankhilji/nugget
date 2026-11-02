@@ -1,11 +1,13 @@
-export const FAQ: { q: string; a: string }[] = [
+import { appList } from "./apps";
+
+export const FAQ: { q: string; a: string; link?: { href: string; text: string } }[] = [
   {
-    q: "Is there a free plan?",
-    a: "No. Every plan starts with a 14-day free trial so you can see Heed working on your own mail and calendar. A card is required, and if you cancel before the trial ends you aren't charged. One trial per person.",
+    q: "Is Heed free?",
+    a: "The Heed app is free and open source under Apache-2.0. You run it on your Mac, bring your own AI and connect your apps yourself. Heed Cloud is the paid option: one-click connections, always-on sync, AI included and support. Both cloud plans start with a 14-day free trial; a card is needed, and you can cancel any time before you're charged. One trial per person.",
   },
   {
     q: "Does my data leave my Mac?",
-    a: "Yes, and we'd rather be upfront about it. Heed is a cloud service: the apps you connect sync to your account in our London data centre, and when you ask a question or Heed writes for you, the relevant snippets are sent to our AI provider (Anthropic, or OpenAI as a fallback) to produce the answer. Heed doesn't run its AI on your device.",
+    a: "With the free app, your synced data stays on your Mac. Your questions and the relevant snippets go only to the AI you chose, or nowhere at all if you use a local model through Ollama. With Heed Cloud, yes, and we'd rather be upfront about it: the apps you connect sync to your account in our data centre (planned for London), and the relevant snippets go to our AI provider (Anthropic, or OpenAI as a fallback) to produce each answer.",
   },
   {
     q: "Do you sell my data or use it to train AI?",
@@ -13,7 +15,11 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Which apps can I connect?",
-    a: "Gmail and Google Calendar first, with Google Drive, Notion, Linear, GitHub and more on the way. Connecting takes one click: you approve access with the app itself, and Heed never sees your password.",
+    a: `${appList()}. More coming soon. Connecting takes one click: you approve access with the app itself, and Heed never sees your password.`,
+  },
+  {
+    q: "Can I use my ChatGPT or Claude subscription?",
+    a: "With the free app, yes for ChatGPT: use OpenAI's Sign in with ChatGPT and your Plus or Pro plan covers it. For Claude, use an Anthropic API key, because Anthropic doesn't allow Pro or Max logins in third-party apps. You can also use an OpenAI or OpenRouter key, or a local model through Ollama. Heed Cloud includes its AI, so you don't need a key at all.",
   },
   {
     q: "Where does ghost text work?",
@@ -30,6 +36,11 @@ export const FAQ: { q: string; a: string }[] = [
   {
     q: "Can I use Heed on Windows or Linux?",
     a: "Not yet. Heed is macOS first (macOS 11 or later, Apple silicon and Intel). Windows and Linux are coming soon.",
+  },
+  {
+    q: "Can I self-host the cloud?",
+    a: "Yes. Heed is open core, and the cloud service is in the same repository. There's a community-supported self-hosting guide. It comes with no warranty or support from us.",
+    link: { href: "/docs/self-host", text: "Read the self-hosting guide" },
   },
   {
     q: "How do I cancel or delete my account?",

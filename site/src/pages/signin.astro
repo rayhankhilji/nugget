@@ -2,10 +2,18 @@
 import Base from "../layouts/Base.astro";
 import Panel from "../components/Panel.astro";
 import AuthForm from "../components/AuthForm.astro";
+import CloudClosed from "../components/CloudClosed.astro";
+import { cloudOpen } from "../lib/config";
 ---
 <Base title="Sign in" description="Sign in to your Heed account." minimal>
-  <Panel title="Welcome back" lede="Sign in to manage your plan, billing and devices.">
-    <AuthForm mode="signin" />
-    <p class="small">New to Heed? <a href="/signup">Start a free trial</a></p>
-  </Panel>
+  {
+    cloudOpen ? (
+      <Panel title="Welcome back" lede="Sign in to manage your plan, billing and devices.">
+        <AuthForm mode="signin" />
+        <p class="small">New to Heed? <a href="/signup">Start a free trial</a></p>
+      </Panel>
+    ) : (
+      <CloudClosed />
+    )
+  }
 </Base>

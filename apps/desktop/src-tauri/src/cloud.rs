@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use nugget_cloud_client::{
-    Action, ActionKind, ActionStatus, Answer, Api, AppInfo, AskRequest, Callback, CloudConfig,
-    CloudError, Connections, Interval, KeychainStore, Me, ModelTier, Plans, ProposeAction,
-    Provider, Session, SyncReport, SystemClock,
+    Action, ActionKind, ActionStatus, Answer, Api, AppInfo, AskRequest, BillingPreview, Callback,
+    CloudConfig, CloudError, Connections, Interval, KeychainStore, Me, ModelTier, Plans,
+    ProposeAction, Provider, Session, SyncReport, SystemClock,
 };
 use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -35,6 +35,8 @@ const MAX_ID_LEN: usize = 128;
 const MAX_IDEMPOTENCY_KEY_LEN: usize = 128;
 /// Serialized size of an action's input.
 const MAX_ACTION_INPUT_BYTES: usize = 256 * 1024;
+/// An RFC 3339 time is about 30 characters; this leaves room and stops abuse.
+const MAX_TIME_LEN: usize = 64;
 
 /// The cloud client, or why there is none (this build has no cloud configuration).
 pub enum Cloud {
@@ -358,15 +360,50 @@ fn check_action_input(input: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// An edit: a small object of fields some action kind lets the user change (the server
+/// enforces which ones apply to this action's kind).
+fn check_action_edit(input: &serde_json::Value) -> Result<()> {
+    check_action_input(input)?;
+    let fields = input.as_object().map(|o| o.keys()).into_iter().flatten();
+    for field in fields {
+        if !ActionKind::any_editable(field) {
+            return Err(CloudError::Invalid(format!("{field} can't be edited")).into());
+        }
+    }
+    Ok(())
+}
+
+/// A snooze end: an RFC 3339 time.
+fn check_snooze_until(until: &str) -> Result<()> {
+    let ok = until.len() <= MAX_TIME_LEN
+        && time::OffsetDateTime::parse(until, &time::format_description::well_known::Rfc3339)
+            .is_ok();
+    if ok {
+        Ok(())
+    } else {
+        Err(CloudError::Invalid("not a valid time".into()).into())
+    }
+}
+
+/// The user's actions, optionally of one `status`. Snoozed ones are left out unless
+/// `include_snoozed`.
 #[tauri::command]
 pub async fn cloud_actions_list(
     app: AppHandle,
     cloud: State<'_, Cloud>,
     status: Option<String>,
+    include_snoozed: Option<bool>,
 ) -> Result<Vec<Action>> {
     let status = status.as_deref().map(check_action_status).transpose()?;
     let api = cloud.api()?;
-    checked(&app, api.actions(status.map(ActionStatus::as_str)).await)
+    checked(
+        &app,
+        api.actions(
+            status.map(ActionStatus::as_str),
+            include_snoozed.unwrap_or(false),
+        )
+        .await,
+    )
 }
 
 /// Propose a write to a connected app. Nothing is sent until it is approved
@@ -435,6 +472,38 @@ pub async fn cloud_action_approve(
     checked(&app, api.approve_action(&id, &digest).await)
 }
 
+/// Edit a pending action before approving it: `input` holds only the fields to change. The
+/// result has a new `digest`; approve with that one.
+#[tauri::command]
+pub async fn cloud_action_update(
+    app: AppHandle,
+    cloud: State<'_, Cloud>,
+    id: String,
+    input: serde_json::Value,
+) -> Result<Action> {
+    check_action_id(&id)?;
+    check_action_edit(&input)?;
+    let api = cloud.api()?;
+    checked(&app, api.update_action(&id, &input).await)
+}
+
+/// Hide a pending action from the list until `until` (RFC 3339, capped by the server at the
+/// action's expiry); `None` brings it back now.
+#[tauri::command]
+pub async fn cloud_action_snooze(
+    app: AppHandle,
+    cloud: State<'_, Cloud>,
+    id: String,
+    until: Option<String>,
+) -> Result<Action> {
+    check_action_id(&id)?;
+    if let Some(u) = &until {
+        check_snooze_until(u)?;
+    }
+    let api = cloud.api()?;
+    checked(&app, api.snooze_action(&id, until.as_deref()).await)
+}
+
 #[tauri::command]
 pub async fn cloud_action_cancel(
     app: AppHandle,
@@ -472,6 +541,20 @@ pub async fn cloud_billing_checkout(
     let api = cloud.api()?;
     let link = checked(&app, api.checkout(&plan, interval).await)?;
     open_web(link.url).await
+}
+
+/// What switching to `plan` (`month` or `year`) would charge now, prorated. Needs a
+/// subscription (`no_subscription` otherwise).
+#[tauri::command]
+pub async fn cloud_billing_preview(
+    app: AppHandle,
+    cloud: State<'_, Cloud>,
+    plan: String,
+    interval: String,
+) -> Result<BillingPreview> {
+    let interval = Interval::parse(&interval)?;
+    let api = cloud.api()?;
+    checked(&app, api.billing_preview(&plan, interval).await)
 }
 
 /// Opens the Stripe customer portal (card, invoices, plan changes, cancel) in the browser.
@@ -674,5 +757,60 @@ mod tests {
         }
         let big = json!({ "body": "x".repeat(MAX_ACTION_INPUT_BYTES) });
         assert!(check_action_input(&big).is_err());
+    }
+
+    #[test]
+    fn action_edits_are_small_objects_of_editable_fields() {
+        use serde_json::json;
+        for ok in [
+            json!({}),
+            json!({ "subject": "s", "cc": ["a@b.c"] }),
+            json!({ "text": "hi" }),
+            json!({ "title": "t", "markdown": "# m" }),
+            json!({ "start": "2026-11-02T10:00:00Z", "attendees": [], "timezone": "Europe/London" }),
+        ] {
+            assert!(check_action_edit(&ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            json!(null),
+            json!([]),
+            json!({ "event_id": "e1" }),
+            json!({ "channel": "C1" }),
+            json!({ "parent_id": "p" }),
+            json!({ "thread_id": "t", "body": "b" }),
+            json!({ "body": "x".repeat(MAX_ACTION_INPUT_BYTES) }),
+        ] {
+            assert!(check_action_edit(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn snooze_times_are_rfc3339() {
+        for ok in [
+            "2026-11-02T10:10:00Z",
+            "2026-11-02T10:10:00.123+01:00",
+            "2026-11-02t10:10:00z",
+        ] {
+            assert!(check_snooze_until(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "",
+            "tomorrow",
+            "2026-11-02",
+            "2026-11-02 10:10",
+            "2026-13-02T10:10:00Z",
+            &format!("2026-11-02T10:10:00.{}Z", "1".repeat(60)),
+        ] {
+            assert!(check_snooze_until(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn billing_intervals_are_month_or_year() {
+        assert_eq!(Interval::parse("month").unwrap(), Interval::Month);
+        assert_eq!(Interval::parse("year").unwrap(), Interval::Year);
+        for bad in ["", "Month", "annual", "week"] {
+            assert!(Interval::parse(bad).is_err(), "{bad}");
+        }
     }
 }

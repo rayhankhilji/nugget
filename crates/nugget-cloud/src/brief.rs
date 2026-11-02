@@ -186,6 +186,7 @@ pub async fn generate(
                                 t.format(&time::format_description::well_known::Rfc3339)
                                     .ok()
                             }),
+                            author: crate::authors::display_name(m.author.as_deref()),
                             snippet: e.text.clone(),
                         })
                     })

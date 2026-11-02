@@ -52,6 +52,10 @@ pub struct FakeComposio {
     pub fail: Mutex<HashMap<String, String>>,
     /// Delay per tool call (slow-backfill tests).
     pub delay_ms: std::sync::atomic::AtomicU64,
+    /// When set, tool calls wait here until the test adds a permit (deterministic "slow" calls).
+    pub gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// Tool calls that have started (including those waiting at the gate).
+    pub entered: std::sync::atomic::AtomicUsize,
 }
 
 /// A recorded response for `tool`, used when the call's arguments contain `when` (every key
@@ -170,6 +174,13 @@ impl Composio for FakeComposio {
         tool: &str,
         args: Value,
     ) -> Result<Value, ComposioError> {
+        self.entered
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let gate = self.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            // Returned right away: once the test opens the gate, every call passes.
+            drop(gate.acquire().await);
+        }
         let delay = self.delay_ms.load(std::sync::atomic::Ordering::SeqCst);
         if delay > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
@@ -265,15 +276,86 @@ impl Embedder for FakeEmbedder {
     }
 }
 
-/// A superuser connection to a test database.
-pub type Pg = Arc<tokio_postgres::Client>;
+/// A superuser connection to one test's database. When the last clone is dropped (the test ended,
+/// passed or panicked), the database is dropped too, so test runs leave nothing behind.
+pub type Pg = Arc<TestDb>;
 
-async fn pg(url: &str) -> Pg {
-    let (client, conn) = tokio_postgres::connect(url, tokio_postgres::NoTls)
+pub struct TestDb {
+    client: tokio_postgres::Client,
+    /// The cluster's admin URL and this database's name, for the drop.
+    admin_url: String,
+    name: String,
+}
+
+impl TestDb {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl std::ops::Deref for TestDb {
+    type Target = tokio_postgres::Client;
+    fn deref(&self) -> &tokio_postgres::Client {
+        &self.client
+    }
+}
+
+impl Drop for TestDb {
+    fn drop(&mut self) {
+        // Drop runs inside the test's runtime (or while unwinding from a panic), where blocking on
+        // async work is not allowed: do it on a plain thread with its own small runtime, and wait,
+        // so the database is gone before the next test starts. FORCE ends the pool's connections.
+        let (url, name) = (self.admin_url.clone(), self.name.clone());
+        let done = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            rt.block_on(async {
+                let (admin, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+                    .await
+                    .ok()?;
+                tokio::spawn(conn);
+                admin
+                    .batch_execute(&format!("drop database if exists {name} with (force)"))
+                    .await
+                    .ok()
+            })
+        })
+        .join();
+        if !matches!(done, Ok(Some(()))) {
+            eprintln!(
+                "testkit: could not drop {}; the next run's sweep will",
+                self.name
+            );
+        }
+    }
+}
+
+/// Test databases are named `nugget_t_<uuid>`. `_` is a LIKE wildcard, hence the escapes: the
+/// pattern must not match the RLS suite's `nugget_test`.
+const TEST_DB_LIKE: &str = r"nugget\_t\_%";
+
+/// Drops test databases left by crashed or killed runs: those created over an hour ago (the
+/// age of their `PG_VERSION` file), so concurrent runs keep theirs.
+async fn sweep_stale(admin: &tokio_postgres::Client) {
+    let stale = admin
+        .query(
+            "select datname from pg_database
+             where datname like $1
+               and (pg_stat_file('base/' || oid || '/PG_VERSION')).modification < now() - interval '1 hour'",
+            &[&TEST_DB_LIKE],
+        )
         .await
-        .expect("connect");
-    tokio::spawn(conn);
-    Arc::new(client)
+        .unwrap_or_default();
+    for row in stale {
+        let name: String = row.get(0);
+        if name.starts_with("nugget_t_") && name[9..].chars().all(|c| c.is_ascii_hexdigit()) {
+            let _ = admin
+                .batch_execute(&format!("drop database if exists {name} with (force)"))
+                .await;
+        }
+    }
 }
 
 /// A fresh database with the shim and migrations, or None (test skipped) when
@@ -283,14 +365,21 @@ pub async fn test_db() -> Option<(Db, Pg)> {
         eprintln!("skipping: NUGGET_TEST_DATABASE_URL is not set");
         return None;
     };
-    static SETUP: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    static SETUP: OnceLock<tokio::sync::Mutex<bool>> = OnceLock::new();
     // Roles are cluster-wide; serialise setup so concurrent CREATE ROLEs don't race.
-    let _guard = SETUP
-        .get_or_init(|| tokio::sync::Mutex::new(()))
+    let mut swept = SETUP
+        .get_or_init(|| tokio::sync::Mutex::new(false))
         .lock()
         .await;
     let mut cfg: tokio_postgres::Config = url.parse().expect("database url");
-    let admin = pg(&url).await;
+    let (admin, admin_conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+        .await
+        .expect("connect");
+    tokio::spawn(admin_conn);
+    if !*swept {
+        sweep_stale(&admin).await;
+        *swept = true;
+    }
     let name = format!("nugget_t_{}", Uuid::new_v4().simple());
     admin
         .batch_execute(&format!("create database {name}"))
@@ -302,7 +391,12 @@ pub async fn test_db() -> Option<(Db, Pg)> {
         .await
         .expect("connect test db");
     tokio::spawn(conn);
-    let client = Arc::new(client);
+    // From here on the guard owns the database: a failed migration still drops it.
+    let client = Arc::new(TestDb {
+        client,
+        admin_url: url.clone(),
+        name: name.clone(),
+    });
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../supabase");
     let mut files = vec![root.join("tests/supabase_shim.sql")];
     let mut migrations: Vec<_> = std::fs::read_dir(root.join("migrations"))
@@ -361,6 +455,22 @@ pub async fn add_user(pool: &Pg) -> Uuid {
     id
 }
 
+/// Polls `check` every 20 ms until it holds, failing after `secs` (generous, for loaded CI).
+pub async fn wait_until<F, Fut>(what: &str, secs: u64, mut check: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
+    while !check().await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out after {secs}s waiting for: {what}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
 pub fn fakes() -> (Arc<FakeAuth>, Arc<FakeComposio>, Arc<FakeLlm>) {
     (
         Arc::new(FakeAuth {
@@ -383,6 +493,8 @@ pub struct FakeStripe {
     pub fetches: Mutex<u32>,
     pub deleted_customers: Mutex<Vec<String>>,
     pub fail_delete: std::sync::atomic::AtomicBool,
+    /// (subscription, price, proration_date) of every preview.
+    pub previews: Mutex<Vec<(String, String, i64)>>,
 }
 
 #[async_trait]
@@ -434,6 +546,32 @@ impl crate::stripe::Stripe for FakeStripe {
         self.deleted_customers.lock().unwrap().push(id.into());
         Ok(())
     }
+    async fn preview_change(
+        &self,
+        subscription: &str,
+        price: &str,
+        proration_date: i64,
+    ) -> Result<crate::stripe::InvoicePreview, crate::stripe::StripeError> {
+        self.previews
+            .lock()
+            .unwrap()
+            .push((subscription.into(), price.into(), proration_date));
+        // A fixed proration: £12.34 to move to a different price, nothing for the same one.
+        let current = self
+            .subs
+            .lock()
+            .unwrap()
+            .get(subscription)
+            .map(|s| s.price_id.clone());
+        Ok(crate::stripe::InvoicePreview {
+            amount_due: if current.as_deref() == Some(price) {
+                0
+            } else {
+                1234
+            },
+            currency: "gbp".into(),
+        })
+    }
 }
 
 /// Test price ids for the default plans.
@@ -458,4 +596,51 @@ pub async fn subscriber(pool: &Pg, plan: &str) -> Uuid {
     .await
     .unwrap();
     id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn exists(name: &str) -> bool {
+        let url = std::env::var("NUGGET_TEST_DATABASE_URL").unwrap();
+        let (admin, conn) = tokio_postgres::connect(&url, tokio_postgres::NoTls)
+            .await
+            .unwrap();
+        tokio::spawn(conn);
+        admin
+            .query_one(
+                "select exists(select 1 from pg_database where datname = $1)",
+                &[&name],
+            )
+            .await
+            .unwrap()
+            .get(0)
+    }
+
+    #[tokio::test]
+    async fn test_databases_are_dropped_even_when_the_test_panics() {
+        let Some((db, pool)) = test_db().await else {
+            return;
+        };
+        let name = pool.name().to_owned();
+        assert!(exists(&name).await);
+        // A "test" that panics while holding the database (and a pool connection to it).
+        let task = tokio::spawn(async move {
+            let _db = db;
+            let _pool = pool;
+            panic!("simulated test failure");
+        });
+        assert!(task.await.unwrap_err().is_panic());
+        assert!(!exists(&name).await, "{name} was left behind");
+    }
+
+    #[test]
+    fn sweep_pattern_spares_the_rls_suite() {
+        // The RLS suite's database must not look like a test database.
+        let like = |s: &str| s.starts_with("nugget_t_");
+        assert!(like("nugget_t_0123abcd"));
+        assert!(!like("nugget_test"));
+        assert_eq!(TEST_DB_LIKE, r"nugget\_t\_%");
+    }
 }

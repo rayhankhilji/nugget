@@ -1,115 +1,59 @@
-/* Heed design tokens and base styles.
-   Brand: Graphite #16171B, Chalk #F7F7F5, Coral #FF5A3C (the one accent), Mist #9AA3AE. */
-
-@font-face {
-  font-family: "Geist";
-  src: url("/fonts/geist.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist Mono";
-  src: url("/fonts/geist-mono.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* Heed site styles, v4.
+   Colour, type, space, depth and motion come from the shared brand tokens (styles/heed/tokens.css,
+   copied verbatim from DS1's apps/desktop/src/brand/tokens.css). This file maps them to the names the
+   site's components use, and adds layout. Don't put brand values here: change tokens.css upstream. */
 
 :root {
-  --graphite: #16171b;
-  --chalk: #f7f7f5;
-  --coral: #ff5a3c;
-  --mist: #9aa3ae;
+  --bg: var(--heed-canvas);
+  --bg-2: color-mix(in srgb, var(--heed-canvas) 94%, var(--heed-ink));
+  --surface: var(--heed-surface);
+  --surface-2: var(--heed-surface-2);
+  --line: var(--heed-line);
+  --line-2: var(--heed-line-strong);
+  --text: var(--heed-ink);
+  --text-2: var(--heed-ink-2);
+  --text-3: var(--heed-ink-quiet); /* quiet text: AA on canvas and surfaces */
+  --ink-3: var(--heed-ink-3); /* icons, rules and disabled states only */
+  --ghost: var(--heed-ink-quiet); /* lighter than typed text, but still AA */
+  --brand: var(--heed-signal);
+  --accent: var(--heed-signal-fill);
+  --accent-strong: var(--heed-signal-hover);
+  --accent-ink: var(--heed-signal-ink);
+  --accent-soft: var(--heed-signal-wash);
+  --on-accent: var(--heed-on-signal);
+  --band: var(--heed-signal-fill);
+  --on-band: var(--heed-on-signal);
+  --ok: var(--heed-ok-ink);
+  --warn: var(--heed-warn); /* fills only */
+  --danger: var(--heed-danger-ink);
+  --mark-tile: var(--heed-signal);
+  --grid: color-mix(in srgb, var(--heed-ink) 6%, transparent);
+  --shadow-1: 0 0 0 1px var(--heed-line), var(--heed-shadow-1);
+  --shadow-2: 0 0 0 1px var(--heed-line), var(--heed-shadow-2);
+  --shadow-3: 0 0 0 1px var(--heed-line), var(--heed-shadow-3);
+  --hi: inset 0 1px 0 color-mix(in srgb, var(--heed-surface) 60%, transparent);
 
-  /* Light theme (Chalk canvas). */
-  color-scheme: light;
-  --bg: var(--chalk);
-  --bg-2: #efefec;
-  --surface: #ffffff;
-  --surface-2: #f2f2ef;
-  --line: rgb(22 23 27 / 0.09);
-  --line-2: rgb(22 23 27 / 0.16);
-  --text: var(--graphite);
-  --text-2: #4f5661; /* Mist, deepened for AA contrast on Chalk */
-  --text-3: #5d646e;
-  --ghost: rgb(22 23 27 / 0.38);
-  /* Same two tokens as the app (apps/desktop/src/tokens.css): --brand is the signal coral for the
-     mark, dots and ghost-text shimmer; --accent is for actions, deeper in light mode so white text
-     on it stays AA. */
-  --brand: var(--coral);
-  --accent: #bc3416;
-  --accent-strong: #9e2a10;
-  --accent-ink: #bc3416;
-  --accent-soft: rgb(255 90 60 / 0.1);
-  --on-accent: #ffffff;
-  --mark-tile: #16171b;
-  --shadow-1: 0 0 0 0.5px rgb(22 23 27 / 0.1), 0 1px 2px rgb(22 23 27 / 0.06);
-  --shadow-2: 0 0 0 0.5px rgb(22 23 27 / 0.08), 0 8px 24px -8px rgb(22 23 27 / 0.14), 0 2px 6px rgb(22 23 27 / 0.05);
-  --shadow-3: 0 0 0 0.5px rgb(22 23 27 / 0.08), 0 30px 80px -20px rgb(22 23 27 / 0.28), 0 10px 24px -12px rgb(22 23 27 / 0.12);
-  --hi: inset 0 1px 0 rgb(255 255 255 / 0.7);
-  --grid: rgb(22 23 27 / 0.045);
-
-  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --r-1: 6px;
-  --r-2: 10px;
-  --r-3: 14px;
-  --r-4: 20px;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --wrap: 1120px;
+  --display: var(--heed-font-display);
+  --font: var(--heed-font-ui);
+  --mono: var(--heed-font-mono);
+  --r-1: var(--heed-radius-s);
+  --r-2: var(--heed-radius-m);
+  --r-3: var(--heed-radius-m);
+  --r-4: var(--heed-radius-l);
+  --ease: var(--heed-ease-enter);
+  --t-ui: var(--heed-dur-ui);
+  --t-brand: var(--heed-dur-brand);
+  --wrap: 1160px;
   --gutter: clamp(16px, 4vw, 32px);
+  color-scheme: light;
 }
-
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: var(--graphite);
-    --bg-2: #1b1c21;
-    --surface: #1e1f24;
-    --surface-2: #25272d;
-    --line: rgb(247 247 245 / 0.07);
-    --line-2: rgb(247 247 245 / 0.13);
-    --mark-tile: #2c2d34;
-    --text: var(--chalk);
-    --text-2: var(--mist);
-    --text-3: #8a929c;
-    --ghost: rgb(247 247 245 / 0.36);
-    --accent: var(--coral);
-    --accent-strong: #ff7b62;
-    --accent-ink: var(--coral);
-    --accent-soft: rgb(255 90 60 / 0.13);
-    --on-accent: var(--graphite);
-    --shadow-1: 0 0 0 0.5px rgb(247 247 245 / 0.09), 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow-2: 0 0 0 0.5px rgb(247 247 245 / 0.08), 0 12px 32px -10px rgb(0 0 0 / 0.6);
-    --shadow-3: 0 0 0 0.5px rgb(247 247 245 / 0.1), 0 40px 100px -24px rgb(0 0 0 / 0.75), 0 12px 30px -14px rgb(0 0 0 / 0.5);
-    --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
-    --grid: rgb(247 247 245 / 0.035);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: var(--graphite);
-  --bg-2: #1b1c21;
-  --surface: #1e1f24;
-  --surface-2: #25272d;
-  --line: rgb(247 247 245 / 0.07);
-  --line-2: rgb(247 247 245 / 0.13);
-  --mark-tile: #2c2d34;
-  --text: var(--chalk);
-  --text-2: var(--mist);
-  --text-3: #8a929c;
-  --ghost: rgb(247 247 245 / 0.36);
-  --accent: var(--coral);
-  --accent-strong: #ff7b62;
-  --accent-ink: var(--coral);
-  --accent-soft: rgb(255 90 60 / 0.13);
-  --on-accent: var(--graphite);
-  --shadow-1: 0 0 0 0.5px rgb(247 247 245 / 0.09), 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-2: 0 0 0 0.5px rgb(247 247 245 / 0.08), 0 12px 32px -10px rgb(0 0 0 / 0.6);
-  --shadow-3: 0 0 0 0.5px rgb(247 247 245 / 0.1), 0 40px 100px -24px rgb(0 0 0 / 0.75), 0 12px 30px -14px rgb(0 0 0 / 0.5);
-  --hi: inset 0 1px 0 rgb(255 255 255 / 0.06);
-  --grid: rgb(247 247 245 / 0.035);
 }
 
 *,
@@ -129,7 +73,7 @@ body {
   font-family: var(--font);
   font-size: 16px;
   line-height: 1.55;
-  font-feature-settings: "ss01", "cv11";
+  font-feature-settings: "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -154,9 +98,20 @@ h3,
 h4 {
   margin: 0;
   font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.1;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
   text-wrap: balance;
+}
+/* Display type: Fraunces with its soft, wonky cut. Headlines, heroes and big prices only. */
+h1,
+h2,
+.display {
+  font-family: var(--display);
+  font-weight: var(--heed-display-weight);
+  font-variation-settings: var(--heed-display-settings);
+  letter-spacing: var(--heed-display-tracking);
+  word-spacing: 0.05em;
+  line-height: 1.04;
 }
 p {
   margin: 0;
@@ -165,10 +120,14 @@ p {
 ::selection {
   background: rgb(255 90 60 / 0.28);
 }
+/* Focus: a 2px ring in --focus (ink on cream, cream on dark and on the blue hero), offset so it shows
+   on any fill, including filled buttons. */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline: 2px solid var(--focus, var(--text));
+  outline-offset: 3px;
+}
+.btn:focus-visible {
+  outline-offset: 3px;
 }
 
 .wrap {
@@ -233,10 +192,10 @@ p {
   gap: 8px;
   height: var(--h);
   padding: 0 16px;
-  border-radius: 9px;
+  border-radius: 999px;
   border: 0;
   font-size: 15px;
-  font-weight: 550;
+  font-weight: 520;
   letter-spacing: -0.01em;
   text-decoration: none;
   white-space: nowrap;
@@ -260,9 +219,9 @@ p {
   background: var(--accent);
   color: var(--on-accent);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.28),
-    0 0 0 0.5px rgb(0 0 0 / 0.15),
-    0 6px 20px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+    inset 0 1px 0 rgb(255 255 255 / 0.22),
+    0 1px 2px rgb(7 7 152 / 0.2),
+    0 8px 20px -10px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 .btn-primary:hover {
   background: var(--accent-strong);
@@ -364,7 +323,7 @@ kbd,
   margin-bottom: clamp(36px, 5vw, 56px);
 }
 .section-head h2 {
-  font-size: clamp(30px, 4.4vw, 48px);
+  font-size: clamp(36px, 5.2vw, 64px);
 }
 .section-head p {
   color: var(--text-2);
@@ -383,7 +342,7 @@ kbd,
 }
 .prose h2 {
   margin: 48px 0 12px;
-  font-size: 22px;
+  font-size: 28px;
   letter-spacing: -0.015em;
 }
 .prose h3 {
@@ -430,6 +389,37 @@ kbd,
   color: var(--text-2);
 }
 
+/* Enter motion: cards rise 8px and fade in when they scroll into view (see Reveal.astro).
+   Under reduced motion they only fade. */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--t-brand) var(--ease),
+    transform var(--t-brand) var(--ease);
+  transition-delay: calc(var(--i, 0) * var(--stagger, 30ms));
+}
+[data-reveal].in {
+  opacity: 1;
+  transform: none;
+}
+html:not(.js) [data-reveal] {
+  opacity: 1;
+  transform: none;
+}
+
+/* Dot-grid texture */
+.dots {
+  background-image: radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 1.5px);
+  background-size: 16px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    transform: none;
+    transition: opacity 400ms linear;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -439,7 +429,7 @@ kbd,
   *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -460,8 +450,11 @@ kbd,
     font-size: 16px;
     transition: box-shadow 0.15s;
   }
+  .input:focus-visible {
+    outline: 2px solid var(--focus, var(--text));
+    outline-offset: 2px;
+  }
   .input:focus {
-    outline: none;
     box-shadow:
       0 0 0 1px var(--accent),
       0 0 0 4px var(--accent-soft);
@@ -505,3 +498,23 @@ kbd,
     color: var(--text);
     text-underline-offset: 3px;
   }
+
+.section-head.center {
+  margin-inline: auto;
+  text-align: center;
+  justify-items: center;
+}
+.section-head p.eyebrow {
+  font-size: 12px;
+}
+
+/* Lazy background art: [data-bg] elements set --bg-img; it's applied once they're near the viewport
+   (Base.astro adds .near), or straight away without JS. CSS backgrounds otherwise all load eagerly. */
+html [data-bg].near,
+html:not(.js) [data-bg] {
+  background-image: var(--bg-img); /* outranks component background shorthands */
+}
+
+main:focus {
+  outline: none; /* focused only as the skip link's target */
+}

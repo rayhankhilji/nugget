@@ -1,0 +1,126 @@
+# Heed Cloud, self-hosted. Community-supported: no warranty or support from Heed.
+# Guide: docs/book/src/guide/self-host.md. Copy .env.example to .env and fill it in first.
+#
+#   db       Postgres 16 + pgvector (your data)
+#   auth     GoTrue, Supabase's open-source auth server (magic link, Google)
+#   migrate  one-shot: applies supabase/migrations, then exits
+#   cloud    nugget-cloud, the Heed API and sync loop
+#   gateway  Caddy: /auth/v1/* -> auth, everything else -> cloud; TLS for a real domain
+#   mail     Mailpit, a local mail catcher for testing (profile "dev"; use real SMTP otherwise)
+
+name: heed
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?set AUTH_DB_PASSWORD in .env}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/00-roles.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  auth:
+    image: supabase/gotrue:v2.180.0
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: ${PUBLIC_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${AUTH_DB_PASSWORD}@db:5432/postgres?sslmode=disable
+      GOTRUE_DB_NAMESPACE: auth
+      GOTRUE_SITE_URL: ${PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: ${APP_REDIRECTS:-nugget://auth/callback,heed://auth/callback}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:?run ./gen-keys.sh}
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "false"
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-mail}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-1025}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_SENDER:-heed@localhost}
+      GOTRUE_SMTP_SENDER_NAME: Heed
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/auth/v1/callback
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9999/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  migrate:
+    image: pgvector/pgvector:pg16
+    depends_on:
+      auth: { condition: service_healthy }
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      SERVICE_DB_PASSWORD: ${SERVICE_DB_PASSWORD:?set SERVICE_DB_PASSWORD in .env}
+    volumes:
+      - ../supabase/migrations:/migrations:ro
+      - ./db/migrate.sh:/migrate.sh:ro
+    entrypoint: ["bash", "/migrate.sh"]
+    restart: "no"
+
+  cloud:
+    image: ${HEED_CLOUD_IMAGE:-heed-cloud:local}
+    build:
+      context: ..
+      dockerfile: crates/nugget-cloud/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://nugget_service:${SERVICE_DB_PASSWORD}@db:5432/postgres?sslmode=disable
+      # The server checks tokens and deletes accounts through the gateway, like a client would.
+      SUPABASE_URL: http://gateway:8001
+      NUGGET_CLOUD_BIND: 0.0.0.0:8080
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+  gateway:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on: [auth, cloud]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:8000}
+    ports:
+      - "${PUBLIC_PORT:-8000}:8000"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+  mail:
+    image: axllent/mailpit:v1.27
+    profiles: ["dev"]
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1:8025:8025"
+
+volumes:
+  db-data:
+  caddy-data:

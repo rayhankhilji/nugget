@@ -58,6 +58,8 @@ export interface CloudCitation {
   url: string | null;
   occurred_at: string | null;
   snippet: string;
+  /** The sender or author's display name (null when unknown or from an older server). */
+  author: string | null;
 }
 
 export interface CloudAnswer {
@@ -109,6 +111,8 @@ export interface CloudMe {
   email: string | null;
   plan: string | null;
   embeddings: boolean;
+  /** False on a self-hosted server with billing off (everyone is entitled). */
+  billing?: boolean;
   subscription: CloudSubscription | null;
   entitlements: CloudEntitlements | null;
   usage: { month_cost_micros: number; smart_asks_used: number };
@@ -121,6 +125,18 @@ export interface CloudPlan {
   annual_gbp: number;
   trial_days: number;
   entitlements: CloudEntitlements;
+}
+
+/** What switching to a plan would charge now, prorated (`cloud_billing_preview`). */
+export interface CloudBillingPreview {
+  plan: string;
+  interval: BillingInterval;
+  /** In the currency's minor units (pence for `gbp`); negative is a credit. */
+  amount_due: number;
+  /** Lowercase ISO code, e.g. `gbp`. */
+  currency: string;
+  /** RFC 3339. */
+  proration_date: string;
 }
 
 export interface CloudSearchRequest {
@@ -281,6 +297,12 @@ export interface CloudAction {
   executed_at: string | null;
   result: unknown;
   error: string | null;
+  /** RFC 3339: hidden from {@link cloudApi.actions} until then unless `includeSnoozed`. */
+  snoozed_until: string | null;
+  /** 1, plus one per edit (0 from an older server). */
+  revision: number;
+  /** The input fields {@link cloudApi.updateAction} may change for this kind. */
+  editable: string[];
 }
 
 export interface ProposeCloudAction {
@@ -369,6 +391,9 @@ export const cloudApi = {
   plans: () => call<{ plans: CloudPlan[] }>("cloud_billing_plans"),
   /** Opens Stripe Checkout in the browser; it comes back with {@link CLOUD_BILLING_EVENT}. */
   checkout: (plan: string, interval: BillingInterval) => call<void>("cloud_billing_checkout", { plan, interval }),
+  /** What switching to `plan` would charge now; needs a subscription (`no_subscription`). */
+  billingPreview: (plan: string, interval: BillingInterval) =>
+    call<CloudBillingPreview>("cloud_billing_preview", { plan, interval }),
   /** Opens the Stripe customer portal in the browser. */
   portal: () => call<void>("cloud_billing_portal"),
   /** Deletes the account and all its cloud data, then signs this computer out. Not undoable. */
@@ -391,14 +416,23 @@ export const cloudApi = {
   /** Today's brief from 07:00 local (generated once), else the latest earlier one, else null. */
   brief: () => call<CloudBrief | null>("cloud_brief", { tz: deviceTimeZone() }),
   apps: () => call<CloudAppInfo[]>("cloud_apps"),
-  actions: (status?: CloudActionStatus) =>
-    call<CloudAction[]>("cloud_actions_list", status ? { status } : {}),
+  /** Snoozed actions are left out unless `includeSnoozed`. */
+  actions: (status?: CloudActionStatus, opts?: { includeSnoozed?: boolean }) =>
+    call<CloudAction[]>("cloud_actions_list", {
+      ...(status ? { status } : {}),
+      ...(opts?.includeSnoozed ? { includeSnoozed: true } : {}),
+    }),
   proposeAction: ({ kind, toolkit, input, idempotencyKey }: ProposeCloudAction) =>
     call<CloudAction>("cloud_action_propose", { kind, toolkit, input, idempotencyKey }),
   /** A dry run: what the action would send, with no side effects. */
   actionPreview: (id: string) => call<CloudAction>("cloud_action_preview", { id }),
   actionStatus: (id: string) => call<CloudAction>("cloud_action_status", { id }),
   approveAction: (id: string, digest: string) => call<CloudAction>("cloud_action_approve", { id, digest }),
+  /** Edits a pending action: `input` holds only fields in its `editable` list. The result has a new
+   * `digest`; approve with that one (the old one gets `digest_mismatch`). */
+  updateAction: (id: string, input: Record<string, unknown>) => call<CloudAction>("cloud_action_update", { id, input }),
+  /** Hides the action until `until` (RFC 3339, capped at its expiry); `null` brings it back. */
+  snoozeAction: (id: string, until: string | null) => call<CloudAction>("cloud_action_snooze", { id, until }),
   cancelAction: (id: string) => call<CloudAction>("cloud_action_cancel", { id }),
   /** Malformed payloads are dropped. */
   onSession: (h: (e: CloudSessionEvent) => void) =>

@@ -2351,6 +2351,7 @@
   "cloud.ask.untitled": "बिना शीर्षक",
   "cloud.ask.open": "खोलें",
   "cloud.ask.openLabel": "{title} खोलें",
+  "cloud.billing.selfHosted": "यह सर्वर स्व-होस्टेड है और बिलिंग बंद है। आपके खाते पर {plan} की सीमाएँ लागू हैं।",
   "cloud.billing.title": "प्लान और बिलिंग",
   "cloud.billing.choose": "Heed एक सशुल्क सेवा है। अपना मुफ़्त ट्रायल शुरू करने के लिए एक प्लान चुनें।",
   "cloud.billing.prices": "{monthly} प्रति माह या {annual} प्रति वर्ष",

@@ -50,7 +50,7 @@ const billing = { cloud_me: trialing, cloud_billing_plans: plans };
 const answer: CloudAnswer = {
   conversation_id: "c1",
   answer: "Your flight is on Tuesday [1]. Not a cite [9].",
-  citations: [{ n: 1, item_id: "i1", title: "Booking confirmed", source: "gmail", url: "https://mail.example/i1", occurred_at: "2026-10-30T09:00:00Z", snippet: "Flight BA1 departs" }],
+  citations: [{ n: 1, item_id: "i1", title: "Booking confirmed", source: "gmail", url: "https://mail.example/i1", occurred_at: "2026-10-30T09:00:00Z", snippet: "Flight BA1 departs", author: null }],
   usage: { input_tokens: 10, output_tokens: 5 },
 };
 
@@ -350,6 +350,18 @@ describe("CloudPage background import", () => {
     expect(row().textContent).not.toContain("Importing…");
     expect(polls).toBeGreaterThanOrEqual(3);
   }, 10_000);
+});
+
+describe("CloudPage self-hosted", () => {
+  it("shows no plans or billing buttons when the server has billing off", async () => {
+    const selfHosted: CloudMe = { ...trialing, billing: false, subscription: { ...trialing.subscription!, status: "active" } };
+    mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: selfHosted, cloud_billing_plans: plans });
+    const { container } = await render(<AccountPage />);
+    const section = container.querySelector('section[aria-labelledby="cloud-billing"]')!;
+    expect(section.textContent).toContain("self-hosted with billing off");
+    expect(byText(section as HTMLElement, "button", "Manage billing")).toBeUndefined();
+    expect(section.textContent).not.toContain("£39");
+  });
 });
 
 describe("cloudApi", () => {

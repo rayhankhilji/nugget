@@ -6,6 +6,7 @@ import {
   deviceTimeZone,
   type CloudAction,
   type CloudAppInfo,
+  type CloudBillingPreview,
   type CloudBrief,
   type CloudSearchResponse,
 } from "./cloud";
@@ -31,6 +32,9 @@ const action: CloudAction = {
   executed_at: null,
   result: null,
   error: null,
+  snoozed_until: null,
+  revision: 1,
+  editable: ["to", "cc", "bcc", "subject", "body"],
 };
 
 const gmail: CloudAppInfo = {
@@ -95,6 +99,32 @@ describe("cloudApi actions", () => {
     ]);
   });
 
+  it("edits, snoozes and lists snoozed actions", async () => {
+    const edited = { ...action, digest: "cd".repeat(32), revision: 2 };
+    const snoozed = { ...action, snoozed_until: "2026-11-02T10:10:00Z" };
+    const calls = record({
+      cloud_actions_list: [snoozed],
+      cloud_action_update: edited,
+      cloud_action_snooze: snoozed,
+    });
+    const e = await cloudApi.updateAction("a1", { subject: "Lunch?" });
+    expect([e.revision, e.digest]).toEqual([2, "cd".repeat(32)]);
+    expect((await cloudApi.snoozeAction("a1", "2026-11-02T10:10:00Z")).snoozed_until).toBe("2026-11-02T10:10:00Z");
+    await cloudApi.snoozeAction("a1", null);
+    expect(await cloudApi.actions("pending", { includeSnoozed: true })).toEqual([snoozed]);
+    await cloudApi.actions(undefined, { includeSnoozed: true });
+    await cloudApi.actions("pending", { includeSnoozed: false });
+
+    expect(calls).toEqual([
+      ["cloud_action_update", { id: "a1", input: { subject: "Lunch?" } }],
+      ["cloud_action_snooze", { id: "a1", until: "2026-11-02T10:10:00Z" }],
+      ["cloud_action_snooze", { id: "a1", until: null }],
+      ["cloud_actions_list", { status: "pending", includeSnoozed: true }],
+      ["cloud_actions_list", { includeSnoozed: true }],
+      ["cloud_actions_list", { status: "pending" }],
+    ]);
+  });
+
   it("surfaces the cloud's error code", async () => {
     mockDaemon({
       cloud_action_approve: () => {
@@ -150,5 +180,30 @@ describe("cloud search, cards and brief wrappers", () => {
     expect(seen.action).toEqual({ id: "abc", action: "snooze", until: "2026-11-04T09:00:00Z" });
     expect((await cloudApi.brief())?.prose).toContain("[1]");
     expect(seen.brief).toEqual({ tz });
+  });
+});
+
+describe("cloud billing preview", () => {
+  it("sends the plan and interval and returns the proration", async () => {
+    const preview: CloudBillingPreview = {
+      plan: "heed_max",
+      interval: "year",
+      amount_due: 95100,
+      currency: "gbp",
+      proration_date: "2026-11-02T10:00:00Z",
+    };
+    const calls = record({ cloud_billing_preview: preview });
+    expect(await cloudApi.billingPreview("heed_max", "year")).toEqual(preview);
+    expect(calls).toEqual([["cloud_billing_preview", { plan: "heed_max", interval: "year" }]]);
+  });
+
+  it("surfaces no_subscription", async () => {
+    mockDaemon({
+      cloud_billing_preview: () => {
+        throw { kind: "rpc", message: "Subscribe first.", code: null, cloud: "no_subscription" };
+      },
+    });
+    const e = await cloudApi.billingPreview("heed", "month").catch((x: unknown) => x);
+    expect((e as CloudError).cloud).toBe("no_subscription");
   });
 });

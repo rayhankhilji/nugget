@@ -30,6 +30,7 @@ pub mod api;
 pub mod apps;
 pub mod ask;
 pub mod auth;
+pub mod authors;
 pub mod brief;
 pub mod card_actions;
 pub mod cards;

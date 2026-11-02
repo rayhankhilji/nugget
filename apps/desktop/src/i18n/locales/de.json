@@ -2351,6 +2351,7 @@
   "cloud.ask.untitled": "Ohne Titel",
   "cloud.ask.open": "Öffnen",
   "cloud.ask.openLabel": "{title} öffnen",
+  "cloud.billing.selfHosted": "Dieser Server wird selbst betrieben, Abrechnung ist aus. Für dein Konto gelten die Grenzen von {plan}.",
   "cloud.billing.title": "Tarif & Abrechnung",
   "cloud.billing.choose": "Heed ist ein kostenpflichtiger Dienst. Wähle einen Tarif, um deine kostenlose Testphase zu starten.",
   "cloud.billing.prices": "{monthly} pro Monat oder {annual} pro Jahr",

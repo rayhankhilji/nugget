@@ -1,0 +1,145 @@
+---
+/**
+ * Renders the book's self-hosting guide (docs/book/src/guide/self-host.md, copied by
+ * scripts/sync-docs.mjs) in the site's style, with a contents list built from its headings.
+ */
+import Base from "../../layouts/Base.astro";
+import { Content, getHeadings } from "../../content/docs/self-host.md";
+import { GITHUB_URL } from "../../lib/plans";
+
+const toc = getHeadings().filter((h) => h.depth === 2);
+const source = `${GITHUB_URL}/blob/HEAD/docs/book/src/guide/self-host.md`;
+---
+<Base
+  title="Self-hosting Heed Cloud"
+  description="Run the Heed Cloud server on your own machine. Community-supported, with no warranty or support from Heed."
+>
+  <div class="wrap doc">
+    <aside class="side">
+      <p class="eyebrow">Docs</p>
+      <nav aria-label="On this page">
+        <ol>{toc.map((h) => <li><a href={`#${h.slug}`}>{h.text}</a></li>)}</ol>
+      </nav>
+      <p class="src"><a href={source} rel="noopener">Source on GitHub</a></p>
+    </aside>
+    <article class="prose doc-body">
+      <Content />
+    </article>
+  </div>
+</Base>
+
+<style>
+  .doc {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    gap: clamp(32px, 5vw, 72px);
+    padding-block: clamp(48px, 7vw, 96px) 120px;
+  }
+  .side {
+    position: sticky;
+    top: 84px;
+    align-self: start;
+    display: grid;
+    gap: 14px;
+    max-height: calc(100vh - 110px);
+    overflow-y: auto;
+  }
+  .side ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--text);
+  }
+  .side li a {
+    display: block;
+    padding: 7px 0;
+    border-bottom: 1px dashed var(--line-2);
+    font-size: 14px;
+    color: var(--text-2);
+    text-decoration: none;
+  }
+  .side li a:hover {
+    color: var(--text);
+  }
+  .src a {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-2);
+    text-underline-offset: 3px;
+  }
+  .doc-body {
+    max-width: 760px;
+    min-width: 0;
+  }
+  .doc-body :global(h1) {
+    font-size: clamp(40px, 6vw, 72px);
+    margin-bottom: 24px;
+  }
+  .doc-body :global(h2) {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(28px, 3.4vw, 36px);
+    padding-top: 28px;
+    border-top: 1px dashed var(--line-2);
+    scroll-margin-top: 84px;
+  }
+  .doc-body :global(blockquote) {
+    margin: 0 0 24px;
+    padding: 14px 18px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .doc-body :global(blockquote p:last-child) {
+    margin-bottom: 0;
+  }
+  .doc-body :global(pre) {
+    margin: 0 0 18px;
+    padding: 14px 16px;
+    border-radius: 4px;
+    background: #0b0b1a !important;
+    color: #f3f1ec;
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-x: auto;
+  }
+  .doc-body :global(pre code) {
+    font-family: var(--mono);
+  }
+  /* Shiki's github-dark comment colour (#6A737D) is under AA on our ink-blue; lift it to quiet ink. */
+  .doc-body :global(pre span[style*="#6A737D" i]) {
+    color: #9a97ad !important;
+  }
+  .doc-body :global(:not(pre) > code) {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+    overflow-wrap: anywhere;
+  }
+  .doc-body :global(table) {
+    font-size: 14px;
+  }
+  .doc-body :global(table th) {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--text);
+  }
+  .doc-body :global(table td) {
+    border-bottom: 1px dashed var(--line-2);
+  }
+  @media (max-width: 900px) {
+    .doc {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .side {
+      position: static;
+      max-height: none;
+    }
+  }
+</style>

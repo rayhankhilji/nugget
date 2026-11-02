@@ -1,0 +1,129 @@
+---
+/**
+ * "Tell me when Heed Cloud opens": posts {email, source} to the cloud's POST /v1/waitlist when this
+ * build has NEXT_PUBLIC_CLOUD_URL; otherwise (or if the request can't reach the cloud, e.g. CORS or
+ * a 404) it falls back to an email link. The server always answers 202 for well-formed JSON and never
+ * reveals whether an address was already on the list, so the success copy doesn't claim anything
+ * about the address. No third-party scripts.
+ */
+import { config, notifyHref } from "../lib/config";
+
+interface Props {
+  /** Which page the sign-up came from: [a-z0-9_-]{1,32}. */
+  source: "landing" | "download" | "pricing" | "account-closed";
+  label?: string;
+  button?: string;
+  /** Light text and fields, for use on the ultramarine hero. */
+  onDark?: boolean;
+}
+const { source, label = "Email", button = "Notify me", onDark = false } = Astro.props;
+const mailto = notifyHref("Heed Cloud waitlist", "Please let me know when Heed Cloud opens.");
+const id = `wl-${source}`;
+---
+{
+  config.cloudUrl ? (
+    <form class:list={["wl", { dark: onDark }]} data-waitlist={source} data-endpoint={`${config.cloudUrl}/v1/waitlist`} data-mailto={mailto} novalidate>
+      <label class="sr-only" for={id}>{label}</label>
+      <input class="input" id={id} type="email" name="email" autocomplete="email" required placeholder="you@company.com" />
+      <button class="btn btn-primary" type="submit">{button}</button>
+      <p class="msg" role="status" aria-live="polite" data-msg hidden></p>
+    </form>
+  ) : (
+    <a class="btn btn-primary wl-mail" href={mailto} data-waitlist-mailto={source}>
+      {button}
+    </a>
+  )
+}
+
+<script>
+  const valid = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+  document.querySelectorAll<HTMLFormElement>("form[data-waitlist]").forEach((form) => {
+    const msg = form.querySelector<HTMLElement>("[data-msg]")!;
+    const input = form.elements.namedItem("email") as HTMLInputElement;
+    const button = form.querySelector("button")!;
+    const say = (html: string, tone: "ok" | "err" = "ok") => {
+      msg.innerHTML = html;
+      msg.dataset["tone"] = tone;
+      msg.hidden = false;
+    };
+    const fallback = () =>
+      say(`We couldn’t reach the list just now. <a href="${form.dataset["mailto"]}">Email us instead</a> and we’ll let you know.`, "err");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = input.value.trim();
+      if (!valid(email)) {
+        say("That email doesn’t look quite right.", "err");
+        input.focus();
+        return;
+      }
+      button.disabled = true;
+      try {
+        const res = await fetch(form.dataset["endpoint"]!, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, source: form.dataset["waitlist"] }),
+        });
+        if (res.status === 202 || res.ok) {
+          say("You’re on the list. We’ll email you once, when Heed Cloud opens.");
+          form.reset();
+        } else if (res.status === 429) {
+          say("Too many tries; please wait a bit.", "err");
+        } else if (res.status === 404) {
+          fallback();
+        } else {
+          say("Something went wrong. Please try again.", "err");
+        }
+      } catch {
+        fallback(); // CORS or network error: the cloud isn't reachable from here yet
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+</script>
+
+<style>
+  .wl {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+    max-width: 440px;
+  }
+  .wl .input {
+    flex: 1 1 200px;
+    min-width: 0;
+    height: 48px;
+    padding: 0 18px;
+    border-radius: 999px;
+  }
+  .wl .btn {
+    height: 48px;
+  }
+  .msg {
+    flex-basis: 100%;
+    margin: 4px 0 0;
+    font-size: 14px;
+    color: var(--text-2);
+  }
+  .msg[data-tone="err"] {
+    color: var(--danger);
+  }
+  .msg :global(a) {
+    color: inherit;
+    text-underline-offset: 3px;
+  }
+  .dark .input {
+    background: rgb(246 243 236 / 0.1);
+    color: #f6f3ec;
+    box-shadow: inset 0 0 0 1px rgb(246 243 236 / 0.4);
+  }
+  .dark .input::placeholder {
+    color: rgb(246 243 236 / 0.7);
+  }
+  .dark .msg,
+  .dark .msg[data-tone="err"] {
+    color: #f6f3ec;
+  }
+</style>

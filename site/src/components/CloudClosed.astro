@@ -1,0 +1,50 @@
+---
+/**
+ * Shown on the account, checkout and sign-in pages when this build has no Heed Cloud settings
+ * (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_CLOUD_URL): a calm "not open
+ * yet" note pointing at the free app and the waitlist, instead of an error.
+ */
+import WaitlistForm from "./WaitlistForm.astro";
+import { GITHUB_URL } from "../lib/plans";
+---
+<section class="wrap closed" data-cloud-closed>
+  <p class="eyebrow">Heed Cloud</p>
+  <h1>Heed Cloud isn't open yet.</h1>
+  <p class="lede">
+    Accounts, trials and billing open soon. In the meantime the Heed app is free and open source: run it on your Mac with
+    your own AI.
+  </p>
+  <div class="cta">
+    <a class="btn btn-primary btn-lg" href="/download">Download the free app</a>
+  </div>
+  <p class="wl-k">Or get one email when Heed Cloud opens:</p>
+  <WaitlistForm source="account-closed" label="Email me when Heed Cloud opens" button="Join the waitlist" />
+  <p class="small">Or <a href={GITHUB_URL} rel="noopener">view the source on GitHub</a>.</p>
+</section>
+
+<style>
+  .closed {
+    display: grid;
+    gap: 20px;
+    justify-items: start;
+    padding-block: clamp(72px, 12vw, 160px);
+    max-width: calc(760px + var(--gutter) * 2);
+  }
+  h1 {
+    font-size: clamp(40px, 6vw, 72px);
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--text-2);
+    max-width: 34em;
+  }
+  .wl-k {
+    margin-top: 12px;
+    color: var(--text-2);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+</style>
