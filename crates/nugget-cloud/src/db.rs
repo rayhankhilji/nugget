@@ -66,6 +66,21 @@ pub struct NewItem {
     pub metadata: Value,
 }
 
+/// A stored subscription (Stripe is the source of truth; webhooks keep this in step).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SubscriptionRow {
+    #[serde(skip)]
+    pub id: String,
+    pub plan: String,
+    pub interval: String,
+    pub status: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub trial_end: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub current_period_end: Option<OffsetDateTime>,
+    pub cancel_at_period_end: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Upsert {
     Added,
@@ -220,16 +235,195 @@ impl Db {
 
     // ---- profile and usage ------------------------------------------------------------------
 
-    /// The user's plan; also records that they are active (drives the sync interval).
-    pub async fn touch_profile(&self, user: Uuid) -> Result<String, DbError> {
+    /// Records that the user is active (drives the sync interval).
+    pub async fn touch_profile(&self, user: Uuid) -> Result<(), DbError> {
         self.scoped(Some(user), async |tx| {
-            let row = tx
+            tx.execute(
+                "update public.profiles set last_active_at = now() where user_id = $1",
+                &[&user],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// LLM calls on `model` this month (smart-ask allowance).
+    pub async fn month_model_calls(&self, user: Uuid, model: &str) -> Result<i64, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let r = tx
+                .query_one(
+                    "select count(*) from public.usage_events
+                     where user_id = $1 and kind = 'llm' and model = $2 and created_at >= date_trunc('month', now())",
+                    &[&user, &model],
+                )
+                .await?;
+            Ok(r.get(0))
+        })
+        .await
+    }
+
+    // ---- billing -------------------------------------------------------------------------------
+
+    pub async fn customer(&self, user: Uuid) -> Result<Option<String>, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let r = tx
                 .query_opt(
-                    "update public.profiles set last_active_at = now() where user_id = $1 returning plan",
+                    "select stripe_customer_id from public.billing_customers where user_id = $1",
                     &[&user],
                 )
                 .await?;
-            Ok(row.map(|r| r.get(0)).unwrap_or_else(|| "free".into()))
+            Ok(r.map(|r| r.get(0)))
+        })
+        .await
+    }
+
+    pub async fn set_customer(&self, user: Uuid, customer: &str) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "insert into public.billing_customers (user_id, stripe_customer_id) values ($1, $2)
+                 on conflict (user_id) do nothing",
+                &[&user, &customer],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn customer_owner(&self, customer: &str) -> Result<Option<Uuid>, DbError> {
+        self.scoped(None, async |tx| {
+            let r = tx
+                .query_one("select nugget_private.customer_owner($1)", &[&customer])
+                .await?;
+            Ok(r.get(0))
+        })
+        .await
+    }
+
+    /// All the user's subscriptions, the one that grants access first, then newest.
+    pub async fn subscriptions(&self, user: Uuid) -> Result<Vec<SubscriptionRow>, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let rows = tx
+                .query(
+                    "select id, plan, interval, status, trial_end, current_period_end, cancel_at_period_end
+                     from public.subscriptions where user_id = $1
+                     order by (status in ('active', 'trialing', 'past_due')) desc, updated_at desc",
+                    &[&user],
+                )
+                .await?;
+            Ok(rows
+                .iter()
+                .map(|r| SubscriptionRow {
+                    id: r.get(0),
+                    plan: r.get(1),
+                    interval: r.get(2),
+                    status: r.get(3),
+                    trial_end: r.get(4),
+                    current_period_end: r.get(5),
+                    cancel_at_period_end: r.get(6),
+                })
+                .collect())
+        })
+        .await
+    }
+
+    pub async fn upsert_subscription(
+        &self,
+        user: Uuid,
+        s: &SubscriptionRow,
+        price_id: &str,
+    ) -> Result<(), DbError> {
+        self.scoped(Some(user), async |tx| {
+            tx.execute(
+                "insert into public.subscriptions
+                   (id, user_id, plan, interval, status, stripe_price_id, trial_end, current_period_end, cancel_at_period_end)
+                 values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 on conflict (id) do update set
+                   plan = excluded.plan, interval = excluded.interval, status = excluded.status,
+                   stripe_price_id = excluded.stripe_price_id, trial_end = excluded.trial_end,
+                   current_period_end = excluded.current_period_end,
+                   cancel_at_period_end = excluded.cancel_at_period_end, updated_at = now()
+                 where public.subscriptions.user_id = excluded.user_id",
+                &[
+                    &s.id, &user, &s.plan, &s.interval, &s.status, &price_id, &s.trial_end, &s.current_period_end,
+                    &s.cancel_at_period_end,
+                ],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn stripe_event_seen(&self, id: &str) -> Result<bool, DbError> {
+        self.scoped(None, async |tx| {
+            Ok(tx
+                .query_one("select nugget_private.stripe_event_seen($1)", &[&id])
+                .await?
+                .get(0))
+        })
+        .await
+    }
+
+    pub async fn mark_stripe_event(&self, id: &str, kind: &str) -> Result<(), DbError> {
+        self.scoped(None, async |tx| {
+            tx.execute(
+                "select nugget_private.mark_stripe_event($1, $2)",
+                &[&id, &kind],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Records the device; false when it is new and the user already has `limit` devices seen
+    /// in the last 30 days.
+    pub async fn register_device(
+        &self,
+        user: Uuid,
+        device: &str,
+        limit: u32,
+    ) -> Result<bool, DbError> {
+        let limit = i64::from(limit);
+        self.scoped(Some(user), async |tx| {
+            let known = tx
+                .execute(
+                    "update public.devices set last_seen_at = now() where user_id = $1 and device_id = $2",
+                    &[&user, &device],
+                )
+                .await?;
+            if known > 0 {
+                return Ok(true);
+            }
+            let n: i64 = tx
+                .query_one(
+                    "select count(*) from public.devices where user_id = $1 and last_seen_at > now() - interval '30 days'",
+                    &[&user],
+                )
+                .await?
+                .get(0);
+            if n >= limit {
+                return Ok(false);
+            }
+            tx.execute("insert into public.devices (user_id, device_id) values ($1, $2)", &[&user, &device])
+                .await?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Deletes items older than `days` (plan history window).
+    pub async fn prune_history(&self, user: Uuid, days: u32) -> Result<u64, DbError> {
+        let days = i32::try_from(days).unwrap_or(i32::MAX);
+        self.scoped(Some(user), async |tx| {
+            Ok(tx
+                .execute(
+                    "delete from public.items where user_id = $1 and occurred_at < now() - make_interval(days => $2)",
+                    &[&user, &days],
+                )
+                .await?)
         })
         .await
     }
@@ -394,12 +588,12 @@ impl Db {
         .await
     }
 
-    /// Whether the user was active in the last hour (sync more often while they use the app).
+    /// Whether the user used Heed in the last 12 hours (sync at the plan's cadence then).
     pub async fn recently_active(&self, user: Uuid) -> Result<bool, DbError> {
         self.scoped(Some(user), async |tx| {
             let r = tx
                 .query_opt(
-                    "select coalesce(last_active_at > now() - interval '1 hour', false) from public.profiles where user_id = $1",
+                    "select coalesce(last_active_at > now() - interval '12 hours', false) from public.profiles where user_id = $1",
                     &[&user],
                 )
                 .await?;
@@ -616,7 +810,18 @@ impl Db {
     /// are derived data and large.
     pub async fn export(&self, user: Uuid) -> Result<Value, DbError> {
         const PARTS: &[(&str, &str)] = &[
-            ("profile", "select plan, created_at from public.profiles"),
+            (
+                "profile",
+                "select created_at, last_active_at from public.profiles",
+            ),
+            (
+                "subscriptions",
+                "select id, plan, interval, status, trial_end, current_period_end, cancel_at_period_end from public.subscriptions",
+            ),
+            (
+                "devices",
+                "select device_id, first_seen_at, last_seen_at from public.devices",
+            ),
             (
                 "connections",
                 "select id, toolkit, status, last_synced_at, created_at from public.connections",

@@ -111,7 +111,55 @@ begin;
 set local role nugget_service;
 do $$ begin
   assert (select user_id from nugget_private.connection_owner('ca_1')) = '00000000-0000-0000-0000-00000000000a', 'owner lookup';
-  assert (select count(*) from nugget_private.due_connections(10)) = 1, 'due connection listed';
+  assert (select count(*) from nugget_private.due_connections(10)) = 0, 'no subscription, no sync';
+end $$;
+rollback;
+
+-- Billing: the service writes A's subscription; due sync needs it; B cannot see it.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.billing_customers (user_id, stripe_customer_id) values ('00000000-0000-0000-0000-00000000000a', 'cus_A');
+insert into public.subscriptions (id, user_id, plan, interval, status, stripe_price_id)
+  values ('sub_A', '00000000-0000-0000-0000-00000000000a', 'heed', 'month', 'trialing', 'price_1');
+insert into public.devices (user_id, device_id) values ('00000000-0000-0000-0000-00000000000a', 'device-0001');
+commit;
+begin;
+set local role nugget_service;
+do $$ begin
+  assert (select count(*) from nugget_private.due_connections(10)) = 1, 'subscribed connection is due';
+  assert nugget_private.customer_owner('cus_A') = '00000000-0000-0000-0000-00000000000a', 'customer owner';
+  assert not nugget_private.stripe_event_seen('evt_1'), 'event unseen';
+  perform nugget_private.mark_stripe_event('evt_1', 'checkout.session.completed');
+  perform nugget_private.mark_stripe_event('evt_1', 'checkout.session.completed');
+  assert nugget_private.stripe_event_seen('evt_1'), 'event recorded once';
+end $$;
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.subscriptions) = 0, 'B sees no subscriptions of A';
+  assert (select count(*) from public.billing_customers) = 0, 'B sees no customers of A';
+  begin
+    perform count(*) from nugget_private.stripe_events;
+    raise exception 'authenticated could read stripe_events';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select status from public.subscriptions) = 'trialing', 'A sees own subscription';
+  begin
+    update public.subscriptions set status = 'active';
+    raise exception 'user could change own subscription';
+  exception when insufficient_privilege then null;
+  end;
+  delete from public.devices;
+  assert (select count(*) from public.devices) = 0, 'A can forget own devices';
 end $$;
 rollback;
 begin;
@@ -132,5 +180,7 @@ do $$ begin
   assert (select count(*) from public.chunks) = 0, 'chunks cascade';
   assert (select count(*) from public.usage_events) = 0, 'usage cascade';
   assert (select count(*) from public.connections) = 0, 'connections cascade';
+  assert (select count(*) from public.subscriptions) = 0, 'subscriptions cascade';
+  assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;
 select 'rls.sql: all assertions passed' as result;
