@@ -11,3 +11,4 @@ for m in "$here"/../migrations/*.sql; do
   psql -q -v ON_ERROR_STOP=1 -d "$db" -f "$m"
 done
 psql -q -v ON_ERROR_STOP=1 -d "$db" -f "$here/rls.sql"
+psql -q -v ON_ERROR_STOP=1 -d "$db" -f "$here/hardening.sql"
