@@ -79,21 +79,24 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     unsafe { CallNextHookEx(null_mut(), code, wparam, lparam) }
 }
 
-struct Hooks(Vec<HHOOK>);
+/// A low-level hook procedure.
+pub(crate) type HookProc = unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT;
+
+pub(crate) struct Hooks(Vec<HHOOK>);
 
 impl Hooks {
-    #[allow(unsafe_code)]
     fn install() -> Result<Self> {
+        Self::install_with(keyboard_proc, mouse_proc)
+    }
+
+    /// Install a `WH_KEYBOARD_LL` and a `WH_MOUSE_LL` hook on this thread, which must then run
+    /// [`pump`].
+    #[allow(unsafe_code)]
+    pub(crate) fn install_with(keyboard: HookProc, mouse: HookProc) -> Result<Self> {
         let mut hooks = Self(Vec::new());
         // SAFETY: a null name returns this process's module handle; it is never freed.
         let module = unsafe { GetModuleHandleW(std::ptr::null()) };
-        for (id, proc_) in [
-            (
-                WH_KEYBOARD_LL,
-                keyboard_proc as unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT,
-            ),
-            (WH_MOUSE_LL, mouse_proc),
-        ] {
+        for (id, proc_) in [(WH_KEYBOARD_LL, keyboard), (WH_MOUSE_LL, mouse)] {
             // SAFETY: the procedures match HOOKPROC and live for the whole program; the hook is
             // global (thread id 0), as low-level hooks must be, and removed in `Drop`.
             let hook = unsafe { SetWindowsHookExW(id, Some(proc_), module, 0) };
@@ -120,7 +123,7 @@ impl Drop for Hooks {
 }
 
 #[allow(unsafe_code)]
-fn ensure_queue_and_thread_id() -> u32 {
+pub(crate) fn ensure_queue_and_thread_id() -> u32 {
     // SAFETY: MSG is plain data, and an all-zero MSG is a valid out-parameter.
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     // SAFETY: peeking (without removing) creates this thread's message queue, so a WM_QUIT posted
@@ -131,7 +134,7 @@ fn ensure_queue_and_thread_id() -> u32 {
 }
 
 #[allow(unsafe_code)]
-fn pump() {
+pub(crate) fn pump() {
     // SAFETY: as above.
     let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
@@ -192,9 +195,10 @@ fn run(mode: Mode, fire: Fire, ready: mpsc::Sender<Result<u32>>) {
     }
 }
 
-struct WinListener {
-    thread_id: u32,
-    thread: Option<JoinHandle<()>>,
+/// A hook thread's handle: dropping it ends the thread's message loop and joins it.
+pub(crate) struct WinListener {
+    pub(crate) thread_id: u32,
+    pub(crate) thread: Option<JoinHandle<()>>,
 }
 
 impl Drop for WinListener {
