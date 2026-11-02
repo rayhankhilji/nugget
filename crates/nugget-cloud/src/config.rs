@@ -31,6 +31,8 @@ pub struct Config {
     pub public_url: Option<String>,
     /// Scheme of the desktop app's deep links (`nugget`, or `heed` after the rename).
     pub app_scheme: String,
+    /// Website origins (`https://heed.app`) allowed for CORS and billing return URLs.
+    pub site_origins: Vec<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -95,11 +97,28 @@ impl Config {
             stripe_base: opt("NUGGET_STRIPE_BASE_URL")
                 .unwrap_or_else(|| "https://api.stripe.com".into()),
             public_url: opt("NUGGET_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
+            site_origins: parse_origins(&opt("NUGGET_SITE_ORIGINS").unwrap_or_default()),
             app_scheme: opt("NUGGET_APP_SCHEME")
                 .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
                 .unwrap_or_else(|| "nugget".into()),
         })
     }
+}
+
+/// `https://heed.app, https://www.heed.app/` → normalised origins (scheme://host[:port]).
+/// Entries that are not plain http(s) origins are dropped.
+pub fn parse_origins(s: &str) -> Vec<String> {
+    s.split(',')
+        .filter_map(|o| {
+            let u = url::Url::parse(o.trim()).ok()?;
+            let plain = matches!(u.scheme(), "https" | "http")
+                && u.host_str().is_some()
+                && matches!(u.path(), "" | "/")
+                && u.query().is_none()
+                && u.username().is_empty();
+            plain.then(|| u.origin().ascii_serialization())
+        })
+        .collect()
 }
 
 /// `gmail=ac_1, googlecalendar=ac_2` → map. Malformed pairs are ignored.
@@ -123,6 +142,20 @@ mod tests {
         assert_eq!(m.len(), 2);
         assert_eq!(m["gmail"], "ac_1");
         assert_eq!(m["googlecalendar"], "ac_2");
+    }
+
+    #[test]
+    fn origins_parse() {
+        assert_eq!(
+            parse_origins(
+                " https://heed.app/ ,http://localhost:4321,https://x.dev/path,ftp://a.b,,nonsense"
+            ),
+            vec![
+                "https://heed.app".to_owned(),
+                "http://localhost:4321".to_owned()
+            ]
+        );
+        assert!(parse_origins("").is_empty());
     }
 
     #[test]

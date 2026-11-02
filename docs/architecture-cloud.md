@@ -221,7 +221,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
 
 ## Security
 - **Isolation:** RLS on every table, with the `nugget_service` role subject to RLS too (see above). `supabase/tests/rls.sql` checks that user A cannot read, write or delete user B's rows, both as `authenticated` and as `nugget_service`.
-- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HEED_MONTHLY`, `STRIPE_PRICE_HEED_ANNUAL`, `STRIPE_PRICE_HEED_MAX_MONTHLY`, `STRIPE_PRICE_HEED_MAX_ANNUAL` and `NUGGET_PUBLIC_URL`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`, `NUGGET_PLANS_FILE` and `NUGGET_APP_SCHEME` (`heed` after the rename).
+- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HEED_MONTHLY`, `STRIPE_PRICE_HEED_ANNUAL`, `STRIPE_PRICE_HEED_MAX_MONTHLY`, `STRIPE_PRICE_HEED_MAX_ANNUAL` and `NUGGET_PUBLIC_URL`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`, `NUGGET_PLANS_FILE`, `NUGGET_APP_SCHEME` (`heed` after the rename) and `NUGGET_SITE_ORIGINS`. That last one lists the website origins, comma-separated, for CORS and billing return URLs; when it is unset, CORS is off.
 - **Secrets** live only in the cloud environment's settings (Fly secrets for the service, and Composio's and Supabase's dashboards). They are never committed and never sent to clients. The desktop ships only `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public by design and protected by RLS) and the API base URL. `SUPABASE_SERVICE_ROLE_KEY` is used only by the service, for the admin user deletion call.
 - **Tokens at rest:**
   - Google OAuth tokens are held by Composio, encrypted by them. We never see them.
@@ -262,7 +262,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - opens a subscription Checkout with the trial;
   - returns `{url}`. The desktop opens it in the browser.
 - `POST /v1/billing/portal` returns the customer-portal URL, for upgrades, downgrades, cancellation, invoices and cards.
-- Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`.
+- Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`. The website can instead pass `return_url`, which must be on an origin in `NUGGET_SITE_ORIGINS`; anything else gets `400 bad_return_url`, so the endpoints cannot be used as an open redirect. The API sends CORS headers for those origins only, and allows no credentials, since auth is a bearer token.
 - `POST /v1/webhooks/stripe`:
   - Verification: `Stripe-Signature` must be HMAC-SHA256 over `t.body`, within 5 minutes.
   - Events handled: `checkout.session.completed`, `customer.subscription.created`, `.updated` and `.deleted`, and `invoice.payment_failed` and `invoice.paid`.
@@ -271,7 +271,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - A failure leaves the event unrecorded, and Stripe retries. Causes include an unknown price id, or a customer we cannot tie to a user through our own metadata.
 - `subscriptions` and `billing_customers` are readable by their owner under RLS and written only by the service.
 
-**Devices.** The desktop sends a random `X-Heed-Device` id. A new device beyond the plan's limit gets `403 device_limit_reached`. Only devices seen in the last 30 days count, and a user can delete their own device rows. The ids are client-generated, so this is a fair-use limit, not DRM.
+**Devices.** The desktop sends a random `X-Heed-Device` id. A new device beyond the plan's limit gets `403 device_limit_reached`. Requests without the header, such as from the website or API tools, never take a seat. Only devices seen in the last 30 days count, and a user can delete their own device rows. The ids are client-generated, so this is a fair-use limit, not DRM.
 
 **Cost and margin per user per month.** Assumptions:
 - The app is active about 10 hours a day. Composio tool calls cost $0.0003.

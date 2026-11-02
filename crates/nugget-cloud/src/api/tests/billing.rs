@@ -506,3 +506,117 @@ async fn account_deletion_cancels_billing_first_and_aborts_on_failure() {
     );
     assert_eq!(h.auth.deleted.lock().unwrap().as_slice(), &[u]);
 }
+
+#[tokio::test]
+async fn website_cors_return_urls_and_no_device_seat() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    // Preflight from the site is answered; other origins get no CORS grant.
+    let pre = |origin: &'static str| {
+        Request::builder()
+            .method("OPTIONS")
+            .uri("/v1/billing/portal")
+            .header("origin", origin)
+            .header("access-control-request-method", "POST")
+            .header(
+                "access-control-request-headers",
+                "authorization,content-type",
+            )
+            .body(Body::empty())
+            .unwrap()
+    };
+    let res = h
+        .app
+        .clone()
+        .oneshot(pre("https://heed.test"))
+        .await
+        .unwrap();
+    assert!(res.status().is_success());
+    let hv = |r: &axum::response::Response, k: &str| {
+        r.headers().get(k).map(|v| v.to_str().unwrap().to_owned())
+    };
+    assert_eq!(
+        hv(&res, "access-control-allow-origin").as_deref(),
+        Some("https://heed.test")
+    );
+    assert!(
+        hv(&res, "access-control-allow-methods")
+            .unwrap()
+            .contains("DELETE")
+    );
+    assert!(
+        hv(&res, "access-control-allow-credentials").is_none(),
+        "bearer auth, no cookies"
+    );
+    let res = h
+        .app
+        .clone()
+        .oneshot(pre("https://evil.test"))
+        .await
+        .unwrap();
+    assert!(hv(&res, "access-control-allow-origin").is_none());
+
+    // A Heed (1 device) user: the desktop registers, then the website manages billing freely.
+    let u = subscriber(&h.pool, "heed").await;
+    assert_eq!(dev(&h, u, "laptop-0001").await.0, StatusCode::OK);
+    for _ in 0..3 {
+        let (s, _) = call(&h.app, "GET", "/v1/me", Some(u), None).await;
+        assert_eq!(
+            s,
+            StatusCode::OK,
+            "web requests send no device id and use no seat"
+        );
+    }
+    let n: i64 = h
+        .pool
+        .query_one(
+            "select count(*) from public.devices where user_id = $1",
+            &[&u],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 1);
+
+    // Return URLs: only on the site's origins.
+    let w = add_user(&h.pool).await;
+    let (s, v) = call(
+        &h.app,
+        "POST",
+        "/v1/billing/checkout",
+        Some(w),
+        Some(json!({"plan": "heed", "interval": "month", "return_url": "https://evil.test/x"})),
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("bad_return_url"))
+    );
+    let (s, _) = call(&h.app, "POST", "/v1/billing/checkout", Some(w),
+        Some(json!({"plan": "heed", "interval": "month", "return_url": "https://heed.test/account?billing=done"}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, v) = call(
+        &h.app,
+        "POST",
+        "/v1/billing/portal",
+        Some(w),
+        Some(json!({"return_url": "https://heed.test.evil.test/"})),
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (StatusCode::BAD_REQUEST, Some("bad_return_url"))
+    );
+    let (s, _) = call(
+        &h.app,
+        "POST",
+        "/v1/billing/portal",
+        Some(w),
+        Some(json!({"return_url": "https://heed.test/account?billing=done"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = call(&h.app, "POST", "/v1/billing/portal", Some(w), None).await;
+    assert_eq!(s, StatusCode::OK, "no body: app hand-off");
+}
