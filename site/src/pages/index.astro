@@ -1,10 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
-import AppIcon from "../components/AppIcon.astro";
 import AppMark from "../components/AppMark.astro";
-import ApprovalCard from "../components/cards/ApprovalCard.astro";
-import GhostCard from "../components/cards/GhostCard.astro";
-import StepCard from "../components/cards/StepCard.astro";
 import WaitlistForm from "../components/WaitlistForm.astro";
 import { APPS, label } from "../lib/apps";
 import { FAQ } from "../lib/faq";
@@ -88,74 +84,60 @@ const faqLd = {
     </div>
   </section>
 
-  <!-- Features: editorial blocks with big image tiles. -->
+  <!-- Features: four wide rows, each a real crop of the app set into a print, then three short notes. -->
   <section id="product" class="section features" aria-labelledby="feat-h">
     <div class="wrap">
       <div class="feat-head">
         <h2 id="feat-h">What Heed does</h2>
-        <p>Six things, done properly. Every answer cites where it came from, and nothing leaves your account without your say.</p>
+        <p>Every answer cites where it came from, and nothing goes out without your say. These are real screens from the app; every name in them is fictional.</p>
       </div>
-      <div class="grid">
-        <article class="feat" data-reveal style="--i:0">
+      <article class="spot" data-reveal>
+        <div class="spot-copy">
           <p class="tag">01 · Ask</p>
           <h3>Answers, with receipts.</h3>
-          <p class="copy">Ask across every app at once. Each answer links to the exact email, event or doc it came from.</p>
-          <div class="tile art-harvesters" data-bg>
-            <div class="answer" aria-label="Example answer with sources">
-              <p class="q">What did we agree with Driftwood about the freeze?</p>
-              <p class="a">
-                The freeze moves to <b>Friday 18:00</b>. Ines wanted a decision on pagination first
-                <span class="chip"><AppIcon slug="notion" size={12} tile />RFC</span>, and Dev confirmed it this morning
-                <span class="chip"><AppIcon slug="gmail" size={12} tile />Mail</span>.
-              </p>
-            </div>
-          </div>
-        </article>
-        <article class="feat" data-reveal style="--i:1">
+          <p class="copy">Ask across every app at once, or just read the morning brief. Every line names the person and the app it came from, so you can check it in one click.</p>
+        </div>
+        <div class="frame art-harvesters" data-bg>
+          <img class="l" src="/screens/brief-light.webp" width="680" height="236" alt="The morning brief: three people waiting on you, each line cited with a chip such as Priya Raman · Gmail or Tom Becker · Slack, and a 3 sources row" loading="lazy" decoding="async" />
+          <img class="d" src="/screens/brief-dark.webp" width="680" height="236" alt="The morning brief: three people waiting on you, each line cited with a chip such as Priya Raman · Gmail or Tom Becker · Slack, and a 3 sources row" loading="lazy" decoding="async" />
+        </div>
+      </article>
+      <article class="spot flip" data-reveal>
+        <div class="spot-copy">
           <p class="tag">02 · Ghost text</p>
           <h3>Writes where you type.</h3>
-          <p class="copy">Suggestions appear right after your cursor in any app on your Mac, in your voice. Press Tab to take one.</p>
-          <div class="tile art-sky" data-bg><GhostCard /></div>
-        </article>
-        <article class="feat" data-reveal style="--i:2">
+          <p class="copy">Suggestions appear right after your cursor in any app on your Mac, in your voice. Press Tab to take one, or keep typing.</p>
+        </div>
+        <div class="frame art-sky" data-bg>
+          <img src="/screens/ghost.webp" width="860" height="258" alt="A reply in a mail compose window, with Heed’s grey suggestion after the cursor and a Tab hint" loading="lazy" decoding="async" />
+        </div>
+      </article>
+      <article class="spot" data-reveal>
+        <div class="spot-copy">
           <p class="tag">03 · Needs you</p>
-          <h3>One list of what's waiting on you.</h3>
-          <p class="copy">The replies, decisions and prep only you can do. Each item shows why it's there and the draft, ready to send.</p>
-          <div class="tile art-andes" data-bg><ApprovalCard /></div>
-        </article>
-        <article class="feat" data-reveal style="--i:0">
-          <p class="tag">04 · Daily brief</p>
-          <h3>A calm brief every morning.</h3>
-          <p class="copy">What changed overnight, what's on today, and the one meeting worth preparing for.</p>
-          <div class="tile art-dither" data-bg role="img" aria-label="Dithered mountain landscape"></div>
-        </article>
-        <article class="feat" data-reveal style="--i:1">
-          <p class="tag">05 · You approve</p>
           <h3>Nothing goes out without you.</h3>
-          <p class="copy">Heed drafts the reply and finds the slot. You check it and approve. Every action is logged.</p>
-          <div class="tile art-engr" data-bg>
-            <div class="steps-wrap">
-              <StepCard
-                title="Reply to Margaret"
-                meta="Needs you"
-                steps={[
-                  { label: "Found her question about Thursday", state: "done" },
-                  { label: "Checked your calendar", detail: "Free from 14:00", state: "done" },
-                  { label: "Drafted a reply", state: "done" },
-                  { label: "Waiting for your approval", state: "current" },
-                ]}
-                actions={[{ label: "Pause" }, { label: "View draft", primary: true }]}
-              />
-            </div>
-          </div>
-        </article>
-        <article class="feat" data-reveal style="--i:2">
-          <p class="tag">06 · Connected</p>
-          <h3>Your work, in one place.</h3>
-          <p class="copy">Mail, calendar, Drive, Slack, Teams and Notion, kept in sync and searchable together.</p>
-          <div class="tile art-land" data-bg role="img" aria-label="Engraved landscape with a low sun"></div>
-        </article>
-      </div>
+          <p class="copy">One list of the replies, decisions and actions only you can make. Heed drafts each one and shows exactly what it will send. Approve with ⌘↵, edit it, or snooze it. Every action is logged.</p>
+        </div>
+        <div class="frame art-andes" data-bg>
+          <img src="/screens/approve.webp" width="580" height="385" alt="An approval in Needs you: a drafted reply to Priya Raman, its To, Subject and Body, with Approve ⌘↵, Reject, Edit and Snooze" loading="lazy" decoding="async" />
+        </div>
+      </article>
+      <article class="spot flip" data-reveal>
+        <div class="spot-copy">
+          <p class="tag">04 · Open source</p>
+          <h3>Free, with your own AI.</h3>
+          <p class="copy">The free app runs on your Mac with the AI you already have: sign in with ChatGPT, run a model on your Mac or through Ollama, or paste an API key. Search and sorting use small models on your Mac.</p>
+          <p class="links"><a href="/download">Get the free app</a> <a href={GITHUB_URL} rel="noopener">Read the code</a></p>
+        </div>
+        <div class="frame art-dither" data-bg>
+          <img src="/screens/choose-ai.webp" width="640" height="462" alt="Choose your AI, in the free app: Sign in with ChatGPT, On this device (recommended), Ollama and Anthropic API key" loading="lazy" decoding="async" />
+        </div>
+      </article>
+      <ul class="notes">
+        <li data-reveal style="--i:0"><p class="tag">05 · Daily brief</p><b>A calm brief every morning.</b><p>What changed overnight, what’s on today, and the one meeting worth preparing for.</p></li>
+        <li data-reveal style="--i:1"><p class="tag">06 · Search</p><b>Find anything with ⌘K.</b><p>People, docs, mail and messages in one search, live as you type.</p></li>
+        <li data-reveal style="--i:2"><p class="tag">07 · Connected</p><b>Your work, in one place.</b><p>Mail, calendar, Drive, Slack, Teams and Notion, kept in sync and searchable together.</p></li>
+      </ul>
     </div>
   </section>
 
@@ -256,7 +238,7 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 </Base>
 
 <script>
-  // "Pause motion" (WCAG 2.2.2): stops the sky drift, the parallax and the ghost-text loop; remembered.
+  // "Pause motion" (WCAG 2.2.2): stops the sky drift and the parallax; remembered.
   const toggle = document.querySelector<HTMLButtonElement>("[data-motion]");
   if (toggle && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
     const set = (off: boolean) => {
@@ -577,26 +559,26 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     font-size: 17px;
     max-width: 30em;
   }
-  .grid {
+  /* Each feature: copy on one side, a real crop of the app set into a print on the other. */
+  .spot {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    column-gap: clamp(24px, 3vw, 40px);
-    row-gap: 10px;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: clamp(28px, 4vw, 64px);
+    align-items: center;
+    padding-block: clamp(32px, 4vw, 48px);
+    border-top: 1px solid var(--text);
   }
-  /* Features rise in a row at a time, 90ms apart (the reveal uses --i × --stagger). */
-  .feat {
-    --stagger: 90ms;
+  .spot.flip {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
   }
-  .feat:nth-child(n + 4) {
-    margin-top: clamp(48px, 6vw, 80px);
+  .spot.flip .spot-copy {
+    order: 2;
   }
-  /* Each feature spans four rows of the grid (tag, title, copy, tile) via subgrid, so tiles line up. */
-  .feat {
+  .spot-copy {
     display: grid;
-    grid-row: span 4;
-    grid-template-rows: subgrid;
-    row-gap: 10px;
+    gap: 12px;
     align-content: start;
+    max-width: 30em;
   }
   .tag {
     font-family: var(--mono);
@@ -605,26 +587,34 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     text-transform: uppercase;
     color: var(--text-2);
   }
-  .feat h3 {
+  .spot h3 {
     font-family: var(--display);
     font-variation-settings: var(--heed-display-settings);
     font-weight: var(--heed-display-weight);
     letter-spacing: var(--heed-display-tracking);
-    font-size: clamp(28px, 2.6vw, 34px);
-    line-height: 1.08;
+    font-size: clamp(32px, 3.4vw, 48px);
+    line-height: 1.05;
   }
   .copy {
     color: var(--text-2);
-    font-size: 15.5px;
+    font-size: 16.5px;
   }
-  .tile {
-    position: relative;
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    font-size: 15px;
+  }
+  .links a {
+    color: var(--text);
+    text-underline-offset: 3px;
+  }
+  /* The print fills the frame; the screenshot sits on it at 1:1 where there's room, never upscaled. */
+  .frame {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
     place-items: center;
-    margin-top: 12px;
-    padding: 24px;
-    aspect-ratio: 4 / 4.3;
+    min-height: clamp(320px, 34vw, 480px);
+    padding: clamp(20px, 3.4vw, 48px);
     border-radius: 4px;
     overflow: hidden;
     background-color: #1f3bff;
@@ -632,8 +622,43 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     background-size: cover;
     background-repeat: no-repeat;
   }
-  .tile > :global(*) {
-    position: relative;
+  .frame img {
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    box-shadow:
+      0 0 0 1px rgb(20 17 15 / 0.12),
+      0 28px 60px -24px rgb(7 7 50 / 0.65);
+  }
+  .frame img[width="580"] {
+    max-width: 580px;
+  }
+  .frame img[width="640"] {
+    max-width: 640px;
+  }
+  .frame img[width="680"] {
+    max-width: 680px;
+  }
+  /* The compose window is the widest crop; give it most of the frame so its text stays readable. */
+  .frame.art-sky {
+    padding-inline: clamp(10px, 1.6vw, 22px);
+  }
+  .frame .d {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .frame .l {
+      display: none;
+    }
+    :global(:root:not([data-theme="light"])) .frame .d {
+      display: block;
+    }
+  }
+  :global(:root[data-theme="dark"]) .frame .l {
+    display: none;
+  }
+  :global(:root[data-theme="dark"]) .frame .d {
+    display: block;
   }
   .art-harvesters {
     --bg-img: url("/art/painting-harvesters.webp");
@@ -656,60 +681,37 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     background-size: auto 100%;
     image-rendering: pixelated;
   }
-  .art-engr {
-    --bg-img: url("/art/ds-engr.webp");
-    background-color: #f6f3ec;
-    background-position: 50% 100%;
+  /* Three short notes on hairlines. */
+  .notes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid var(--text);
   }
-  .art-land {
-    --bg-img: url("/art/landscape-light.webp");
-    background-color: #f6f3ec;
-    background-position: 70% 100%;
-    background-size: auto 100%;
+  .notes li {
+    --stagger: 90ms;
+    display: grid;
+    gap: 8px;
+    align-content: start;
+    padding: 24px clamp(20px, 2.6vw, 36px) 0 0;
   }
-  .answer {
-    width: 100%;
-    max-width: 340px;
-    padding: 16px;
-    border-radius: var(--heed-radius-l);
-    background: var(--surface);
-    box-shadow: var(--shadow-3);
-    font-size: 14px;
+  .notes li + li {
+    padding-left: clamp(20px, 2.6vw, 36px);
+    border-left: 1px dashed var(--line-2);
   }
-  .answer .q {
-    margin-left: auto;
-    width: fit-content;
-    max-width: 88%;
-    padding: 8px 12px;
-    border-radius: 12px 12px 4px 12px;
-    background: var(--surface-2);
-    box-shadow: inset 0 0 0 1px var(--line);
-    margin-bottom: 12px;
+  .notes b {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(22px, 2vw, 26px);
+    letter-spacing: -0.02em;
+    line-height: 1.15;
   }
-  .answer .a {
+  .notes li > p:last-child {
     color: var(--text-2);
-    line-height: 1.7;
-  }
-  .answer b {
-    color: var(--text);
-    font-weight: 560;
-  }
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 7px 0 3px;
-    border-radius: 999px;
-    font-size: 11.5px;
-    line-height: 20px;
-    color: var(--text-2);
-    background: var(--surface-2);
-    box-shadow: inset 0 0 0 1px var(--line-2);
-    vertical-align: 0.06em;
-  }
-  .steps-wrap {
-    width: 100%;
-    max-width: 340px;
+    font-size: 15.5px;
   }
 
   /* ---------- How ---------- */
@@ -972,11 +974,13 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 
   /* ---------- Responsive ---------- */
   @media (max-width: 1020px) {
-    .grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .spot,
+    .spot.flip {
+      grid-template-columns: 1fr;
+      gap: 20px;
     }
-    .feat:nth-child(n + 3) {
-      margin-top: 48px;
+    .spot.flip .spot-copy {
+      order: 0;
     }
     .flow {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1041,27 +1045,29 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     }
   }
   @media (max-width: 640px) {
-    .grid,
+    .notes,
     .flow {
       grid-template-columns: 1fr;
+    }
+    .notes li,
+    .notes li + li {
+      padding: 20px 0;
+      border-left: 0;
+    }
+    .notes li + li {
+      border-top: 1px dashed var(--line-2);
     }
     .flow li,
     .flow li + li {
       padding-left: 0;
       border-left: 0;
     }
-    .tile {
-      aspect-ratio: auto;
-      min-height: 300px;
-      padding: 20px 16px;
+    .frame {
+      min-height: 0;
+      padding: 28px 12px;
     }
-    .feat:nth-child(n + 2) {
-      margin-top: 48px;
-    }
-    /* One column: the image leads each block. */
-    .feat .tile {
-      order: -1;
-      margin: 0 0 6px;
+    .frame img {
+      border-radius: 6px;
     }
     .facts div,
     .specs div {

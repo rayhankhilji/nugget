@@ -28,7 +28,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 
 | Route | What it does |
 | --- | --- |
-| `/` | A full-bleed ultramarine hero with one huge Fraunces line and one large print (El Greco, duotoned) over the drifting dithered sky. Directly under it, DS1's real Home screenshot (light or dark, following the theme) set into a duotone painting, then a quiet line of the 7 connectable apps. Six editorial feature blocks follow: a mono tag, a Fraunces title, two lines of copy and a large image tile, using paintings, dither and engraving, three of them with a real UI detail. Then how it works on hairlines, privacy (the Oxbow block and a plain-English list), a "Get Heed for Mac" block with system requirements in mono, the FAQ, and a footer with the engraved landscape and a giant faint wordmark. There are no invented metrics and no testimonials. |
+| `/` | A full-bleed ultramarine hero with one huge Fraunces line and one large print (El Greco, duotoned) over the drifting dithered sky. Directly under it, DS1's real Home screenshot (light or dark, following the theme) set into a duotone painting, then a quiet line of the 7 connectable apps. Four wide feature rows follow (Ask, Ghost text, Needs you, and Free with your own AI), each with a mono tag, a Fraunces title, copy, and a real 1:1 crop of the app set into a duotone painting or dither; then three short notes on hairlines (daily brief, ⌘K search, connected apps). Then how it works on hairlines, privacy (the Oxbow block and a plain-English list), a "Get Heed for Mac" block with system requirements in mono, the FAQ, and a footer with the engraved landscape and a giant faint wordmark. There are no invented metrics and no testimonials. |
 | `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. The card grid has one column per plan, so a third tier fits. Note that `loadPlans` still only accepts the `heed` and `heed_max` ids. |
 | `/download` | The macOS builds, from env vars. It leads with the Intel build when the browser reports x86. Windows and Linux show as "Coming soon". |
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
@@ -259,8 +259,12 @@ The footer's theme switch can force dark on a light system. To support that, `Ba
 - the engraved landscape in the footer;
 - Thomas Cole's *The Oxbow*, duotoned, in the privacy section, with a flat signal block over it.
 
-The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
-them once they exist. Sources and licences are in `CREDITS.md`.
+The product images are real screenshots of the app from DS1 (`docs/brand/screens/`, fictional data),
+cut into WebP by `npm run screens` (`scripts/screens.mjs`): the whole Home screen for the showcase,
+and 1:1 crops for the feature rows (the morning brief with its citation chips, ghost text, the
+approval pane in Needs you, and Choose your AI). The script fails if any file is over 300 KB. The
+light Choose your AI shot shows a model id, so the site uses the dark one. Sources and licences are
+in `CREDITS.md`.
 
 **Social cards:** each page gets a 1200×630 Open Graph and Twitter image: a Fraunces line over the
 dithered sky, with the wordmark. They are rendered once at build time by

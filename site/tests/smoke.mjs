@@ -177,7 +177,7 @@ for (const scheme of ["light", "dark"]) {
         // Scroll through so reveal-on-scroll content is visible, as a reader would see it.
         await page.evaluate(async () => {
           for (let y = 0; y < document.body.scrollHeight; y += 600) {
-            window.scrollTo(0, y);
+            window.scrollTo({ top: y, behavior: "instant" });
             await new Promise((res) => setTimeout(res, 30));
           }
         });
