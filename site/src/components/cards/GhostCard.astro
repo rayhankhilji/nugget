@@ -2,7 +2,7 @@
 /**
  * Ghost text in an email: Heed's suggestion appears after the caret, Tab accepts it.
  * Pure HTML/CSS with a small script that loops the typing. Without JS, or with reduced motion,
- * it shows the accepted state.
+ * it shows the suggestion waiting for Tab.
  */
 import AppIcon from "../AppIcon.astro";
 const typed = "Thursday ";
@@ -18,7 +18,7 @@ const ghost = "at 2pm works. I've moved the review to Friday so we get the full 
     <div><dt>Subject</dt><dd>Re: Moorland kickoff</dd></div>
   </dl>
   <p class="hi">Hi Margaret,</p>
-  <p class="line"><span class="typed">{typed}</span><span class="caret" aria-hidden="true"></span><span class="ghost" data-state="accepted">{ghost}</span><span class="chip" data-state="accepted"><span class="c-tab"><i aria-hidden="true"></i><kbd>Tab</kbd></span><span class="c-src"><AppIcon slug="googlecalendar" size={12} tile />2 sources</span></span></p>
+  <p class="line"><span class="typed">{typed}</span><span class="caret" aria-hidden="true"></span><span class="ghost" data-state="suggesting">{ghost}</span><span class="chip" data-state="suggesting"><span class="c-tab"><i aria-hidden="true"></i><kbd>Tab</kbd></span><span class="c-src"><AppIcon slug="googlecalendar" size={12} tile />2 sources</span></span></p>
   <script type="application/json" set:html={JSON.stringify({ typed, ghost })} />
 </article>
 
@@ -142,6 +142,11 @@ const ghost = "at 2pm works. I've moved the review to Friday so we get the full 
   }
   .line:has(.ghost[data-state="accepted"]) .caret {
     display: none;
+  }
+  /* Ghost text: the quiet ink (lighter than typed text, still AA), set a touch lighter in weight. */
+  .ghost[data-state="suggesting"],
+  .ghost[data-state="streaming"] {
+    font-weight: 350;
   }
   @keyframes blink {
     50% {

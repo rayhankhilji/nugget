@@ -54,6 +54,13 @@ These come from `crates/nugget-cloud` on `ar/cloud` (`src/api/billing.rs`, `plan
   limits both tables to the signed-in user. Going through Supabase means a single round trip, and
   the devices list can be managed from the same place.
 
+### Connected apps come from the cloud's catalogue
+
+The "Connects to" strip and the FAQ list exactly the apps in `crates/nugget-cloud/src/apps/mod.rs`
+(`CATALOG`). `npm run apps` regenerates `src/data/apps.json` from that file, and
+`node scripts/sync-apps.mjs --check` checks it's up to date. The smoke test fails if the JSON, the
+strip or the FAQ drift from the catalogue. Add an app to the cloud first, then run `npm run apps`.
+
 ### Prices come from the API
 
 `src/lib/plans.ts` fetches the public `GET /v1/billing/plans` **at build time**. It writes the

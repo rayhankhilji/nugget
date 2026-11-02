@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
-import AppIcon from "../components/AppIcon.astro";
+import AppMark from "../components/AppMark.astro";
+import { APPS, label } from "../lib/apps";
 import BriefCard from "../components/cards/BriefCard.astro";
 import ApprovalCard from "../components/cards/ApprovalCard.astro";
 import GhostCard from "../components/cards/GhostCard.astro";
@@ -12,20 +13,6 @@ import { loadPlans } from "../lib/plans";
 const { plans } = await loadPlans();
 const trial = plans[0]?.trial_days ?? 14;
 
-const apps: [string, string][] = [
-  ["gmail", "Gmail"],
-  ["googlecalendar", "Google Calendar"],
-  ["googledrive", "Google Drive"],
-  ["googledocs", "Google Docs"],
-  ["notion", "Notion"],
-  ["linear", "Linear"],
-  ["github", "GitHub"],
-  ["figma", "Figma"],
-  ["jira", "Jira"],
-  ["hubspot", "HubSpot"],
-  ["asana", "Asana"],
-  ["dropbox", "Dropbox"],
-];
 
 const faqLd = {
   "@context": "https://schema.org",
@@ -63,16 +50,17 @@ const faqLd = {
   <section class="apps" aria-labelledby="apps-h">
     <div class="wrap">
       <h2 id="apps-h" class="apps-h">Connects to the apps you already live in</h2>
-      <ul class="apps-row">
+      <ul class="apps-row" data-apps>
         {
-          apps.map(([slug, name]) => (
-            <li>
-              <AppIcon slug={slug} size={20} mono />
-              <span>{name}</span>
+          APPS.map((a) => (
+            <li data-app={a.slug}>
+              <AppMark slug={a.slug} />
+              <span>{label(a)}</span>
             </li>
           ))
         }
       </ul>
+      <p class="apps-more">More coming soon.</p>
     </div>
   </section>
 
@@ -437,6 +425,12 @@ const faqLd = {
     justify-content: center;
     gap: 12px 28px;
     color: var(--text-2);
+  }
+  .apps-more {
+    margin-top: 14px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-3);
   }
   .apps-row li {
     display: inline-flex;

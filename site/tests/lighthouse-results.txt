@@ -1,5 +1,5 @@
 route            form     perf a11y best  seo
-/                mobile     99  100  100  100 
+/                mobile     98  100  100  100 
 /                desktop   100  100  100  100 
 /pricing         mobile    100  100  100  100 
 /pricing         desktop   100  100  100  100 

@@ -42,6 +42,24 @@ for (const scheme of ["light", "dark"]) {
   }
 }
 
+// 1b. The "Connects to" strip and the FAQ list exactly the cloud's app catalogue, in order.
+{
+  const { readFileSync, existsSync } = await import("node:fs");
+  const apps = JSON.parse(readFileSync(new URL("../src/data/apps.json", import.meta.url), "utf8"));
+  const catalogue = new URL("../../crates/nugget-cloud/src/apps/mod.rs", import.meta.url);
+  if (existsSync(catalogue)) {
+    const { readCatalog } = await import("../scripts/sync-apps.mjs");
+    check(JSON.stringify(readCatalog()) === JSON.stringify(apps), "apps.json matches crates/nugget-cloud/src/apps/mod.rs");
+  }
+  const page = await browser.newPage();
+  await page.goto(base + "/");
+  const shown = await page.$$eval("[data-apps] [data-app]", (els) => els.map((e) => e.getAttribute("data-app")));
+  check(JSON.stringify(shown) === JSON.stringify(apps.map((a) => a.slug)), `app strip shows exactly ${shown.join(", ")}`);
+  const faq = await page.locator("#faq details", { hasText: "Which apps can I connect?" }).textContent();
+  check(apps.every((a) => faq?.includes(a.name)) && faq?.includes("More coming soon") === true, "FAQ lists the same apps");
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

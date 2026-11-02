@@ -18,9 +18,14 @@ Regenerate the art with `node scripts/art/sky.mjs && node scripts/art/landscape.
 
 ## App logos
 
-Gmail, Google Calendar, Google Drive, Google Docs, Notion, Linear, GitHub, Figma, Jira, HubSpot, Asana
-and Dropbox come from [Simple Icons](https://simpleicons.org) (CC0 1.0). They are inlined at build
-time. The logos are trademarks of their owners, and using them doesn't imply endorsement.
+The "Connects to" strip lists exactly the apps in the cloud's catalogue
+(`crates/nugget-cloud/src/apps/mod.rs`, read into `src/data/apps.json` by `scripts/sync-apps.mjs`):
+- Gmail, Google Calendar, Google Drive and Notion use [Simple Icons](https://simpleicons.org)
+  (CC0 1.0), inlined at build time.
+- Outlook, Microsoft Teams and Slack aren't on Simple Icons, because their owners asked for removal.
+  They're shown with a neutral line glyph next to their name, not a logo.
+
+The logos are trademarks of their owners, and using them doesn't imply endorsement.
 
 ## Fonts
 

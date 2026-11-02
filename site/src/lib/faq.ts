@@ -1,3 +1,5 @@
+import { appList } from "./apps";
+
 export const FAQ: { q: string; a: string }[] = [
   {
     q: "Is there a free plan?",
@@ -13,7 +15,7 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Which apps can I connect?",
-    a: "Gmail and Google Calendar first, with Google Drive, Notion, Linear, GitHub and more on the way. Connecting takes one click: you approve access with the app itself, and Heed never sees your password.",
+    a: `${appList()}. More coming soon. Connecting takes one click: you approve access with the app itself, and Heed never sees your password.`,
   },
   {
     q: "Where does ghost text work?",
