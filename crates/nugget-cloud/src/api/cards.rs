@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use super::{ApiError, ApiResult, AppState, user};
+use super::{ApiError, ApiResult, AppState, caller};
 use crate::cards::{self, CardOp, CardsError};
 use crate::intel::{self, IntelError};
 
@@ -53,6 +53,11 @@ impl From<IntelError> for ApiError {
             IntelError::Db(e) => e.into(),
             IntelError::Cards(e) => e.into(),
             IntelError::Gateway(e) => e.into(),
+            IntelError::NotEntitled => Self::new(
+                StatusCode::PAYMENT_REQUIRED,
+                "subscription_required",
+                "start a Heed trial or subscription to use this",
+            ),
             IntelError::Pipeline(e) => {
                 tracing::error!(%e, "intelligence pipeline");
                 Self::new(
@@ -63,6 +68,23 @@ impl From<IntelError> for ApiError {
             }
         }
     }
+}
+
+/// The signed-in, subscribed caller's id, when their plan has the "Needs you" inbox.
+async fn inbox_user(s: &AppState, h: &HeaderMap) -> ApiResult<Uuid> {
+    let c = caller(s, h).await?;
+    if !c.entitled()?.needs_you_inbox {
+        return Err(not_in_plan());
+    }
+    Ok(c.user.id)
+}
+
+pub(super) fn not_in_plan() -> ApiError {
+    ApiError::new(
+        StatusCode::FORBIDDEN,
+        "not_in_plan",
+        "your plan does not include this; upgrade to use it",
+    )
 }
 
 /// Records the desktop's zone when it sends one, and returns the zone to use.
@@ -96,9 +118,9 @@ pub(super) async fn list(
     h: HeaderMap,
     Query(q): Query<TzQuery>,
 ) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
-    let tz = timezone(&s, u.id, q.tz.as_deref()).await?;
-    Ok(Json(inbox(&s, u.id, tz).await?))
+    let u = inbox_user(&s, &h).await?;
+    let tz = timezone(&s, u, q.tz.as_deref()).await?;
+    Ok(Json(inbox(&s, u, tz).await?))
 }
 
 pub(super) async fn refresh(
@@ -106,10 +128,10 @@ pub(super) async fn refresh(
     h: HeaderMap,
     Query(q): Query<TzQuery>,
 ) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
-    let tz = timezone(&s, u.id, q.tz.as_deref()).await?;
-    let (report, _) = s.intel().run(u.id, OffsetDateTime::now_utc()).await?;
-    let mut out = inbox(&s, u.id, tz).await?;
+    let u = inbox_user(&s, &h).await?;
+    let tz = timezone(&s, u, q.tz.as_deref()).await?;
+    let (report, _) = s.intel().run(u, OffsetDateTime::now_utc()).await?;
+    let mut out = inbox(&s, u, tz).await?;
     out["report"] = json!(report);
     Ok(Json(out))
 }
@@ -124,12 +146,12 @@ pub(super) async fn seen(
     h: HeaderMap,
     Json(b): Json<SeenBody>,
 ) -> ApiResult<StatusCode> {
-    let u = user(&s, &h).await?;
-    let tz = intel::profile(&s.db, u.id).await?.timezone;
+    let u = inbox_user(&s, &h).await?;
+    let tz = intel::profile(&s.db, u).await?.timezone;
     let ids: Vec<String> = b.ids.into_iter().take(200).collect();
     cards::act(
         &s.db,
-        u.id,
+        u,
         &cards::config(tz),
         CardOp::Seen(ids),
         OffsetDateTime::now_utc(),
@@ -152,7 +174,7 @@ pub(super) async fn act(
     Path((id, action)): Path<(String, String)>,
     body: Option<Json<ActBody>>,
 ) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
+    let u = inbox_user(&s, &h).await?;
     let b = body.map(|Json(b)| b).unwrap_or_default();
     let now = OffsetDateTime::now_utc();
     let bad = |m: &str| ApiError::new(StatusCode::BAD_REQUEST, "bad_request", m);
@@ -184,7 +206,7 @@ pub(super) async fn act(
             ));
         }
     };
-    let tz = intel::profile(&s.db, u.id).await?.timezone;
-    let card = cards::act(&s.db, u.id, &cards::config(tz), op, now).await?;
+    let tz = intel::profile(&s.db, u).await?.timezone;
+    let card = cards::act(&s.db, u, &cards::config(tz), op, now).await?;
     Ok(Json(json!({ "card": card.as_ref().map(cards::wire) })))
 }

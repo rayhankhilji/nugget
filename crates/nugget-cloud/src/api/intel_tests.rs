@@ -17,7 +17,12 @@ use super::*;
 use crate::db::NewItem;
 use crate::gateway::{Embedder, GatewayError, Llm, LlmRequest, LlmResponse};
 use crate::ingest::{chunk, content_hash, indexed_text};
-use crate::testkit::{FakeEmbedder, add_user, fakes, test_db};
+use crate::plans::Catalog;
+use crate::testkit::{FakeEmbedder, add_user, fakes, subscriber, test_db, test_prices};
+
+fn catalog() -> Arc<Catalog> {
+    Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap())
+}
 
 /// Answers extraction prompts with a fixed graph for Dana's mail, brief prompts with prose
 /// citing entry 1, and records every prompt.
@@ -219,19 +224,29 @@ async fn knowledge_cards_brief_and_search() {
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let state = AppState::new(
-        db.clone(),
-        auth,
-        None,
-        gateway,
-        Default::default(),
-        None,
-        "nugget://connections/callback".into(),
-    );
+    let state = AppState::new(db.clone(), auth, gateway, catalog());
     let app = router(Arc::new(state));
-    let (a, b) = (add_user(&pool).await, add_user(&pool).await);
+    let (a, b) = (
+        subscriber(&pool, "heed").await,
+        subscriber(&pool, "heed").await,
+    );
     let now = OffsetDateTime::now_utc();
     seed(&db, a, now).await;
+
+    // Without a live subscription every intelligence endpoint answers 402.
+    let lapsed = add_user(&pool).await;
+    for (method, uri, body) in [
+        ("GET", "/v1/cards", None),
+        ("POST", "/v1/cards/refresh", Some(json!({}))),
+        ("POST", "/v1/cards/seen", Some(json!({"ids": []}))),
+        ("POST", "/v1/cards/abc/accept", None),
+        ("GET", "/v1/brief", None),
+        ("POST", "/v1/search", Some(json!({"q": "contract"}))),
+    ] {
+        let (s, v) = call(&app, method, uri, lapsed, body).await;
+        assert_eq!(s, StatusCode::PAYMENT_REQUIRED, "{method} {uri}: {v}");
+        assert_eq!(v["error"], "subscription_required");
+    }
 
     // Before any run: an empty inbox; a bad zone is refused.
     let (s, v) = call(&app, "GET", "/v1/cards?tz=Europe/London", a, None).await;
@@ -553,16 +568,28 @@ async fn scheduler_runs_changed_users_and_skips_quota_spent_extraction() {
     let intel = crate::intel::Intel {
         db: db.clone(),
         gateway,
+        plans: catalog(),
     };
-    let u = add_user(&pool).await;
+    let u = subscriber(&pool, "heed").await;
+    let lapsed = add_user(&pool).await;
     let now = OffsetDateTime::now_utc();
     seed(&db, u, now).await;
-    // Spend the free quota: extraction is skipped, deterministic knowledge and cards still run.
-    db.record_usage(u, crate::db::UsageKind::Llm, "x", 0, 0, 10_000_000)
+    seed(&db, lapsed, now).await;
+    // Past the plan's hard cap: extraction is skipped, deterministic knowledge and cards still run.
+    db.record_usage(u, crate::db::UsageKind::Llm, "x", 0, 0, 100_000_000)
         .await
         .unwrap();
     intel.tick().await;
     assert_eq!(llm.count("knowledge graph"), 0);
+    let lapsed_runs: i64 = pool
+        .query_one(
+            "select count(*) from public.intel_runs where user_id = $1",
+            &[&lapsed],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(lapsed_runs, 0, "no jobs for a user without a subscription");
     let ran: i64 = pool
         .query_one(
             "select count(*) from public.intel_runs where user_id = $1 and last_error is null",

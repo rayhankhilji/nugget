@@ -33,11 +33,16 @@ pub struct CloudItem {
     pub chunks: Vec<String>,
 }
 
-/// The user's recent items with their chunk texts, and the newest `updated_at` among them.
+/// The user's recent items (within [`WINDOW_DAYS`] and the plan's `history_days`) with their
+/// chunk texts, and the newest `updated_at` among all their items.
 pub async fn load(
     db: &Db,
     user: Uuid,
+    history_days: Option<u32>,
 ) -> Result<(Vec<CloudItem>, Option<OffsetDateTime>), DbError> {
+    let days = history_days.map_or(WINDOW_DAYS, |d| {
+        WINDOW_DAYS.min(d.min(i32::MAX as u32) as i32)
+    });
     db.scoped(Some(user), async |tx| {
         let rows = tx
             .query(
@@ -46,7 +51,7 @@ pub async fn load(
                  where user_id = $1 and (occurred_at is null
                    or occurred_at > now() - make_interval(days => $2))
                  order by occurred_at desc nulls last limit $3",
-                &[&user, &WINDOW_DAYS, &MAX_ITEMS],
+                &[&user, &days, &MAX_ITEMS],
             )
             .await?;
         let through = tx

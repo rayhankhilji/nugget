@@ -17,9 +17,10 @@ use uuid::Uuid;
 use crate::brief::{self, Brief};
 use crate::cards::{self, CardsError};
 use crate::db::{Db, DbError};
-use crate::gateway::{Gateway, GatewayError, Plan};
+use crate::gateway::{Allowance, Gateway, GatewayError};
 use crate::knowledge;
 use crate::llm_bridge::{BridgeStats, GatewayProvider};
+use crate::plans::{Catalog, ModelTier, Plan};
 use crate::snapshot;
 
 /// Cards depend on the clock (meetings come up, deadlines pass): rerun at least this often.
@@ -37,6 +38,9 @@ pub enum IntelError {
     Gateway(#[from] GatewayError),
     #[error("{0}")]
     Pipeline(#[from] nugget_core::Error),
+    /// No live subscription: no jobs run for the user.
+    #[error("no live subscription")]
+    NotEntitled,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -51,7 +55,6 @@ pub struct IntelReport {
 
 #[derive(Debug, Clone)]
 pub struct Profile {
-    pub plan: Plan,
     pub timezone: Option<String>,
 }
 
@@ -59,13 +62,12 @@ pub async fn profile(db: &Db, user: Uuid) -> Result<Profile, DbError> {
     db.scoped(Some(user), async |tx| {
         let r = tx
             .query_opt(
-                "select plan, timezone from public.profiles where user_id = $1",
+                "select timezone from public.profiles where user_id = $1",
                 &[&user],
             )
             .await?;
         Ok(Profile {
-            plan: Plan::parse(&r.as_ref().map_or("free".into(), |r| r.get::<_, String>(0))),
-            timezone: r.and_then(|r| r.get(1)),
+            timezone: r.and_then(|r| r.get(0)),
         })
     })
     .await
@@ -122,17 +124,27 @@ pub struct Snap {
 pub struct Intel {
     pub db: Db,
     pub gateway: Gateway,
+    pub plans: Arc<Catalog>,
 }
 
 impl Intel {
+    /// The user's live plan (`plans::entitlement`), or [`IntelError::NotEntitled`].
+    pub async fn plan(&self, user: Uuid) -> Result<Plan, IntelError> {
+        crate::plans::entitlement(&self.db, &self.plans, user)
+            .await?
+            .map(|e| e.plan)
+            .ok_or(IntelError::NotEntitled)
+    }
+
     /// Snapshot, knowledge, projection and a card refresh for one user.
     pub async fn run(
         &self,
         user: Uuid,
         now: OffsetDateTime,
     ) -> Result<(IntelReport, Snap), IntelError> {
+        let plan = self.plan(user).await?;
         let p = profile(&self.db, user).await?;
-        let (items, through) = snapshot::load(&self.db, user).await?;
+        let (items, through) = snapshot::load(&self.db, user, plan.history_days).await?;
         let mut sources: Vec<String> = items.iter().map(|i| i.source.clone()).collect();
         sources.sort();
         sources.dedup();
@@ -141,11 +153,12 @@ impl Intel {
             .await
             .map_err(|e| nugget_core::Error::Other(e.to_string()))??;
         let graph: Arc<dyn GraphStore> = Arc::new(store.graph());
-        // The extractor runs only while the user has quota left; the gateway checks every call too.
+        // The extractor runs only while the plan's allowance has room; every call checks again.
+        let allowance = Allowance::from(&plan);
         let llm_ok = self.gateway.has_llm()
             && self
                 .gateway
-                .check_quota(&self.db, user, p.plan)
+                .choose(&self.db, user, allowance, Some(ModelTier::Fast))
                 .await
                 .is_ok();
         let provider = llm_ok.then(|| {
@@ -153,7 +166,7 @@ impl Intel {
                 self.db.clone(),
                 self.gateway.clone(),
                 user,
-                p.plan,
+                allowance,
                 knowledge::MAX_FRESH_LLM,
             ))
         });
@@ -197,6 +210,7 @@ impl Intel {
         user: Uuid,
         now: OffsetDateTime,
     ) -> Result<Option<Brief>, IntelError> {
+        let plan = self.plan(user).await?;
         let p = profile(&self.db, user).await?;
         let local = now.to_offset(utc_offset(p.timezone.as_deref(), now));
         if let Some(b) = brief::stored(&self.db, user, Some(local.date())).await? {
@@ -213,7 +227,7 @@ impl Intel {
                 &self.db,
                 &self.gateway,
                 user,
-                p.plan,
+                Allowance::from(&plan),
                 &tz,
                 &mb,
                 &state,

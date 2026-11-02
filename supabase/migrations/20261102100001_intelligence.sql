@@ -89,7 +89,7 @@ begin
   end loop;
 end $$;
 
--- Users whose items changed since their last intelligence run, or whose last run is older than
+-- Subscribed users whose items changed since their last intelligence run, or whose last run is older than
 -- `stale` (cards depend on the clock: meetings come up, deadlines pass), oldest run first.
 create or replace function nugget_private.intel_due(max_rows int, stale interval)
 returns table (user_id uuid)
@@ -97,6 +97,8 @@ language sql stable security definer set search_path = '' as $$
   select p.user_id from public.profiles p
   left join public.intel_runs r on r.user_id = p.user_id
   where exists (select 1 from public.items i where i.user_id = p.user_id)
+    and exists (select 1 from public.subscriptions s
+                where s.user_id = p.user_id and s.status in ('active', 'trialing', 'past_due'))
     and (r.user_id is null
          or r.ran_at < now() - stale
          or exists (select 1 from public.items i
@@ -105,12 +107,14 @@ language sql stable security definer set search_path = '' as $$
   limit max_rows
 $$;
 
--- Users whose local time is past 07:00 and who have no brief for their local today.
+-- Subscribed users whose local time is past 07:00 and who have no brief for their local today.
 create or replace function nugget_private.brief_due(max_rows int)
 returns table (user_id uuid, timezone text)
 language sql stable security definer set search_path = '' as $$
   select p.user_id, coalesce(p.timezone, 'UTC') from public.profiles p
   where exists (select 1 from public.items i where i.user_id = p.user_id)
+    and exists (select 1 from public.subscriptions s
+                where s.user_id = p.user_id and s.status in ('active', 'trialing', 'past_due'))
     and extract(hour from now() at time zone coalesce(p.timezone, 'UTC')) >= 7
     and not exists (select 1 from public.briefs b
                     where b.user_id = p.user_id

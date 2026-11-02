@@ -1,6 +1,6 @@
 //! The AI gateway as a `nugget_infer::Provider`, so the reused crates' model steps (knowledge
 //! extraction) run on the gateway's fast model: metered in `usage_events`, held to the user's
-//! quota, and cached in `llm_cache` by prompt hash, so an unchanged item is never paid for twice.
+//! plan's allowance (`Gateway::choose`, fast tier), and cached in `llm_cache` by prompt hash, so an unchanged item is never paid for twice.
 //! Each job gets a cap on uncached requests; past it, requests fail and the item keeps its
 //! deterministic facts until a later run.
 
@@ -19,7 +19,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::db::{Db, DbError};
-use crate::gateway::{Gateway, GatewayError, LlmRequest, Plan, Role, Tier};
+use crate::gateway::{Allowance, Gateway, GatewayError, LlmRequest, Role};
+use crate::plans::ModelTier;
 
 pub const PROVIDER_ID: &str = "nugget-cloud-gateway";
 
@@ -35,7 +36,7 @@ pub struct GatewayProvider {
     db: Db,
     gateway: Gateway,
     user: Uuid,
-    plan: Plan,
+    allowance: Allowance,
     fresh_left: AtomicUsize,
     cached: AtomicUsize,
     fresh: AtomicUsize,
@@ -43,13 +44,19 @@ pub struct GatewayProvider {
 }
 
 impl GatewayProvider {
-    pub fn new(db: Db, gateway: Gateway, user: Uuid, plan: Plan, max_fresh: usize) -> Self {
+    pub fn new(
+        db: Db,
+        gateway: Gateway,
+        user: Uuid,
+        allowance: Allowance,
+        max_fresh: usize,
+    ) -> Self {
         Self {
             id: ProviderId::new(PROVIDER_ID),
             db,
             gateway,
             user,
-            plan,
+            allowance,
             fresh_left: AtomicUsize::new(max_fresh),
             cached: AtomicUsize::new(0),
             fresh: AtomicUsize::new(0),
@@ -191,7 +198,7 @@ impl Provider for GatewayProvider {
     fn meta(&self) -> ProviderMeta {
         ProviderMeta {
             kind: ProviderKind::Anthropic,
-            model: self.gateway.model_for(Tier::Fast, self.plan).to_owned(),
+            model: self.gateway.model_for(ModelTier::Fast).to_owned(),
             locality: Locality::Cloud,
             context_tokens: None,
         }
@@ -200,7 +207,7 @@ impl Provider for GatewayProvider {
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let (system, messages) = flatten(&req);
         let max_tokens = req.max_tokens.unwrap_or(1024);
-        let model = self.gateway.model_for(Tier::Fast, self.plan).to_owned();
+        let model = self.gateway.model_for(ModelTier::Fast).to_owned();
         let key = cache_key(&model, &system, &messages, max_tokens);
         let db_err = |e: DbError| Error::Storage(e.to_string());
         if let Some(text) = cached(&self.db, self.user, &key).await.map_err(db_err)? {
@@ -217,13 +224,23 @@ impl Provider for GatewayProvider {
                 retry_after_ms: None,
             });
         }
+        let quota = |e: GatewayError| match e {
+            GatewayError::QuotaExceeded => Error::RateLimited {
+                retry_after_ms: None,
+            },
+            other => Error::Provider(other.to_string()),
+        };
+        // Past the plan's hard cap this refuses; extraction always runs on the fast model.
+        self.gateway
+            .choose(&self.db, self.user, self.allowance, Some(ModelTier::Fast))
+            .await
+            .map_err(quota)?;
         let res = self
             .gateway
             .complete(
                 &self.db,
                 self.user,
-                self.plan,
-                Tier::Fast,
+                ModelTier::Fast,
                 LlmRequest {
                     model: String::new(),
                     system,
@@ -232,12 +249,7 @@ impl Provider for GatewayProvider {
                 },
             )
             .await
-            .map_err(|e| match e {
-                GatewayError::QuotaExceeded => Error::RateLimited {
-                    retry_after_ms: None,
-                },
-                other => Error::Provider(other.to_string()),
-            })?;
+            .map_err(quota)?;
         self.fresh.fetch_add(1, Ordering::Relaxed);
         let tokens = (res.input_tokens, res.output_tokens);
         remember(&self.db, self.user, &key, &res.text, tokens)

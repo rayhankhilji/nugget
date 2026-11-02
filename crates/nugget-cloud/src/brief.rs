@@ -13,7 +13,8 @@ use uuid::Uuid;
 
 use crate::ask::{Citation, cited_numbers};
 use crate::db::{Db, DbError, ItemMeta};
-use crate::gateway::{Gateway, GatewayError, LlmRequest, Plan, Role, Tier};
+use crate::gateway::{Allowance, Gateway, GatewayError, LlmRequest, Role};
+use crate::plans::ModelTier;
 
 const MAX_PROSE_TOKENS: u32 = 400;
 
@@ -132,7 +133,7 @@ pub async fn generate(
     db: &Db,
     gateway: &Gateway,
     user: Uuid,
-    plan: Plan,
+    allowance: Allowance,
     timezone: &str,
     brief: &MorningBrief,
     state: &ProactiveState,
@@ -145,20 +146,27 @@ pub async fn generate(
     let (prose, citations) = if entries.is_empty() || !gateway.has_llm() {
         (None, Vec::new())
     } else {
-        let res = gateway
-            .complete(
-                db,
-                user,
-                plan,
-                Tier::Fast,
-                LlmRequest {
-                    model: String::new(),
-                    system: SYSTEM.into(),
-                    messages: vec![(Role::User, prompt(&entries, brief.date))],
-                    max_tokens: MAX_PROSE_TOKENS,
-                },
-            )
-            .await;
+        let res = match gateway
+            .choose(db, user, allowance, Some(ModelTier::Fast))
+            .await
+        {
+            Ok(_) => {
+                gateway
+                    .complete(
+                        db,
+                        user,
+                        ModelTier::Fast,
+                        LlmRequest {
+                            model: String::new(),
+                            system: SYSTEM.into(),
+                            messages: vec![(Role::User, prompt(&entries, brief.date))],
+                            max_tokens: MAX_PROSE_TOKENS,
+                        },
+                    )
+                    .await
+            }
+            Err(e) => Err(e),
+        };
         match res {
             Ok(r) => {
                 let ids: Vec<Uuid> = entries.iter().map(|e| e.item).collect();

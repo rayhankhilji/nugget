@@ -301,3 +301,90 @@ pub fn fakes() -> (Arc<FakeAuth>, Arc<FakeComposio>, Arc<FakeLlm>) {
         }),
     )
 }
+
+/// Stripe with in-memory subscriptions; records checkouts and subscription fetches.
+#[derive(Default)]
+pub struct FakeStripe {
+    pub subs: Mutex<HashMap<String, crate::stripe::Subscription>>,
+    /// (customer, price, trial_days)
+    pub checkouts: Mutex<Vec<(String, String, Option<u32>)>>,
+    pub customers: Mutex<Vec<String>>,
+    pub fetches: Mutex<u32>,
+    pub deleted_customers: Mutex<Vec<String>>,
+    pub fail_delete: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl crate::stripe::Stripe for FakeStripe {
+    async fn create_customer(
+        &self,
+        _email: Option<&str>,
+        user_id: &str,
+    ) -> Result<String, crate::stripe::StripeError> {
+        let id = format!("cus_{}", &user_id[..8]);
+        self.customers.lock().unwrap().push(id.clone());
+        Ok(id)
+    }
+    async fn checkout(
+        &self,
+        r: &crate::stripe::CheckoutRequest<'_>,
+    ) -> Result<String, crate::stripe::StripeError> {
+        self.checkouts
+            .lock()
+            .unwrap()
+            .push((r.customer.into(), r.price.into(), r.trial_days));
+        Ok(format!("https://checkout.stripe.test/{}", r.price))
+    }
+    async fn portal(
+        &self,
+        customer: &str,
+        _return_url: &str,
+    ) -> Result<String, crate::stripe::StripeError> {
+        Ok(format!("https://billing.stripe.test/{customer}"))
+    }
+    async fn subscription(
+        &self,
+        id: &str,
+    ) -> Result<crate::stripe::Subscription, crate::stripe::StripeError> {
+        *self.fetches.lock().unwrap() += 1;
+        self.subs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| crate::stripe::StripeError::Http("no such subscription".into()))
+    }
+    async fn delete_customer(&self, id: &str) -> Result<(), crate::stripe::StripeError> {
+        if self.fail_delete.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(crate::stripe::StripeError::Http(
+                "stripe down (secret detail)".into(),
+            ));
+        }
+        self.deleted_customers.lock().unwrap().push(id.into());
+        Ok(())
+    }
+}
+
+/// Test price ids for the default plans.
+pub fn test_prices(k: &str) -> Option<String> {
+    match k {
+        "STRIPE_PRICE_HEED_MONTHLY" => Some("price_hm".into()),
+        "STRIPE_PRICE_HEED_ANNUAL" => Some("price_ha".into()),
+        "STRIPE_PRICE_HEED_MAX_MONTHLY" => Some("price_xm".into()),
+        "STRIPE_PRICE_HEED_MAX_ANNUAL" => Some("price_xa".into()),
+        _ => None,
+    }
+}
+
+/// A user with an active subscription to `plan`, written directly (as a webhook would).
+pub async fn subscriber(pool: &Pg, plan: &str) -> Uuid {
+    let id = add_user(pool).await;
+    pool.execute(
+        "insert into public.subscriptions (id, user_id, plan, interval, status, stripe_price_id)
+         values ($1, $2, $3, 'month', 'active', 'price_test')",
+        &[&format!("sub_{}", id.simple()), &id, &plan],
+    )
+    .await
+    .unwrap();
+    id
+}

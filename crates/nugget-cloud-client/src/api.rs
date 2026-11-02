@@ -17,19 +17,119 @@ pub use intel::{
     SearchRequest, SearchResponse, SearchResult, Timeline, TimelineBucket,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Sent on every `/v1` call so the cloud can enforce the plan's device limit.
+pub const DEVICE_HEADER: &str = "X-Heed-Device";
+
+/// This month's metering. Older servers sent `quota_micros`; newer ones `smart_asks_used`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Usage {
     pub month_cost_micros: i64,
-    pub quota_micros: i64,
+    pub quota_micros: Option<i64>,
+    pub smart_asks_used: u32,
+}
+
+/// What a plan includes. `None` limits are unlimited.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Entitlements {
+    pub plan: String,
+    pub name: String,
+    pub max_connections: Option<u32>,
+    pub sync_interval_minutes: u32,
+    pub history_days: Option<u32>,
+    pub smart_asks_per_month: u32,
+    /// `fast` or `smart`.
+    pub default_model: String,
+    pub devices: u32,
+    pub ghost_text: bool,
+    pub needs_you_inbox: bool,
+    pub daily_brief: bool,
+    pub actions_with_approval: bool,
+    pub agent_tasks: bool,
+    pub computer_use: bool,
+    pub priority_support: bool,
+}
+
+/// The Stripe subscription as the cloud mirrors it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Subscription {
+    pub plan: String,
+    /// Stripe's status: `trialing`, `active`, `past_due`, `canceled`, ...
+    pub status: String,
+    /// `month` or `year`.
+    pub interval: String,
+    pub trial_end: Option<String>,
+    pub current_period_end: Option<String>,
+    pub cancel_at_period_end: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Me {
     pub user_id: String,
+    #[serde(default)]
     pub email: Option<String>,
-    pub plan: String,
+    /// `heed`, `heed_max`, or `None` without a subscription.
+    #[serde(default)]
+    pub plan: Option<String>,
+    #[serde(default)]
     pub embeddings: bool,
+    #[serde(default)]
+    pub subscription: Option<Subscription>,
+    #[serde(default)]
+    pub entitlements: Option<Entitlements>,
+    #[serde(default)]
     pub usage: Usage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanOffer {
+    pub id: String,
+    pub name: String,
+    pub monthly_gbp: u32,
+    pub annual_gbp: u32,
+    #[serde(default)]
+    pub trial_days: u32,
+    #[serde(default)]
+    pub entitlements: Entitlements,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Plans {
+    pub plans: Vec<PlanOffer>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Interval {
+    Month,
+    Year,
+}
+
+impl Interval {
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "month" => Ok(Self::Month),
+            "year" => Ok(Self::Year),
+            _ => Err(CloudError::Invalid(
+                "choose monthly or annual billing".into(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelTier {
+    Fast,
+    Smart,
+}
+
+/// A Stripe page (Checkout or the customer portal) to open in the browser.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillingLink {
+    pub url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +178,9 @@ pub struct AskRequest {
     pub question: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<String>,
+    /// Ask for a tier; the plan's default when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelTier>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,6 +207,12 @@ pub struct Answer {
     pub answer: String,
     pub citations: Vec<Citation>,
     pub usage: AskUsage,
+    /// `fast` or `smart`: the tier that answered.
+    #[serde(default)]
+    pub model_tier: Option<String>,
+    /// A smart request answered by the fast tier (allowance or fair-use budget used up).
+    #[serde(default)]
+    pub downgraded: bool,
 }
 
 #[derive(Clone)]
@@ -128,7 +237,12 @@ impl Api {
     ) -> Result<reqwest::Response> {
         let token = self.session.access_token().await?;
         let url = format!("{}/v1/{path}", self.session.config().api_base);
-        let mut req = self.session.http().request(method, url).bearer_auth(token);
+        let mut req = self
+            .session
+            .http()
+            .request(method, url)
+            .bearer_auth(token)
+            .header(DEVICE_HEADER, self.session.device_id().await);
         if let Some(body) = body {
             req = req.json(&body);
         }
@@ -146,8 +260,15 @@ impl Api {
             self.session.invalidate_access().await;
             return Err(CloudError::NotSignedIn);
         }
-        if status == reqwest::StatusCode::TOO_MANY_REQUESTS && code == "quota_exceeded" {
-            return Err(CloudError::QuotaExceeded(message));
+        match (status.as_u16(), code.as_str()) {
+            (429, "quota_exceeded") => return Err(CloudError::QuotaExceeded(message)),
+            (402, _) => return Err(CloudError::SubscriptionRequired(message)),
+            (403, "device_limit_reached") => return Err(CloudError::DeviceLimitReached(message)),
+            (403, "connection_limit_reached") => {
+                return Err(CloudError::ConnectionLimitReached(message));
+            }
+            (409, "no_customer") => return Err(CloudError::NoCustomer(message)),
+            _ => {}
         }
         Err(CloudError::Api {
             status: status.as_u16(),
@@ -206,6 +327,32 @@ impl Api {
     pub async fn ask(&self, request: &AskRequest) -> Result<Answer> {
         let body = serde_json::to_value(request).map_err(|e| CloudError::Invalid(e.to_string()))?;
         self.json(Method::POST, "ask", Some(body)).await
+    }
+
+    /// `GET /v1/billing/plans`: the plans on offer.
+    pub async fn plans(&self) -> Result<Plans> {
+        self.json(Method::GET, "billing/plans", None).await
+    }
+
+    /// `POST /v1/billing/checkout`: a Stripe Checkout page that starts a trial of `plan`.
+    pub async fn checkout(&self, plan: &str, interval: Interval) -> Result<BillingLink> {
+        let ok = !plan.is_empty()
+            && plan.len() <= 32
+            && plan
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if !ok {
+            return Err(CloudError::Invalid("not a known plan".into()));
+        }
+        let body = json!({ "plan": plan, "interval": interval });
+        self.json(Method::POST, "billing/checkout", Some(body))
+            .await
+    }
+
+    /// `POST /v1/billing/portal`: the Stripe customer portal (change plan, card, cancel).
+    pub async fn portal(&self) -> Result<BillingLink> {
+        self.json(Method::POST, "billing/portal", Some(json!({})))
+            .await
     }
 
     /// `GET /v1/export`: all of the user's data as JSON.
@@ -321,11 +468,14 @@ pub(super) mod tests {
             .ask(&AskRequest {
                 question: "When is my flight?".into(),
                 conversation_id: None,
+                model: None,
             })
             .await
             .unwrap();
         assert_eq!(a.citations[0].n, 1);
         assert_eq!(a.usage.output_tokens, 5);
+        // An older server: no tier fields.
+        assert_eq!((a.model_tier.as_deref(), a.downgraded), (None, false));
         let c = api.connections().await.unwrap();
         assert_eq!(c.connections[0].toolkit, "gmail");
         assert!(!c.available[1].connectable);
@@ -374,6 +524,7 @@ pub(super) mod tests {
             .ask(&AskRequest {
                 question: "q".into(),
                 conversation_id: Some("c1".into()),
+                model: None,
             })
             .await
             .unwrap_err();
@@ -392,6 +543,180 @@ pub(super) mod tests {
             Err(e @ CloudError::Api { status: 500, .. }) => assert_eq!(e.code(), "http_500"),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn me_plans_and_billing() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        let device = api.session().device_id().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/me"))
+            .and(header(DEVICE_HEADER, device.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "user_id": "u1", "email": "me@example.com", "plan": "heed", "embeddings": true,
+                "subscription": { "plan": "heed", "status": "trialing", "interval": "month",
+                                  "trial_end": "2026-11-16T00:00:00Z", "current_period_end": null,
+                                  "cancel_at_period_end": false, "future": 1 },
+                "entitlements": { "plan": "heed", "name": "Heed", "max_connections": 10,
+                                  "sync_interval_minutes": 30, "history_days": null,
+                                  "smart_asks_per_month": 300, "default_model": "fast", "devices": 1,
+                                  "ghost_text": true, "needs_you_inbox": true, "daily_brief": true,
+                                  "actions_with_approval": true, "agent_tasks": false,
+                                  "computer_use": false, "priority_support": false },
+                "usage": { "month_cost_micros": 1200, "smart_asks_used": 7 }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/billing/plans"))
+            .and(header(DEVICE_HEADER, device.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "plans": [
+                { "id": "heed", "name": "Heed", "monthly_gbp": 39, "annual_gbp": 390, "trial_days": 14,
+                  "entitlements": { "plan": "heed", "name": "Heed", "smart_asks_per_month": 300 } },
+                { "id": "heed_max", "name": "Heed Max", "monthly_gbp": 99, "annual_gbp": 990, "trial_days": 14,
+                  "entitlements": { "plan": "heed_max", "name": "Heed Max", "max_connections": null } }
+            ]})))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/billing/checkout"))
+            .and(body_json(json!({ "plan": "heed_max", "interval": "year" })))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "url": "https://checkout.stripe.com/c/x" })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/billing/portal"))
+            .and(body_json(json!({})))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "url": "https://billing.stripe.com/p/x" })),
+            )
+            .mount(&server)
+            .await;
+
+        let me = api.me().await.unwrap();
+        assert_eq!(me.plan.as_deref(), Some("heed"));
+        let sub = me.subscription.unwrap();
+        assert_eq!(
+            (sub.status.as_str(), sub.trial_end.as_deref()),
+            ("trialing", Some("2026-11-16T00:00:00Z"))
+        );
+        let ent = me.entitlements.unwrap();
+        assert_eq!((ent.smart_asks_per_month, ent.history_days), (300, None));
+        assert_eq!(me.usage.smart_asks_used, 7);
+        let plans = api.plans().await.unwrap().plans;
+        assert_eq!(plans[1].annual_gbp, 990);
+        assert_eq!(plans[1].entitlements.max_connections, None);
+        assert_eq!(
+            api.checkout("heed_max", Interval::Year).await.unwrap().url,
+            "https://checkout.stripe.com/c/x"
+        );
+        assert!(matches!(
+            api.checkout("../x", Interval::Month).await,
+            Err(CloudError::Invalid(_))
+        ));
+        assert_eq!(
+            api.portal().await.unwrap().url,
+            "https://billing.stripe.com/p/x"
+        );
+        assert!(Interval::parse("week").is_err());
+    }
+
+    #[tokio::test]
+    async fn me_without_a_subscription_and_old_fields() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "user_id": "u1", "email": null, "plan": null, "embeddings": false,
+                "subscription": null, "entitlements": null,
+                "usage": { "month_cost_micros": 0, "quota_micros": 500 }
+            })))
+            .mount(&server)
+            .await;
+        let me = api.me().await.unwrap();
+        assert_eq!(
+            (me.plan, me.subscription, me.entitlements),
+            (None, None, None)
+        );
+        assert_eq!(me.usage.quota_micros, Some(500));
+    }
+
+    #[tokio::test]
+    async fn ask_sends_the_tier_and_reads_a_downgrade() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/ask"))
+            .and(body_json(json!({ "question": "q", "model": "smart" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "conversation_id": "c1", "answer": "a", "citations": [],
+                "usage": { "input_tokens": 1, "output_tokens": 1 },
+                "model_tier": "fast", "downgraded": true
+            })))
+            .mount(&server)
+            .await;
+        let a = api
+            .ask(&AskRequest {
+                question: "q".into(),
+                conversation_id: None,
+                model: Some(ModelTier::Smart),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (a.model_tier.as_deref(), a.downgraded),
+            (Some("fast"), true)
+        );
+    }
+
+    #[tokio::test]
+    async fn billing_errors_have_their_own_codes() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/v1/sync"))
+            .respond_with(err(402, "subscription_required", "Start a trial to sync."))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/connections"))
+            .respond_with(err(403, "device_limit_reached", "Too many devices."))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/connections"))
+            .respond_with(err(403, "connection_limit_reached", "Plan limit."))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/billing/portal"))
+            .respond_with(err(409, "no_customer", "Subscribe first."))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/export"))
+            .respond_with(err(403, "forbidden", "no"))
+            .mount(&server)
+            .await;
+        let e = api.sync().await.unwrap_err();
+        assert!(matches!(&e, CloudError::SubscriptionRequired(m) if m == "Start a trial to sync."));
+        assert_eq!(e.code(), "subscription_required");
+        let e = api.connections().await.unwrap_err();
+        assert!(matches!(e, CloudError::DeviceLimitReached(_)));
+        assert_eq!(e.code(), "device_limit_reached");
+        let e = api.connect("gmail").await.unwrap_err();
+        assert_eq!(e.code(), "connection_limit_reached");
+        let e = api.portal().await.unwrap_err();
+        assert!(matches!(e, CloudError::NoCustomer(_)));
+        assert_eq!(e.code(), "no_customer");
+        let e = api.export().await.unwrap_err();
+        assert!(matches!(e, CloudError::Api { status: 403, .. }));
     }
 
     #[tokio::test]

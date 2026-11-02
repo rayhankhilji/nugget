@@ -9,15 +9,19 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 
 use super::cards::TzQuery;
-use super::{ApiResult, AppState, user};
+use super::{ApiResult, AppState, caller};
 
 pub(super) async fn get(
     State(s): State<Arc<AppState>>,
     h: HeaderMap,
     Query(q): Query<TzQuery>,
 ) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
-    super::cards::timezone(&s, u.id, q.tz.as_deref()).await?;
-    let b = s.intel().brief(u.id, OffsetDateTime::now_utc()).await?;
+    let c = caller(&s, &h).await?;
+    if !c.entitled()?.daily_brief {
+        return Err(super::cards::not_in_plan());
+    }
+    let u = c.user.id;
+    super::cards::timezone(&s, u, q.tz.as_deref()).await?;
+    let b = s.intel().brief(u, OffsetDateTime::now_utc()).await?;
     Ok(Json(json!({ "brief": b })))
 }

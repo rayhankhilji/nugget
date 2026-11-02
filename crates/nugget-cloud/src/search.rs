@@ -17,7 +17,8 @@ use tokio_postgres::types::ToSql;
 use uuid::Uuid;
 
 use crate::db::{Db, DbError, ItemMeta, tsquery};
-use crate::gateway::{Gateway, GatewayError};
+use crate::gateway::{Allowance, Gateway, GatewayError};
+use crate::plans::ModelTier;
 
 const CANDIDATES: i64 = 200;
 pub const MAX_LIMIT: usize = 50;
@@ -176,6 +177,7 @@ pub async fn search(
     gateway: &Gateway,
     user: Uuid,
     req: &SearchRequest,
+    allowance: Allowance,
     offset: UtcOffset,
     now: OffsetDateTime,
 ) -> Result<SearchResponse, GatewayError> {
@@ -323,7 +325,21 @@ pub async fn search(
         });
     }
 
-    let vector = match gateway.embed(db, user, &[words.clone()]).await? {
+    // The query embedding is metered: past the plan's hard cap, search is full text only.
+    let embed_ok = match gateway
+        .choose(db, user, allowance, Some(ModelTier::Fast))
+        .await
+    {
+        Ok(_) => true,
+        Err(GatewayError::QuotaExceeded) => false,
+        Err(e) => return Err(e),
+    };
+    let embedded = if embed_ok {
+        gateway.embed(db, user, &[words.clone()]).await?
+    } else {
+        None
+    };
+    let vector = match embedded {
         Some(mut v) if !v.is_empty() => {
             let emb = crate::db::vector_literal(&v.remove(0));
             db.scoped(Some(user), async |tx| {
@@ -342,7 +358,7 @@ pub async fn search(
         }
         _ => Vec::new(),
     };
-    let mode = if gateway.has_embeddings() {
+    let mode = if gateway.has_embeddings() && embed_ok {
         "hybrid"
     } else {
         "text"

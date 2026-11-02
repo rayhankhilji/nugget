@@ -265,6 +265,10 @@ fn main() {
             cloud::intel::cloud_cards_seen,
             cloud::intel::cloud_card_action,
             cloud::intel::cloud_brief,
+            cloud::cloud_me,
+            cloud::cloud_billing_plans,
+            cloud::cloud_billing_checkout,
+            cloud::cloud_billing_portal,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])

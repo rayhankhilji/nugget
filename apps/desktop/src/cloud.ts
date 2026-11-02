@@ -59,6 +59,61 @@ export interface CloudAnswer {
   answer: string;
   citations: CloudCitation[];
   usage: { input_tokens: number; output_tokens: number };
+  /** The tier that answered (absent from older servers). */
+  model_tier?: CloudModelTier | null;
+  /** A smart request answered by the fast tier: this month's smart allowance is used up. */
+  downgraded?: boolean;
+}
+
+export type CloudModelTier = "fast" | "smart";
+export type BillingInterval = "month" | "year";
+
+/** What a plan includes; `null` limits are unlimited. */
+export interface CloudEntitlements {
+  plan: string;
+  name: string;
+  max_connections: number | null;
+  sync_interval_minutes: number;
+  history_days: number | null;
+  smart_asks_per_month: number;
+  default_model: string;
+  devices: number;
+  ghost_text: boolean;
+  needs_you_inbox: boolean;
+  daily_brief: boolean;
+  actions_with_approval: boolean;
+  agent_tasks: boolean;
+  computer_use: boolean;
+  priority_support: boolean;
+}
+
+export interface CloudSubscription {
+  plan: string;
+  /** Stripe's status: `trialing`, `active`, `past_due`, `canceled`, ... */
+  status: string;
+  interval: string;
+  trial_end: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+}
+
+export interface CloudMe {
+  user_id: string;
+  email: string | null;
+  plan: string | null;
+  embeddings: boolean;
+  subscription: CloudSubscription | null;
+  entitlements: CloudEntitlements | null;
+  usage: { month_cost_micros: number; smart_asks_used: number };
+}
+
+export interface CloudPlan {
+  id: string;
+  name: string;
+  monthly_gbp: number;
+  annual_gbp: number;
+  trial_days: number;
+  entitlements: CloudEntitlements;
 }
 
 export interface CloudSearchRequest {
@@ -146,6 +201,8 @@ export interface CloudSessionEvent {
 export const CLOUD_SESSION_EVENT = "nugget:cloud-session";
 /** No payload: Composio sent the browser back; reload the connections. */
 export const CLOUD_CONNECTIONS_EVENT = "nugget:cloud-connections";
+/** No payload: Stripe Checkout sent the browser back; reload the account and plans. */
+export const CLOUD_BILLING_EVENT = "nugget:cloud-billing";
 
 /** A cloud error: the shell's `ApiError` plus the cloud's own code (`not_signed_in`, ...). */
 export class CloudError extends ApiError {
@@ -191,8 +248,14 @@ export const cloudApi = {
   connect: (toolkit: string) => call<void>("cloud_connect", { toolkit }),
   disconnect: (id: string) => call<void>("cloud_disconnect", { id }),
   sync: () => call<{ synced: CloudSyncResult[] }>("cloud_sync"),
-  ask: (question: string, conversationId?: string | null) =>
-    call<CloudAnswer>("cloud_ask", conversationId ? { question, conversationId } : { question }),
+  ask: (question: string, conversationId?: string | null, model?: CloudModelTier) =>
+    call<CloudAnswer>("cloud_ask", { question, ...(conversationId ? { conversationId } : {}), ...(model ? { model } : {}) }),
+  me: () => call<CloudMe>("cloud_me"),
+  plans: () => call<{ plans: CloudPlan[] }>("cloud_billing_plans"),
+  /** Opens Stripe Checkout in the browser; it comes back with {@link CLOUD_BILLING_EVENT}. */
+  checkout: (plan: string, interval: BillingInterval) => call<void>("cloud_billing_checkout", { plan, interval }),
+  /** Opens the Stripe customer portal in the browser. */
+  portal: () => call<void>("cloud_billing_portal"),
   search: (request: CloudSearchRequest) => call<CloudSearchResponse>("cloud_search", { request: { ...request, tz: deviceTimeZone() } }),
   cards: () => call<CloudCards>("cloud_cards", { tz: deviceTimeZone() }),
   /** Runs knowledge and cards now (slow: seconds). */
@@ -213,4 +276,5 @@ export const cloudApi = {
       if (isSessionEvent(p)) h({ signed_in: p.signed_in, error: typeof p.error === "string" ? p.error : null });
     }),
   onConnectionsChanged: (h: (payload: unknown) => void) => on<unknown>(CLOUD_CONNECTIONS_EVENT, h),
+  onBillingChanged: (h: (payload: unknown) => void) => on<unknown>(CLOUD_BILLING_EVENT, h),
 };

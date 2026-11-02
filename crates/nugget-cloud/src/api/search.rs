@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::Deserialize;
 use time::OffsetDateTime;
 
-use super::{ApiError, ApiResult, AppState, user};
+use super::{ApiError, ApiResult, AppState, caller};
 use crate::intel;
 use crate::search::{self, SearchRequest, SearchResponse};
 
@@ -27,7 +27,9 @@ pub(super) async fn search(
     h: HeaderMap,
     Json(b): Json<Body>,
 ) -> ApiResult<Json<SearchResponse>> {
-    let u = user(&s, &h).await?;
+    let c = caller(&s, &h).await?;
+    let allowance = crate::gateway::Allowance::from(c.entitled()?);
+    let u = c.user;
     if b.req.q.chars().count() > MAX_QUERY_CHARS {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -48,6 +50,6 @@ pub(super) async fn search(
     let now = OffsetDateTime::now_utc();
     let offset = intel::utc_offset(tz.as_deref(), now);
     Ok(Json(
-        search::search(&s.db, &s.gateway, u.id, &b.req, offset, now).await?,
+        search::search(&s.db, &s.gateway, u.id, &b.req, allowance, offset, now).await?,
     ))
 }
