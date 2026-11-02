@@ -1,66 +1,41 @@
 ---
 /**
- * The Heed logo: an ultramarine rounded-square mark and the lowercase "heed" wordmark in Fraunces
- * (SOFT 100, WONK 1). Interim drawing from the v4 brief; swap in DS1's SVGs from docs/brand when
- * they land. The mark's attention dot breathes; reduced motion stops it.
+ * The Heed logo from DS1's brand assets (docs/brand/assets, copied to public/brand): the ultramarine
+ * squircle mark with a cream "h", and the Fraunces wordmark drawn from outlines. The wordmark uses
+ * currentColor, so it follows the theme.
  */
+import markSvg from "../../public/brand/heed-mark.svg?raw";
+import wordSvg from "../../public/brand/heed-wordmark-mono.svg?raw";
+
 interface Props {
   size?: number;
-  pulse?: boolean;
 }
-const { size = 24, pulse = true } = Astro.props;
+const { size = 24 } = Astro.props;
+const mark = markSvg.replace(/\srole="img"/, "").replace(/\saria-label="[^"]*"/, ' aria-hidden="true"');
+const word = wordSvg;
 ---
 <span class="logo" style={`--s:${size}px`}>
-  <svg class:list={["mark", { pulse }]} viewBox="0 0 32 32" aria-hidden="true">
-    <rect width="32" height="32" rx="9" class="tile"></rect>
-    <circle cx="16" cy="16" r="8.5" class="ring"></circle>
-    <circle cx="16" cy="16" r="5" fill="#F6F3EC"></circle>
-  </svg>
-  <span class="word">heed</span>
+  <span class="mark" set:html={mark} />
+  <span class="word" set:html={word} />
 </span>
 
 <style>
   .logo {
     display: inline-flex;
     align-items: center;
-    gap: calc(var(--s) * 0.34);
-    font-family: var(--display);
-    font-size: calc(var(--s) * 1.08);
-    font-weight: 420;
-    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 72;
-    letter-spacing: -0.03em;
-    line-height: 1;
+    gap: calc(var(--s) * 0.32);
     color: currentColor;
+    line-height: 0;
   }
-  .mark {
+  .mark,
+  .mark :global(svg) {
     width: var(--s);
     height: var(--s);
     flex: none;
   }
-  .tile {
-    fill: var(--mark-tile);
-  }
-  .ring {
-    fill: #f6f3ec;
-    opacity: 0.22;
-    transform-box: fill-box;
-    transform-origin: center;
-  }
-  .pulse .ring {
-    animation: mark-breathe 2.8s var(--ease) infinite;
-  }
-  @keyframes mark-breathe {
-    0%,
-    100% {
-      transform: scale(0.75);
-      opacity: 0.32;
-    }
-    50% {
-      transform: scale(1.05);
-      opacity: 0.12;
-    }
-  }
-  .word {
-    transform: translateY(-0.06em);
+  .word :global(svg) {
+    height: calc(var(--s) * 0.98);
+    width: auto;
+    display: block;
   }
 </style>

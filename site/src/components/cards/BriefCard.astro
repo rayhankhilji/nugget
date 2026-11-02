@@ -1,99 +1,111 @@
 ---
-/** HTML recreation of the Home morning brief (until real v4 app screens are available). */
+/**
+ * HTML recreation of the v4 Home screen: a light Fraunces greeting with today's focus, brief prose with
+ * grey citation chips, then recommended actions. Used until real v4 app screens exist.
+ */
 import AppIcon from "../AppIcon.astro";
 ---
-<article class="card brief" aria-label="Example: Heed's morning brief">
-  <header>
-    <span class="label">Morning brief · Tue 4 Nov</span>
-    <span class="live"><i></i>Up to date</span>
-  </header>
-  <p class="hello">Good morning, Ada. Three things matter today.</p>
-  <ol>
-    <li>
-      <AppIcon slug="googlecalendar" size={18} tile />
-      <span><b>11:00 Driftwood review.</b> Ines wants a call on pagination first.</span>
-    </li>
-    <li>
-      <AppIcon slug="gmail" size={18} tile />
-      <span><b>Margaret</b> is waiting on a kickoff time. 2 days.</span>
-    </li>
-    <li>
-      <AppIcon slug="notion" size={18} tile />
-      <span><b>Q4 board notes</b> changed overnight. 3 edits.</span>
-    </li>
-  </ol>
+<article class="card brief" aria-label="Example: the Home brief in Heed">
+  <p class="label">Tuesday 4 November</p>
+  <p class="hello">Good morning, Ada.</p>
+  <p class="focus"><span>Focus for today</span> the Driftwood API decision</p>
+  <p class="prose">
+    Ines wants a call on cursor pagination before the 11:00 review <span class="chip"><AppIcon slug="notion" size={11} tile />RFC</span>.
+    Margaret is still waiting on a kickoff time <span class="chip"><AppIcon slug="gmail" size={11} tile />Mail</span>.
+  </p>
+  <ul class="actions">
+    <li><span class="k">1</span>Prep for the Driftwood review<span class="t">11:00</span></li>
+    <li><span class="k">2</span>Reply to Margaret with Thursday 2pm<span class="t">draft ready</span></li>
+    <li><span class="k">3</span>Skim 3 edits to the board notes<span class="t">4 min</span></li>
+  </ul>
 </article>
 
 <style>
   .brief {
-    padding: 18px 18px 14px;
     width: 340px;
     max-width: 100%;
+    padding: 18px 18px 12px;
+    border-radius: var(--heed-radius-l);
     background: var(--surface);
-    border-radius: 16px;
     box-shadow: var(--shadow-3);
     font-size: 13.5px;
-    color: var(--text);
-  }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
   }
   .label {
     font-family: var(--mono);
     font-size: 11.5px;
-    letter-spacing: 0.02em;
     color: var(--text-3);
   }
-  .live {
+  .hello {
+    margin: 4px 0 2px;
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: 28px;
+    letter-spacing: var(--heed-display-tracking);
+    line-height: 1.1;
+  }
+  .focus {
+    font-size: 13px;
+    color: var(--text);
+  }
+  .focus span {
+    color: var(--text-3);
+    margin-right: 4px;
+  }
+  .prose {
+    margin: 12px 0;
+    color: var(--text-2);
+    line-height: 1.6;
+  }
+  .chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    font-size: 11.5px;
+    gap: 4px;
+    padding: 0 6px 0 3px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 18px;
     color: var(--text-2);
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    vertical-align: 0.05em;
   }
-  .live i {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--ok);
-  }
-  .hello {
-    font-family: var(--display);
-    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 48;
-    font-weight: 380;
-    font-size: 20px;
-    line-height: 1.2;
-    letter-spacing: -0.015em;
-    margin-bottom: 12px;
-  }
-  ol {
+  .actions {
     list-style: none;
-    margin: 0;
+    margin: 0 -6px;
     padding: 0;
+    border-top: 1px solid var(--line);
+  }
+  .actions li {
     display: grid;
-    gap: 2px;
-  }
-  li {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    padding: 8px;
-    margin: 0 -8px;
-    border-radius: 10px;
-    color: var(--text-2);
-    line-height: 1.4;
-  }
-  li:first-child {
-    background: var(--accent-soft);
-  }
-  li b {
+    grid-template-columns: 18px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 6px;
+    border-bottom: 1px solid var(--line);
     color: var(--text);
-    font-weight: 560;
   }
-  li :global(.app) {
-    margin-top: 1px;
+  .actions li:last-child {
+    border-bottom: 0;
+  }
+  .actions li:first-child {
+    background: var(--accent-soft);
+    border-radius: 8px;
+  }
+  .k {
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-2);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+  .t {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
   }
 </style>

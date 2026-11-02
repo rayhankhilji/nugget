@@ -1,140 +1,59 @@
-/* Heed v4 design tokens and base styles.
-   Ultramarine + Fraunces: warm cream canvases, warm near-black ink, one bold signal colour in big
-   confident fields. Token values match the shared app tokens (docs/brand, DS1); keep them in sync. */
-
-@font-face {
-  font-family: "Fraunces";
-  src: url("/fonts/fraunces.woff2") format("woff2-variations"), url("/fonts/fraunces.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist";
-  src: url("/fonts/geist.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Geist Mono";
-  src: url("/fonts/geist-mono.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* Heed site styles, v4.
+   Colour, type, space, depth and motion come from the shared brand tokens (styles/heed/tokens.css,
+   copied verbatim from DS1's apps/desktop/src/brand/tokens.css). This file maps them to the names the
+   site's components use, and adds layout. Don't put brand values here: change tokens.css upstream. */
 
 :root {
-  /* Brand palette */
-  --signal: #1f3bff;
-  --signal-hover: #1830d6;
-  --signal-deep: #070798;
-  --signal-wash: #e9ecff;
-  --lilac: #e8e3ff;
-  --cream: #f6f3ec;
-  --ok: #1e8e5a;
-  --warn: #c77700;
-  --danger: #d93a2b;
+  --bg: var(--heed-canvas);
+  --bg-2: color-mix(in srgb, var(--heed-canvas) 94%, var(--heed-ink));
+  --surface: var(--heed-surface);
+  --surface-2: var(--heed-surface-2);
+  --line: var(--heed-line);
+  --line-2: var(--heed-line-strong);
+  --text: var(--heed-ink);
+  --text-2: var(--heed-ink-2);
+  --text-3: var(--heed-ink-quiet); /* quiet text: AA on canvas and surfaces */
+  --ink-3: var(--heed-ink-3); /* icons, rules and disabled states only */
+  --ghost: var(--heed-ink-quiet); /* lighter than typed text, but still AA */
+  --brand: var(--heed-signal);
+  --accent: var(--heed-signal-fill);
+  --accent-strong: var(--heed-signal-hover);
+  --accent-ink: var(--heed-signal-ink);
+  --accent-soft: var(--heed-signal-wash);
+  --on-accent: var(--heed-on-signal);
+  --band: var(--heed-signal-fill);
+  --on-band: var(--heed-on-signal);
+  --ok: var(--heed-ok-ink);
+  --warn: var(--heed-warn); /* fills only */
+  --danger: var(--heed-danger-ink);
+  --mark-tile: var(--heed-signal);
+  --grid: color-mix(in srgb, var(--heed-ink) 6%, transparent);
+  --shadow-1: 0 0 0 1px var(--heed-line), var(--heed-shadow-1);
+  --shadow-2: 0 0 0 1px var(--heed-line), var(--heed-shadow-2);
+  --shadow-3: 0 0 0 1px var(--heed-line), var(--heed-shadow-3);
+  --hi: inset 0 1px 0 color-mix(in srgb, var(--heed-surface) 60%, transparent);
 
-  /* Light theme */
-  color-scheme: light;
-  --bg: var(--cream); /* canvas */
-  --bg-2: #efeae0;
-  --surface: #ffffff;
-  --surface-2: #fbf9f4;
-  --line: rgb(20 17 15 / 0.08);
-  --line-2: rgb(20 17 15 / 0.14);
-  --text: #14110f; /* ink */
-  --text-2: #4a4540; /* ink-2 */
-  --text-3: #6b655d; /* ink-3 (#8A847C) deepened so small text meets AA on the canvas */
-  --ink-3: #8a847c; /* decorative only: icons, rules, 18px+ */
-  --ghost: rgb(20 17 15 / 0.36);
-  --brand: var(--signal);
-  --accent: var(--signal);
-  --accent-strong: var(--signal-hover);
-  --accent-ink: var(--signal);
-  --accent-soft: var(--signal-wash);
-  --on-accent: #ffffff;
-  --band: var(--signal); /* the full-bleed signal field */
-  --on-band: #ffffff;
-  --shadow-1: 0 0 0 1px rgb(20 17 15 / 0.06), 0 1px 2px rgb(20 17 15 / 0.04);
-  --shadow-2: 0 0 0 1px rgb(20 17 15 / 0.05), 0 2px 4px rgb(20 17 15 / 0.04), 0 12px 32px -12px rgb(20 17 15 / 0.12);
-  --shadow-3: 0 0 0 1px rgb(20 17 15 / 0.05), 0 4px 10px rgb(20 17 15 / 0.05), 0 28px 60px -24px rgb(20 17 15 / 0.22);
-  --hi: inset 0 1px 0 rgb(255 255 255 / 0.8);
-  --grid: rgb(20 17 15 / 0.05);
-  --mark-tile: var(--signal);
-
-  --display: "Fraunces", ui-serif, Georgia, serif;
-  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --r-1: 6px;
-  --r-2: 10px;
-  --r-3: 14px;
-  --r-4: 16px;
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --t-ui: 200ms;
-  --t-brand: 800ms;
+  --display: var(--heed-font-display);
+  --font: var(--heed-font-ui);
+  --mono: var(--heed-font-mono);
+  --r-1: var(--heed-radius-s);
+  --r-2: var(--heed-radius-m);
+  --r-3: var(--heed-radius-m);
+  --r-4: var(--heed-radius-l);
+  --ease: var(--heed-ease-enter);
+  --t-ui: var(--heed-dur-ui);
+  --t-brand: var(--heed-dur-brand);
   --wrap: 1160px;
   --gutter: clamp(16px, 4vw, 32px);
+  color-scheme: light;
 }
-
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #0b0b1a;
-    --bg-2: #10101f;
-    --surface: #131327;
-    --surface-2: #1a1a33;
-    --line: rgb(233 236 255 / 0.09);
-    --line-2: rgb(233 236 255 / 0.16);
-    --text: #f3f1ec;
-    --text-2: #b9b6c8;
-    --text-3: #8f8ca6;
-    --ink-3: #7d7a92;
-    --ghost: rgb(243 241 236 / 0.36);
-    --brand: #5a6cff;
-    --accent: #5a6cff;
-    --accent-strong: #7584ff;
-    --accent-ink: #8592ff;
-    --accent-soft: rgb(90 108 255 / 0.16);
-    --on-accent: #0b0b1a;
-    --danger: #ff7466;
-    --band: #1f3bff;
-    --shadow-1: 0 0 0 1px rgb(233 236 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.4);
-    --shadow-2: 0 0 0 1px rgb(233 236 255 / 0.07), 0 12px 32px -12px rgb(0 0 0 / 0.6);
-    --shadow-3: 0 0 0 1px rgb(233 236 255 / 0.08), 0 28px 60px -24px rgb(0 0 0 / 0.7);
-    --hi: inset 0 1px 0 rgb(255 255 255 / 0.05);
-    --grid: rgb(233 236 255 / 0.05);
-    --mark-tile: #5a6cff;
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0b1a;
-  --bg-2: #10101f;
-  --surface: #131327;
-  --surface-2: #1a1a33;
-  --line: rgb(233 236 255 / 0.09);
-  --line-2: rgb(233 236 255 / 0.16);
-  --text: #f3f1ec;
-  --text-2: #b9b6c8;
-  --text-3: #8f8ca6;
-  --ink-3: #7d7a92;
-  --ghost: rgb(243 241 236 / 0.36);
-  --brand: #5a6cff;
-  --accent: #5a6cff;
-  --accent-strong: #7584ff;
-  --accent-ink: #8592ff;
-  --accent-soft: rgb(90 108 255 / 0.16);
-  --on-accent: #0b0b1a;
-  --danger: #ff7466;
-  --band: #1f3bff;
-  --shadow-1: 0 0 0 1px rgb(233 236 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.4);
-  --shadow-2: 0 0 0 1px rgb(233 236 255 / 0.07), 0 12px 32px -12px rgb(0 0 0 / 0.6);
-  --shadow-3: 0 0 0 1px rgb(233 236 255 / 0.08), 0 28px 60px -24px rgb(0 0 0 / 0.7);
-  --hi: inset 0 1px 0 rgb(255 255 255 / 0.05);
-  --grid: rgb(233 236 255 / 0.05);
-  --mark-tile: #5a6cff;
 }
 
 *,
@@ -188,10 +107,10 @@ h1,
 h2,
 .display {
   font-family: var(--display);
-  font-weight: 340;
-  font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
-  letter-spacing: -0.02em;
-  word-spacing: 0.06em;
+  font-weight: var(--heed-display-weight);
+  font-variation-settings: var(--heed-display-settings);
+  letter-spacing: var(--heed-display-tracking);
+  word-spacing: 0.05em;
   line-height: 1.04;
 }
 p {

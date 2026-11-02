@@ -2,10 +2,13 @@
 import Base from "../layouts/Base.astro";
 import { loadPlans } from "../lib/plans";
 const { plans } = await loadPlans();
-const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entitlements.devices])));
+// Per-plan facts the page needs in the browser: price per interval and the device limit.
+const facts = JSON.stringify(
+  Object.fromEntries(plans.map((p) => [p.id, { name: p.name, month: p.monthly_gbp, year: p.annual_gbp, devices: p.entitlements.devices }])),
+);
 ---
 <Base title="Account" description="Your Heed plan, billing and devices." noindex>
-  <section class="wrap acct" data-account data-limits={limits} aria-busy="true">
+  <section class="wrap acct" data-account data-facts={facts} aria-busy="true">
     <header class="head">
       <div>
         <h1>Account</h1>
@@ -16,58 +19,88 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
 
     <p class="status" role="status" aria-live="polite" data-msg hidden></p>
 
+    <!-- Plan strip: Plan · Cost · Renews · Usage -->
+    <section class="strip" aria-labelledby="plan-h">
+      <h2 id="plan-h" class="sr-only">Plan</h2>
+      <div class="cell">
+        <span class="k">Plan</span>
+        <span class="v"><span data-plan>…</span> <span class="pill" data-status hidden></span></span>
+      </div>
+      <div class="cell">
+        <span class="k">Cost</span>
+        <span class="v mono" data-cost>…</span>
+      </div>
+      <div class="cell">
+        <span class="k" data-when-label>Renews</span>
+        <span class="v mono" data-when>…</span>
+      </div>
+      <div class="cell usage">
+        <span class="k">Deep answers this month</span>
+        <span class="v mono" data-usage-text>…</span>
+        <span class="meter" aria-hidden="true"><i data-usage-bar></i></span>
+      </div>
+    </section>
+    <p class="trialline" data-plan-detail></p>
+    <div class="row">
+      <button type="button" class="btn btn-primary" data-portal hidden>Manage billing</button>
+      <a href="/pricing" class="btn btn-primary" data-choose hidden>Choose a plan</a>
+      <a href="/pricing" class="btn btn-ghost" data-compare>Compare plans</a>
+    </div>
+    <p class="small">Stripe handles invoices, card details and cancelling securely.</p>
+
     <div class="grid">
-      <section class="box plan" aria-labelledby="plan-h">
+      <section class="box devices" aria-labelledby="dev-h">
         <div class="box-h">
-          <h2 id="plan-h">Plan</h2>
-          <span class="pill" data-status hidden></span>
+          <h2 id="dev-h">Devices</h2>
+          <span class="mono small" data-dev-limit></span>
         </div>
-        <p class="plan-name" data-plan><span class="sk" style="width:140px"></span></p>
-        <p class="muted" data-plan-detail><span class="sk" style="width:220px"></span></p>
-        <div class="row">
-          <button type="button" class="btn btn-primary btn-sm" data-portal hidden>Manage billing</button>
-          <a href="/pricing" class="btn btn-primary btn-sm" data-choose hidden>Choose a plan</a>
-          <a href="/pricing" class="btn btn-ghost btn-sm" data-compare>Compare plans</a>
-        </div>
-        <p class="small">Billing, invoices, card details and cancelling are handled securely by Stripe.</p>
+        <ul data-devices><li class="muted">Loading…</li></ul>
+        <p class="small">A device counts towards your plan's limit for 30 days after it was last used.</p>
       </section>
 
       <section class="box" aria-labelledby="dl-h">
         <div class="box-h"><h2 id="dl-h">Heed for Mac</h2></div>
-        <p class="muted">macOS 11 or later, Apple silicon and Intel. Sign in inside the app with the same email.</p>
+        <p class="muted">For macOS 11 or later, on Apple silicon and Intel. Sign in to the app with this email.</p>
         <div class="row"><a href="/download" class="btn btn-secondary btn-sm">Download</a></div>
       </section>
 
-      <section class="box devices" aria-labelledby="dev-h">
-        <div class="box-h">
-          <h2 id="dev-h">Devices</h2>
-          <span class="muted small" data-dev-limit></span>
-        </div>
-        <ul data-devices><li class="muted">Loading…</li></ul>
-        <p class="small">Devices count towards your plan's limit for 30 days after they were last used.</p>
-      </section>
-
       <section class="box danger" aria-labelledby="del-h">
-        <div class="box-h"><h2 id="del-h">Delete account</h2></div>
+        <div class="box-h"><h2 id="del-h">Your data</h2></div>
         <p class="muted">
-          Disconnects every app and permanently deletes your account and all synced data. Cancel your plan in Manage
-          billing first if you don't want to be charged again.
+          Download everything Heed stores about you, or delete your account. Deleting disconnects every app and permanently
+          deletes your synced data.
         </p>
-        <form data-delete>
-          <label class="field">
-            <span>Type <strong>delete</strong> to confirm</span>
-            <input class="input" name="confirm" autocomplete="off" spellcheck="false" />
-          </label>
-          <button type="submit" class="btn btn-sm danger-btn">Delete my account</button>
-        </form>
+        <div class="row">
+          <button type="button" class="btn btn-secondary btn-sm" data-export>Download my data</button>
+          <button type="button" class="btn btn-sm danger-btn" data-delete-open>Delete account…</button>
+        </div>
       </section>
     </div>
+
+    <dialog class="dlg" data-delete-dialog aria-labelledby="dlg-h">
+      <form data-delete method="dialog">
+        <h2 id="dlg-h">Delete your Heed account?</h2>
+        <p class="muted">
+          This disconnects every app and permanently deletes your account and all synced data. It can't be undone. If you
+          have a plan, cancel it in Manage billing first so you aren't charged again.
+        </p>
+        <p><button type="button" class="linkish" data-export>Download your data first</button></p>
+        <label class="field">
+          <span>Type <strong>delete</strong> to confirm</span>
+          <input class="input" name="confirm" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="row end">
+          <button type="button" class="btn btn-ghost btn-sm" data-delete-cancel>Cancel</button>
+          <button type="submit" class="btn btn-sm danger-fill" data-delete-confirm disabled>Delete account</button>
+        </div>
+      </form>
+    </dialog>
   </section>
 </Base>
 
 <script>
   import { supabase } from "../lib/supabase";
-  import { billingPortal, deleteAccount, CloudError } from "../lib/cloud";
+  import { billingPortal, deleteAccount, exportData, getMe, CloudError } from "../lib/cloud";
   import { planName } from "../lib/plans";
 
   interface Sub {
@@ -83,6 +116,7 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
     first_seen_at: string;
     last_seen_at: string;
   }
+  type Facts = Record<string, { name: string; month: number; year: number; devices: number }>;
 
   const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)!;
   const msg = $("[data-msg]");
@@ -116,37 +150,75 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
       location.replace(`/signin?next=${encodeURIComponent("/account")}`);
       return;
     }
+    const token = session.access_token;
+    const facts = JSON.parse($("[data-account]").dataset["facts"] ?? "{}") as Facts;
     $("[data-email]").textContent = session.user.email ?? "";
     if (new URLSearchParams(location.search).get("billing") === "done") say("Thanks. Your plan is being set up.");
 
-    // Read straight from Supabase: row-level security limits these to the signed-in user.
-    const [subs, devs] = await Promise.all([
+    // Plan and devices come straight from Supabase (row-level security limits them to this user);
+    // usage comes from the cloud API.
+    const [subs, devs, me] = await Promise.all([
       sb.from("subscriptions").select("plan,interval,status,trial_end,current_period_end,cancel_at_period_end").order("updated_at", { ascending: false }),
       sb.from("devices").select("device_id,first_seen_at,last_seen_at").order("last_seen_at", { ascending: false }),
+      getMe(token).catch(() => null),
     ]);
     $("[data-account]").setAttribute("aria-busy", "false");
 
+    async function openPortal(e: Event) {
+      const b = e.currentTarget as HTMLButtonElement;
+      b.disabled = true;
+      try {
+        const { url } = await billingPortal(token);
+        if (!/^https:\/\//.test(url)) throw new Error("Billing returned an invalid address.");
+        location.assign(url);
+      } catch (err) {
+        b.disabled = false;
+        say(
+          err instanceof CloudError && err.code === "no_customer"
+            ? "There's no billing account yet. Choose a plan to start your free trial."
+            : err instanceof Error
+              ? err.message
+              : "We couldn't open billing.",
+          true,
+        );
+      }
+    }
+
     const rows = (subs.data ?? []) as Sub[];
     const sub = rows.find((s) => LIVE.has(s.status)) ?? rows[0];
-    const live = sub && LIVE.has(sub.status);
+    const live = !!sub && LIVE.has(sub.status);
+    const f = sub ? facts[sub.plan] : undefined;
     const status = $("[data-status]");
     if (sub) {
-      $("[data-plan]").textContent = `${planName(sub.plan)}, ${sub.interval === "year" ? "annual" : "monthly"}`;
+      $("[data-plan]").textContent = planName(sub.plan);
       status.textContent = LABEL[sub.status] ?? sub.status;
       status.dataset["tone"] = live ? (sub.status === "past_due" ? "warn" : "ok") : "off";
       status.hidden = false;
-      const end = date(sub.current_period_end);
-      $("[data-plan-detail]").textContent =
-        sub.status === "trialing"
-          ? `Free trial until ${date(sub.trial_end)}. ${sub.cancel_at_period_end ? "It won't renew." : "Your first payment is taken then."}`
-          : sub.cancel_at_period_end && live
-            ? `Cancelled. You keep access until ${end}.`
-            : live
-              ? `Renews on ${end}.`
-              : "No active subscription.";
+      $("[data-cost]").textContent = f ? (sub.interval === "year" ? `£${f.year} / year` : `£${f.month} / month`) : "–";
+      const trial = sub.status === "trialing";
+      $("[data-when-label]").textContent = trial ? "Trial ends" : sub.cancel_at_period_end ? "Access until" : "Renews";
+      $("[data-when]").textContent = live ? date(trial ? sub.trial_end : sub.current_period_end) : "–";
+      const detail = $("[data-plan-detail]");
+      if (trial) {
+        detail.innerHTML = `Your free trial ends on <strong></strong>. ${sub.cancel_at_period_end ? "It won't renew." : "Your first payment is taken then."}`;
+        detail.querySelector("strong")!.textContent = date(sub.trial_end);
+      } else {
+        detail.textContent =
+          sub.cancel_at_period_end && live ? "Cancelled. You keep access until the end of the period." : live ? "" : "No active subscription.";
+      }
+      if (live && sub.plan === "heed") {
+        const up = document.createElement("button");
+        up.type = "button";
+        up.className = "linkish";
+        up.textContent = "Upgrade to Heed Max";
+        up.addEventListener("click", openPortal);
+        detail.append(" ", up);
+      }
       $("[data-portal]").hidden = false;
     } else {
       $("[data-plan]").textContent = "No plan yet";
+      $("[data-cost]").textContent = "–";
+      $("[data-when]").textContent = "–";
       $("[data-plan-detail]").textContent = "Start a 14-day free trial to connect your apps.";
     }
     if (!live) {
@@ -155,8 +227,20 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
     }
     if (subs.error) say("We couldn't load your plan. Refresh to try again.", true);
 
-    const limits = JSON.parse($("[data-account]").dataset["limits"] ?? "{}") as Record<string, number>;
-    const limit = live ? (limits[sub.plan] ?? 1) : 0;
+    // Usage meter: ink, amber from 80%, red at 100%.
+    const allowance = me?.entitlements?.smart_asks_per_month ?? 0;
+    const used = me?.usage?.smart_asks_used ?? 0;
+    if (live && allowance > 0) {
+      const pct = Math.min(100, Math.round((used / allowance) * 100));
+      $("[data-usage-text]").textContent = `${used} of ${allowance}`;
+      const bar = $("[data-usage-bar]");
+      bar.style.width = `${pct}%`;
+      bar.dataset["level"] = pct >= 100 ? "full" : pct >= 80 ? "high" : "ok";
+    } else {
+      $("[data-usage-text]").textContent = "–";
+    }
+
+    const limit = live && f ? f.devices : 0;
     const list = $("[data-devices]");
     const devices = (devs.data ?? []) as Device[];
     $("[data-dev-limit]").textContent = live ? `${devices.length} of ${limit}` : "";
@@ -173,13 +257,14 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
         const li = document.createElement("li");
         const label = document.createElement("span");
         label.innerHTML = `<b></b><small class="muted"></small>`;
-        label.querySelector("b")!.textContent = d.device_id === "unnamed-client" ? "Unnamed client" : `Device ${d.device_id.slice(0, 8)}`;
+        const name = d.device_id === "unnamed-client" ? "Unnamed client" : `Device ${d.device_id.slice(0, 8)}`;
+        label.querySelector("b")!.textContent = name;
         label.querySelector("small")!.textContent = `Last used ${date(d.last_seen_at)}`;
         const rm = document.createElement("button");
         rm.type = "button";
         rm.className = "btn btn-ghost btn-sm";
         rm.textContent = "Remove";
-        rm.setAttribute("aria-label", `Remove ${label.querySelector("b")!.textContent}`);
+        rm.setAttribute("aria-label", `Remove ${name}`);
         rm.addEventListener("click", async () => {
           rm.disabled = true;
           const { error } = await sb.from("devices").delete().eq("device_id", d.device_id);
@@ -198,47 +283,54 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
     };
     renderDevices(devices);
 
-    $("[data-portal]").addEventListener("click", async (e) => {
-      const b = e.currentTarget as HTMLButtonElement;
-      b.disabled = true;
-      try {
-        const { url } = await billingPortal(session.access_token);
-        if (!/^https:\/\//.test(url)) throw new Error("Billing returned an invalid address.");
-        location.assign(url);
-      } catch (err) {
-        b.disabled = false;
-        say(
-          err instanceof CloudError && err.code === "no_customer"
-            ? "There's no billing account yet. Choose a plan to start your free trial."
-            : err instanceof Error
-              ? err.message
-              : "We couldn't open billing.",
-          true,
-        );
-      }
-    });
+    $("[data-portal]").addEventListener("click", openPortal);
 
     $("[data-signout]").addEventListener("click", async () => {
       await sb.auth.signOut();
       location.replace("/");
     });
 
-    $<HTMLFormElement>("[data-delete]").addEventListener("submit", async (e) => {
+    document.querySelectorAll<HTMLButtonElement>("[data-export]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        b.disabled = true;
+        try {
+          const data = await exportData(token);
+          const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+          const a = Object.assign(document.createElement("a"), { href: url, download: "heed-export.json" });
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (err) {
+          say(err instanceof Error ? err.message : "We couldn't export your data.", true);
+        } finally {
+          b.disabled = false;
+        }
+      }),
+    );
+
+    // Delete: a type-to-confirm dialog.
+    const dlg = $<HTMLDialogElement>("[data-delete-dialog]");
+    const form = $<HTMLFormElement>("[data-delete]");
+    const input = form.elements.namedItem("confirm") as HTMLInputElement;
+    const confirmBtn = $<HTMLButtonElement>("[data-delete-confirm]");
+    $("[data-delete-open]").addEventListener("click", () => {
+      input.value = "";
+      confirmBtn.disabled = true;
+      dlg.showModal();
+      input.focus();
+    });
+    $("[data-delete-cancel]").addEventListener("click", () => dlg.close());
+    input.addEventListener("input", () => (confirmBtn.disabled = input.value.trim().toLowerCase() !== "delete"));
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const form = e.currentTarget as HTMLFormElement;
-      const typed = (form.elements.namedItem("confirm") as HTMLInputElement).value.trim().toLowerCase();
-      if (typed !== "delete") {
-        say("Type delete to confirm.", true);
-        return;
-      }
-      const b = form.querySelector("button")!;
-      b.disabled = true;
+      if (input.value.trim().toLowerCase() !== "delete") return;
+      confirmBtn.disabled = true;
       try {
-        await deleteAccount(session.access_token);
+        await deleteAccount(token);
         await sb.auth.signOut().catch(() => undefined);
         location.replace("/?deleted=1");
       } catch (err) {
-        b.disabled = false;
+        confirmBtn.disabled = false;
+        dlg.close();
         say(err instanceof CloudError ? err.message : "We couldn't delete your account. Try again.", true);
       }
     });
@@ -247,53 +339,93 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
 
 <style>
   .acct {
-    padding-block: 48px 96px;
+    padding-block: 56px 96px;
     display: grid;
-    gap: 24px;
+    gap: 20px;
   }
   .head {
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
     gap: 16px;
+    margin-bottom: 8px;
   }
   h1 {
-    font-size: clamp(30px, 4vw, 40px);
-    margin-bottom: 4px;
+    font-size: clamp(40px, 6vw, 56px);
+    margin-bottom: 6px;
   }
-  .grid {
+  .strip {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 16px;
-  }
-  .box {
-    display: grid;
-    gap: 12px;
-    align-content: start;
-    padding: 24px;
-    border-radius: var(--r-4);
+    grid-template-columns: 1.1fr 1fr 1fr 1.4fr;
+    border-radius: var(--heed-radius-l);
     background: var(--surface);
-    box-shadow: var(--shadow-1), var(--hi);
+    box-shadow: var(--shadow-2);
+    overflow: hidden;
   }
-  .box-h {
+  .cell {
+    display: grid;
+    gap: 6px;
+    align-content: start;
+    padding: 18px 20px;
+    border-left: 1px solid var(--line);
+  }
+  .cell:first-child {
+    border-left: 0;
+  }
+  .k {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .v {
+    font-size: 18px;
+    font-weight: 560;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
+    flex-wrap: wrap;
   }
-  h2 {
-    font-size: 16px;
-    letter-spacing: -0.01em;
+  .mono {
+    font-family: var(--mono);
+    font-weight: 450;
+    font-variant-numeric: tabular-nums;
   }
-  .plan-name {
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: -0.03em;
+  .meter {
+    display: block;
+    height: 6px;
+    margin-top: 4px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line);
+    overflow: hidden;
+  }
+  .meter i {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: 6px;
+    background: var(--text);
+    transition: width var(--heed-dur-panel) var(--ease);
+  }
+  .meter i[data-level="high"] {
+    background: var(--heed-warn);
+  }
+  .meter i[data-level="full"] {
+    background: var(--heed-danger);
+  }
+  .trialline {
+    color: var(--text-2);
+  }
+  .trialline:empty {
+    display: none;
   }
   .pill {
+    font-family: var(--font);
     font-size: 12px;
     font-weight: 500;
-    padding: 3px 9px;
+    padding: 2px 9px;
     border-radius: 999px;
     background: var(--surface-2);
     color: var(--text-2);
@@ -303,24 +435,53 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
     color: var(--text);
   }
   .pill[data-tone="warn"] {
-    background: var(--warn);
+    background: var(--heed-warn);
     color: #14110f;
   }
   .row {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+    align-items: center;
+  }
+  .row.end {
+    justify-content: flex-end;
   }
   .row [hidden] {
     display: none;
   }
-  .sk {
-    display: inline-block;
-    max-width: 100%;
-    height: 1em;
-    border-radius: 6px;
-    background: var(--surface-2);
-    vertical-align: middle;
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .box {
+    display: grid;
+    gap: 12px;
+    align-content: start;
+    padding: 22px;
+    border-radius: var(--heed-radius-l);
+    background: var(--surface);
+    box-shadow: var(--shadow-1);
+  }
+  .box-h {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .box h2 {
+    font-family: var(--font);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    font-variation-settings: normal;
+    word-spacing: normal;
+  }
+  .dlg h2 {
+    font-size: 28px;
   }
   .devices ul {
     list-style: none;
@@ -341,22 +502,56 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
     display: grid;
   }
   .devices :global(li b) {
-    font-weight: 550;
-  }
-  .danger form {
-    display: grid;
-    gap: 12px;
+    font-weight: 560;
   }
   .danger-btn {
-    justify-self: start;
     background: transparent;
     color: var(--danger);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--heed-danger) 50%, transparent);
   }
   .danger-btn:hover {
-    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    background: color-mix(in srgb, var(--heed-danger) 10%, transparent);
   }
-  @media (max-width: 760px) {
+  .danger-fill {
+    background: #b83224; /* light danger-ink: white text stays AA in both themes */
+    color: #fff;
+  }
+  :global(.linkish) {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .dlg {
+    width: min(480px, calc(100vw - 32px));
+    padding: 24px;
+    border: 0;
+    border-radius: var(--heed-radius-l);
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-3);
+  }
+  .dlg::backdrop {
+    background: rgb(11 11 26 / 0.45);
+  }
+  .dlg form {
+    display: grid;
+    gap: 14px;
+  }
+  @media (max-width: 900px) {
+    .strip {
+      grid-template-columns: 1fr 1fr;
+    }
+    .cell:nth-child(3) {
+      border-left: 0;
+    }
+    .cell:nth-child(n + 3) {
+      border-top: 1px solid var(--line);
+    }
     .grid {
       grid-template-columns: 1fr;
     }

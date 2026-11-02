@@ -164,50 +164,42 @@ unknown paths. Any static host that does the same will work, for example Vercel 
 
 ## Brand (v4: ultramarine and Fraunces)
 
-These follow the founder's v4 direction, the same brief DS1 is using to restyle the app. Keep the
-two in sync. When DS1 publishes `docs/brand/` (the shared `tokens.css`, the SVG logo and the brand
-sheet), switch `src/styles/global.css` and `src/components/Logo.astro` over to those files.
+**One source with the app.** These files are copied verbatim from DS1's `ds/brand` (182befd2), so the
+website and the desktop app can't drift apart:
 
-**Look:** warm cream canvas, warm near-black ink, and one bold signal colour used in big fields.
-That covers the hero sky, the feature band and the Heed Max card. Calm white product cards float
-over the imagery.
-
-**Colour tokens**, in `src/styles/global.css`:
-
-| Light | Value |
+| In the site | From `ds/brand` |
 | --- | --- |
-| Canvas | `#F6F3EC` |
-| Surfaces | `#FFFFFF` and `#FBF9F4` |
-| Ink | `#14110F`, `#4A4540`, and `#6B655D` |
-| Signal | `#1F3BFF` (hover `#1830D6`, deep `#070798`, wash `#E9ECFF`) |
-| Lilac | `#E8E3FF` |
-| States | ok `#1E8E5A`, warn `#C77700`, danger `#D93A2B` |
+| `src/styles/heed/tokens.css` | `apps/desktop/src/brand/tokens.css` (all `--heed-*` variables) |
+| `src/styles/heed/fonts.css` | `apps/desktop/src/brand/fonts.css`, with `url()` paths changed to `/fonts/` |
+| `public/fonts/*.woff2`, `OFL-*.txt` | `apps/desktop/src/fonts/` (Fraunces, Geist, Geist Mono) |
+| `public/brand/*.svg`, `public/favicon.svg` | `docs/brand/assets/` (mark, wordmarks, favicon, app icon) |
+| `public/art/painting-oxbow.webp` | `apps/desktop/src/brand/img/` (CC0, duotoned) |
 
-| Dark | Value |
-| --- | --- |
-| Canvas | `#0B0B1A` |
-| Surfaces | `#131327` and `#1A1A33` |
-| Ink | `#F3F1EC`, `#B9B6C8`, and `#8F8CA6` |
-| Signal | `#5A6CFF` |
+To update, check those paths out from the newer `ds/brand` commit again. Never edit them here.
 
-Two values differ from the brief, so that small text meets AA:
-- The third ink, `ink-3`, is deepened from `#8A847C` (light) and `#7D7A92` (dark). The brief values
-  are kept as `--ink-3` for decorative use only.
-- Signal-coloured text is used only at 18px and above.
+`src/styles/global.css` only maps the tokens onto the names the site's components use (`--bg`,
+`--text`, `--accent` and so on) and adds layout. It holds no brand values.
 
-**Type:**
-- Fraunces (variable, with the opsz, wght, SOFT and WONK axes) is the display face. It is set at
-  SOFT 100, WONK 1, weights 300–420 and tracking between -2% and -2.5%, and is used for headlines,
-  the hero, big prices and the wordmark.
-- Geist is the UI and body face. Geist Mono is for numbers and labels.
-- All fonts are bundled locally. See `CREDITS.md`.
+The footer's theme switch can force dark on a light system. To support that, `Base.astro` reuses
+`tokens.css`'s own dark block under `:root[data-theme="dark"]`, so no values are copied.
 
-**Logo:** an ultramarine rounded-square mark with the lowercase "heed" wordmark in Fraunces. This is
-an interim drawing until DS1's SVGs arrive.
+**DS1's contrast rules, which the site follows:**
+- `ink-3` is used for icons and rules only. Quiet text uses `ink-quiet`.
+- ok, warn and danger text use the `-ink` variants. The base colours are used for fills only.
+- Filled buttons use `signal-fill`, and signal-coloured text uses `signal-ink`, only at 18px and up.
 
-**Imagery:** original procedural art, from `scripts/art/`:
+**Look:**
+- Warm cream canvas and warm ink, with one bold ultramarine used in big fields: the hero sky, the
+  feature band, the Heed Max card and the privacy block.
+- Calm white product cards float over the imagery.
+- Fraunces is the display face, used at SOFT 100, WONK 1 and a light weight, for headlines, prices
+  and the greeting.
+- Geist is the UI face. Geist Mono is for numbers and labels.
+
+**Imagery:** original procedural art (from `scripts/art/`) plus one CC0 painting from DS1:
 - the dithered sky in the hero, which drifts in a 36-second loop with at most 12px of parallax;
-- the engraved landscape in the footer.
+- the engraved landscape in the footer;
+- Thomas Cole's *The Oxbow*, duotoned, in the privacy section, with a flat signal block over it.
 
 The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
 them once they exist. Sources and licences are in `CREDITS.md`.

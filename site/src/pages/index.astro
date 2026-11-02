@@ -138,6 +138,11 @@ const faqLd = {
         <h2 id="privacy-h">Your data, in plain English.</h2>
         <p>Heed runs in the cloud, not on your Mac. This is what that means for you.</p>
       </div>
+      <figure class="painting" data-reveal>
+        <img src="/art/painting-oxbow.webp" alt="A river bend under a clearing storm, printed in ultramarine on cream" width="1400" height="944" loading="lazy" decoding="async" />
+        <div class="block"><p>Never sold.<br />Never used for training.</p></div>
+        <figcaption>After Thomas Cole, <i>The Oxbow</i>, 1836. The Met, Open Access (CC0), duotoned.</figcaption>
+      </figure>
       <dl class="facts">
         <div data-reveal style="--i:0">
           <dt>Where it lives</dt>
@@ -222,14 +227,9 @@ const faqLd = {
 </Base>
 
 <script>
-  // Sky drift (36s loop) and parallax (at most 12px). Both are off under reduced motion.
-  const SKY_RATIO = 16 / 9; // width / height of one sky tile
+  // Sky parallax: at most 12px, and none under reduced motion. (The drift itself is pure CSS.)
   const layer = document.querySelector<HTMLElement>("[data-sky]");
   if (layer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    const size = () => layer.style.setProperty("--tile", `${Math.round(layer.offsetHeight * SKY_RATIO)}px`);
-    size();
-    new ResizeObserver(size).observe(layer);
-    document.documentElement.classList.add("drifting");
     let ticking = false;
     addEventListener(
       "scroll",
@@ -237,8 +237,7 @@ const faqLd = {
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
-          const y = Math.min(12, scrollY * 0.03);
-          layer.style.setProperty("--py", `${y}px`);
+          layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
           ticking = false;
         });
       },
@@ -256,6 +255,9 @@ const faqLd = {
     color: #f6f3ec;
     isolation: isolate;
   }
+  /* Dithered sky (scripts/art/sky.mjs): 640x360 cells shown 3x with nearest-neighbour scaling, so one
+     tile is 1920x1080 CSS px and repeats seamlessly in x. The layer is two tiles wide and slides left
+     by exactly one tile per 36s loop. Above the image, the top colour carries on. */
   .sky {
     position: absolute;
     inset: -12px 0 0;
@@ -264,32 +266,32 @@ const faqLd = {
     background: #070798;
     transform: translate3d(0, var(--py, 0px), 0);
   }
-  /* The sky image tiles horizontally. Script sets --tile (one tile's rendered width) and the layer,
-     two tiles wide, slides left by exactly one tile per loop. Without script it simply sits still. */
   .drift {
     position: absolute;
-    inset: 0 auto 0 0;
-    width: calc(2 * var(--tile, 100vw));
-    min-width: 100%;
-    background-image: url("/art/sky-light.webp");
-    background-repeat: repeat-x;
-    background-size: auto 100%;
-    background-position: 0 0;
+    left: 0;
+    bottom: 0;
+    width: 3840px;
+    height: 1080px;
+    background: url("/art/sky-light.webp") 0 100% / 1920px 1080px repeat-x;
     image-rendering: pixelated;
-    will-change: transform;
-  }
-  :global(html.drifting) .drift {
     animation: drift 36s linear infinite;
+    will-change: transform;
   }
   @keyframes drift {
     to {
-      transform: translate3d(calc(-1 * var(--tile, 0px)), 0, 0);
+      transform: translate3d(-1920px, 0, 0);
     }
   }
   @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .sky {
+      background-color: #0b0b1a;
+    }
     :global(:root:not([data-theme="light"])) .drift {
       background-image: url("/art/sky-dark.webp");
     }
+  }
+  :global(:root[data-theme="dark"]) .sky {
+    background-color: #0b0b1a;
   }
   :global(:root[data-theme="dark"]) .drift {
     background-image: url("/art/sky-dark.webp");
@@ -449,7 +451,7 @@ const faqLd = {
   }
   .feats h3 {
     font-family: var(--display);
-    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 72;
+    font-variation-settings: var(--heed-display-settings);
     font-weight: 380;
     font-size: 28px;
     letter-spacing: -0.02em;
@@ -502,6 +504,41 @@ const faqLd = {
   }
 
   /* Privacy */
+  .painting {
+    position: relative;
+    margin: 0 0 56px;
+  }
+  .painting img {
+    width: 100%;
+    height: clamp(260px, 36vw, 440px);
+    object-fit: cover;
+    object-position: 50% 40%;
+    border-radius: var(--heed-radius-l);
+    background: var(--heed-signal-wash);
+  }
+  .block {
+    position: absolute;
+    left: clamp(16px, 3vw, 32px);
+    bottom: clamp(44px, 5vw, 64px);
+    padding: clamp(18px, 2.4vw, 28px) clamp(20px, 3vw, 32px);
+    background: var(--band);
+    color: var(--on-band);
+    border-radius: 4px;
+    max-width: min(80%, 460px);
+  }
+  .block p {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(26px, 3.4vw, 40px);
+    letter-spacing: var(--heed-display-tracking);
+    line-height: 1.08;
+  }
+  .painting figcaption {
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
   .facts {
     margin: 0;
     display: grid;

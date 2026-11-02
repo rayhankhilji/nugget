@@ -54,7 +54,7 @@ const cols = [
       !minimal && (
         <div class="top">
           <div class="brand">
-            <Logo size={20} pulse={false} />
+            <Logo size={22} />
             <p class="muted">The assistant that pays attention for you. Made in the UK.</p>
           </div>
           {cols.map((c) => (
@@ -136,7 +136,7 @@ const cols = [
   .h-line {
     font-family: var(--display);
     font-weight: 330;
-    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+    font-variation-settings: var(--heed-display-settings);
     font-size: clamp(40px, 7vw, 88px);
     letter-spacing: -0.025em;
     line-height: 1;
@@ -180,6 +180,10 @@ const cols = [
     align-content: start;
   }
   h2 {
+    font-family: var(--font);
+    font-variation-settings: normal;
+    word-spacing: normal;
+    line-height: 1.3;
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0;
@@ -193,11 +197,11 @@ const cols = [
     display: grid;
     gap: 10px;
   }
-  a {
+  .top a {
     color: var(--text-2);
     text-decoration: none;
   }
-  a:hover {
+  .top a:hover {
     color: var(--text);
   }
   .bottom {

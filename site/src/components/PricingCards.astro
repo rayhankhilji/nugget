@@ -9,6 +9,8 @@ const { level = "h3" } = Astro.props;
 const H = level;
 const { plans, source } = await loadPlans();
 const TRIAL_DAYS = plans[0]?.trial_days ?? 14;
+const first = plans[0];
+const save = first ? Math.round((1 - first.annual_gbp / (first.monthly_gbp * 12)) * 100) : 0;
 const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
 ---
 <div class="pricing" data-plans-source={source}>
@@ -16,7 +18,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     <legend class="sr-only">Billing period</legend>
     <label><input type="radio" name="interval" value="month" checked /><span>Monthly</span></label>
     <label
-      ><input type="radio" name="interval" value="year" /><span>Annual <em>2 months free</em></span></label
+      ><input type="radio" name="interval" value="year" /><span>Annual <em>Save {save}%</em></span></label
     >
   </fieldset>
 
@@ -217,7 +219,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
   }
   .amt {
     font-family: var(--display);
-    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+    font-variation-settings: var(--heed-display-settings);
     font-size: 72px;
     font-weight: 320;
     letter-spacing: -0.03em;

@@ -1,5 +1,13 @@
 ---
+import "../styles/heed/fonts.css";
+import "../styles/heed/tokens.css";
 import "../styles/global.css";
+import tokensCss from "../styles/heed/tokens.css?raw";
+
+// tokens.css follows the system theme (data-theme="light" opts out). The footer switch can also force
+// dark, so reuse tokens.css's own dark block under :root[data-theme="dark"]; no values are duplicated.
+const darkBlock = /@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/.exec(tokensCss)?.[1] ?? "";
+const forcedDark = `:root[data-theme="dark"]{${darkBlock}}`;
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 
@@ -29,8 +37,9 @@ const og = new URL("/og.png", Astro.site);
     <meta name="theme-color" content="#0B0B1A" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="preload" href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/fraunces-latin-full-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/geist-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <style is:inline set:html={forcedDark}></style>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Heed" />
     <meta property="og:title" content={fullTitle} />

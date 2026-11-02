@@ -1,7 +1,7 @@
 // Smoke test: builds the site with test settings, then drives every route in Chromium.
 // Supabase and the Heed cloud API are mocked at the network layer, so no real backend is needed.
 import { createRequire } from "node:module";
-import { buildTestSite, signedIn, SB, CLOUD } from "./mocks.mjs";
+import { buildTestSite, signedIn, SB, CLOUD, ME } from "./mocks.mjs";
 
 await buildTestSite();
 const { serve, ROUTES } = await import("./serve.mjs");
@@ -49,6 +49,7 @@ for (const scheme of ["light", "dark"]) {
   check((await page.getAttribute(".pricing", "data-plans-source")) === "api", "pricing rendered from GET /v1/billing/plans");
   const firstPrice = () => page.locator(".plan .amt:visible").first().textContent();
   check((await firstPrice()) === "£39", "pricing shows £39 monthly");
+  check((await page.textContent(".toggle em"))?.trim() === "Save 17%", "annual toggle says Save 17%");
   await page.locator('input[value="year"]').check();
   check((await firstPrice()) === "£390", "pricing toggle shows £390 annual");
   const href = await page.locator(".plan a.go:visible").first().getAttribute("href");
@@ -97,6 +98,7 @@ for (const scheme of ["light", "dark"]) {
     if (path === "/v1/billing/checkout") return route.fulfill({ json: { url: "https://checkout.stripe.test/c/pay_123" } });
     if (path === "/v1/billing/portal") return route.fulfill({ json: { url: "https://billing.stripe.test/p/session_123" } });
     if (path === "/v1/me" && req.method() === "DELETE") return route.fulfill({ status: 204 });
+    if (path === "/v1/me") return route.fulfill({ json: ME });
     return route.fulfill({ status: 404, json: { error: "not_found", message: "no" } });
   });
   await ctx.route("https://*.stripe.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Stripe</title><h1>Stripe</h1>" }));
@@ -109,7 +111,11 @@ for (const scheme of ["light", "dark"]) {
 
   await page.goto(base + "/account");
   await page.locator("[data-plan]").filter({ hasText: "Heed Max" }).waitFor();
-  check((await page.textContent("[data-plan-detail]"))?.includes("Free trial until 16 November 2026") === true, "account shows trial end");
+  check(
+    (await page.textContent("[data-when]")) === "16 November 2026" &&
+      (await page.textContent("[data-plan-detail]"))?.includes("free trial ends on 16 November 2026") === true,
+    "account shows the trial end date",
+  );
   check((await page.textContent("[data-dev-limit]")) === "1 of 3", "account shows device count");
   await page.click("[data-portal]");
   await page.waitForURL("https://billing.stripe.test/**");
@@ -120,8 +126,12 @@ for (const scheme of ["light", "dark"]) {
 
   await page.goto(base + "/account");
   await page.locator("[data-plan]").filter({ hasText: "Heed Max" }).waitFor();
+  check((await page.textContent("[data-usage-text]")) === "720 of 900", "account shows deep-answer usage");
+  check((await page.getAttribute("[data-usage-bar]", "data-level")) === "high", "usage meter turns amber at 80%");
+  await page.click("[data-delete-open]");
+  check(await page.isDisabled("[data-delete-confirm]"), "delete stays disabled until 'delete' is typed");
   await page.fill('[data-delete] input', "delete");
-  await page.click('[data-delete] button');
+  await page.click("[data-delete-confirm]");
   await page.waitForURL(`${base}/?deleted=1`);
   check(calls.some((c) => c.path === "/v1/me" && c.method === "DELETE"), "delete account DELETE /v1/me");
   await ctx.close();

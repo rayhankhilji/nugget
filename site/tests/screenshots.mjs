@@ -2,7 +2,7 @@
 import { createRequire } from "node:module";
 import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
-import { buildTestSite, signedIn, CLOUD } from "./mocks.mjs";
+import { buildTestSite, signedIn, CLOUD, ME } from "./mocks.mjs";
 
 await buildTestSite();
 const { serve, ROUTES } = await import("./serve.mjs");
@@ -32,7 +32,9 @@ for (const v of VIEWS) {
     // Account and checkout are shown signed in; checkout is caught mid-redirect to Stripe.
     const authed = await browser.newContext(opts);
     await signedIn(authed);
-    await authed.route(`${CLOUD}/**`, () => new Promise(() => {}));
+    await authed.route(`${CLOUD}/**`, (route) =>
+      new URL(route.request().url()).pathname === "/v1/me" ? route.fulfill({ json: ME }) : new Promise(() => {}),
+    );
     const pages = { anon: await anon.newPage(), authed: await authed.newPage() };
     for (const r of routes) {
       const name = `${r === "/" ? "home" : r.slice(1).replace(/\//g, "-")}-${v.name}-${scheme}`;
@@ -53,7 +55,7 @@ for (const v of VIEWS) {
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
       const file = new URL(`${name}.webp`, OUT);
-      await sharp(png).resize({ width: v.out }).webp({ quality: v.name === "mobile" ? 62 : 72 }).toFile(file.pathname);
+      await sharp(png).resize({ width: r === "/" && v.name === "desktop" ? 1040 : v.out }).webp({ quality: r === "/" ? 46 : v.name === "mobile" ? 62 : 70 }).toFile(file.pathname);
       console.log(name);
     }
     await anon.close();
