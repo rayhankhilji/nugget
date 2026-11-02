@@ -65,6 +65,7 @@ const MAX_PLUGIN_BYTES: u64 = 64 * 1024 * 1024;
 /// Pages a link may open (the frontend's `PageId`s).
 pub const PAGES: &[&str] = &[
     "today",
+    "needs",
     "chat",
     "search",
     "knowledge",
