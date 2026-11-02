@@ -54,6 +54,7 @@ pub async fn doubletap_settings_set(
     *lock(&state.settings) = settings.clone();
     flow::restart_listener_async(&app).await;
     readahead::restart(&app);
+    super::ghost_flow::restart(&app);
     if let Err(e) = app.emit(SETTINGS_EVENT, &settings) {
         tracing::debug!(error = %e, "cannot announce the Double Tap settings");
     }
@@ -87,6 +88,7 @@ async fn status(app: &AppHandle) -> DoubleTapStatus {
             trigger_error.as_deref(),
         ),
         modifiers: permissions::modifiers(platform),
+        ghost: super::ghost_flow::status(app),
         recommended_trigger: TriggerSpec::recommended(),
         shortcut: lock(&state.listener)
             .as_ref()

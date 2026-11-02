@@ -136,6 +136,22 @@ describe("Double Tap settings page", () => {
     expect((sent[0] as DoubleTapSettings).read_ahead).toBe(false);
   });
 
+  it("turns suggestions as you type off, and says when inline suggestions can't run", async () => {
+    const { sent } = setup({ doubletap_status: { ...status, platform: "macos", ghost: { available: false, error: "unsupported" } } });
+    await render(<App />);
+    await flush(10);
+    const label = byText(document, "label", "Suggest as you type");
+    const toggle = label?.querySelector<HTMLInputElement>('input[role="switch"]');
+    expect(toggle?.checked).toBe(true);
+    const hint = document.getElementById(toggle!.getAttribute("aria-describedby")!);
+    expect(hint?.textContent).toContain("Press Tab to accept it, ⌥→ to accept one word");
+    expect(hint?.textContent).toContain("Never in password, one-time code or card fields");
+    expect(document.querySelector("main")!.textContent).toContain("Double Tap opens its panel instead");
+    await click(toggle);
+    await click(byText(document, "button", "Save"));
+    expect((sent[0] as DoubleTapSettings).auto_suggest).toBe(false);
+  });
+
   it("shows the desktop's shortcut consent and checks back until it is approved", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     try {
