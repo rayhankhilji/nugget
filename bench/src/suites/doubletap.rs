@@ -660,6 +660,7 @@ fn draft_request(task: &Task) -> DraftRequest {
         instruction: None,
         provider: None,
         max_tokens: None,
+        mode: Default::default(),
     }
 }
 

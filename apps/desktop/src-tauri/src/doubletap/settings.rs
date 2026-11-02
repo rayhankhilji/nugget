@@ -122,6 +122,9 @@ pub struct DoubleTapSettings {
     /// Keep reading ahead while the computer runs on battery. On by default; low power mode
     /// (battery saver) always pauses read-ahead, whatever this says.
     pub read_ahead_on_battery: bool,
+    /// Ghost text: suggest a continuation at the caret after a typing pause, in apps where the
+    /// caret can be placed (Double Tap always works on demand). On by default.
+    pub auto_suggest: bool,
 }
 
 impl Default for DoubleTapSettings {
@@ -134,6 +137,7 @@ impl Default for DoubleTapSettings {
             allow_terminals: false,
             read_ahead: true,
             read_ahead_on_battery: true,
+            auto_suggest: true,
         }
     }
 }

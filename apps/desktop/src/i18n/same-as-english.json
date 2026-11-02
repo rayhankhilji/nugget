@@ -45,9 +45,11 @@
     "status.version",
     "today.actionFullName",
     "today.learned.line",
-    "shell.tray.doubleTap"
+    "shell.tray.doubleTap",
+    "cloud.title"
   ],
   "ar": [
+    "cloud.syncFailed",
     "shortcuts.key.enter"
   ],
   "de": [
@@ -113,7 +115,11 @@
     "searchui.kind.chat",
     "searchui.saveName",
     "searchui.text",
-    "status.runtime.details"
+    "status.runtime.details",
+    "app.nav.connections",
+    "cloud.col.app",
+    "cloud.col.status",
+    "cloud.syncFailed"
   ],
   "es": [
     "addSource.linear.include",
@@ -142,7 +148,8 @@
     "status.role.chat",
     "status.role.embedding",
     "updates.badge.beta",
-    "searchui.kind.chat"
+    "searchui.kind.chat",
+    "cloud.syncFailed"
   ],
   "fr": [
     "addSource.folder.defaultNone",
@@ -200,15 +207,22 @@
     "updates.channel.stable",
     "appSettings.notifyHeading",
     "searchui.facet.date",
-    "searchui.facet.source"
+    "searchui.facet.source",
+    "app.nav.connections",
+    "cloud.col.actions",
+    "cloud.ask.label",
+    "cloud.ask.sources",
+    "cloud.ask.citationLabel"
   ],
   "hi": [
     "addSource.linear.include",
+    "cloud.syncFailed",
     "shortcuts.key.enter",
     "sources.detailsId",
     "status.contextTokens"
   ],
   "ja": [
+    "cloud.syncFailed",
     "shortcuts.key.enter",
     "sources.detailsId",
     "status.contextTokens"
@@ -244,7 +258,8 @@
     "status.role.embedding",
     "status.title",
     "updates.badge.beta",
-    "shell.tray.status"
+    "shell.tray.status",
+    "cloud.syncFailed"
   ],
   "zh-CN": [
     "shortcuts.key.enter",

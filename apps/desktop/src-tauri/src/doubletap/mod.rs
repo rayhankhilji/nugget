@@ -9,6 +9,9 @@
 //! - [`readahead`]: read-ahead, prefilling the local model's cache while a reply field keeps
 //!   focus (with its privacy rules); [`focus`]: the OS focus change notifications it sleeps on;
 //!   [`power`]: battery and low power mode, which pause it.
+//! - [`ghost`]: ghost text (the suggestion drawn at the caret, accepted with Tab) as a pure
+//!   state machine; [`ghost_flow`]: its key tap, typing-pause trigger, window and insertion.
+//!   Double Tap uses it whenever the caret can be placed and falls back to the panel otherwise.
 //! - [`history`]: the last drafts, in memory only, to insert one again.
 //! - [`practice`]: the Double Tap page's practice field, a sandbox target for the real trigger.
 //! - [`commands`]: the Tauri commands.
@@ -18,6 +21,8 @@ pub mod commands;
 pub mod errors;
 pub mod flow;
 pub mod focus;
+pub mod ghost;
+pub mod ghost_flow;
 pub mod history;
 pub mod overlay;
 pub mod permissions;
@@ -76,6 +81,7 @@ pub struct DoubleTap {
     pub(crate) layout: Mutex<Layout>,
     pub(crate) a11y: Arc<A11y>,
     pub(crate) read_ahead: readahead::Runner,
+    pub(crate) ghost: ghost_flow::Ghost,
 }
 
 /// Lock, recovering from a poisoned mutex (the data is plain state).
@@ -110,12 +116,14 @@ pub fn setup(app: &App) {
         layout: Mutex::new(Layout::default()),
         a11y: Arc::new(A11y::new()),
         read_ahead: readahead::Runner::default(),
+        ghost: ghost_flow::Ghost::default(),
     });
     if let Err(e) = create_overlay(app) {
         tracing::warn!(error = %e, "cannot create the Double Tap overlay window");
     }
     flow::follow_streams(handle);
     readahead::restart(handle);
+    ghost_flow::setup(app);
     // macOS: install on the main thread so errors are reported synchronously. Elsewhere start
     // off the main thread (the Wayland portal can take seconds to answer).
     #[cfg(target_os = "macos")]

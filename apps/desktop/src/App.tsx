@@ -25,6 +25,7 @@ import { StatusPage } from "./pages/Status";
 import { TodayPage } from "./pages/Today";
 import { startProactiveNotifications } from "./proactiveNotifications";
 import { DoubleTapPage } from "./pages/DoubleTap";
+import { CloudPage } from "./pages/Cloud";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
@@ -43,6 +44,8 @@ export interface PageDef {
   keywords?: MessageKey;
   /** A ⌘/Ctrl+<key> shortcut besides the automatic ⌘/Ctrl+1…9 by position. */
   shortcut?: string;
+  /** Works without the local background service (Nugget Cloud). */
+  standalone?: boolean;
 }
 
 /**
@@ -65,6 +68,7 @@ export const PAGES: readonly PageDef[] = [
   { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
   { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
+  { id: "connections", label: "app.nav.connections", Component: CloudPage, standalone: true },
 ];
 
 /**
@@ -371,7 +375,9 @@ export function App() {
         </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
-        {conn === null ? (
+        {current.standalone ? (
+          <Current />
+        ) : conn === null ? (
           <div className="center muted">{t("app.connecting")}</div>
         ) : !conn.connected ? (
           <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />

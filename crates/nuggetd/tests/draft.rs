@@ -106,7 +106,7 @@ impl FakeModel {
             };
             if seen.body.contains(SLOW) {
                 let head = "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n";
-                let first = delta("Sounds good, ");
+                let first = delta("Sounds good. See you ");
                 let chunk = format!("{:x}\r\n{first}\r\n", first.len());
                 if sock.write_all(head.as_bytes()).await.is_err()
                     || sock.write_all(chunk.as_bytes()).await.is_err()
@@ -407,7 +407,7 @@ async fn begin_streams_the_draft_then_feedback_is_recorded() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cancel_stops_a_draft_mid_stream_and_shutdown_ends_one() {
-    // The slow model stops mid-sentence; with grounding off its first words stream at once.
+    // The slow model stops mid-sentence, after a complete one (which the check releases).
     let mut h = start("grounding = false", |_| {}).await;
     let mut notes = h.client.notifications();
 
@@ -418,7 +418,7 @@ async fn cancel_stops_a_draft_mid_stream_and_shutdown_ends_one() {
         )
         .await;
     let first = first_delta(&mut notes, &started.stream_id).await;
-    assert!(first.starts_with("Sounds"), "{first:?}");
+    assert_eq!(first, "Sounds good.");
     let v: Value = h
         .call(
             method::DRAFT_CANCEL,

@@ -19,6 +19,8 @@ nugget-ipc.workspace = true
 nugget-hotkey.workspace = true
 nugget-a11y.workspace = true
 nugget-policy.workspace = true
+# Nugget Cloud sign-in, session and /v1 API (`src/cloud.rs`).
+nugget-cloud-client.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -26,7 +28,9 @@ tokio.workspace = true
 tracing.workspace = true
 futures.workspace = true
 time.workspace = true
-tauri = { version = "2", features = ["tray-icon"] }
+# `macos-private-api`: the ghost text window is transparent (macOS needs the private API for a
+# transparent webview window; Nugget is not distributed through the Mac App Store).
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 # Rust-side APIs only: no plugin command is granted to the webview (see capabilities/default.json).
 # Pinned to the last releases on the Tauri 2.11 line (newer ones need tauri 2.12 and Rust 1.90).
 tauri-plugin-opener = "=2.5.5"
@@ -67,7 +71,7 @@ jiff = { version = "0.2", default-features = false, features = ["std", "tz-syste
 
 [dev-dependencies]
 # `tauri::test`'s mock runtime: notification click handling against a mock app (notify.rs).
-tauri = { version = "2", features = ["tray-icon", "test"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "test"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Asks the session bus whether a StatusNotifier host exists before creating the tray (tray.rs).
@@ -84,7 +88,8 @@ mac-notification-sys = "0.6"
 objc2 = "0.6"
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSNotification", "NSOperation", "NSProcessInfo", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace"] }
+# Ghost text (`doubletap/ghost_flow.rs`): the click-through, non-activating suggestion window.
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWorkspace", "NSWindow", "NSResponder", "NSColor", "NSGraphics"] }
 objc2-io-kit = { version = "0.3", default-features = false, features = ["std", "ps"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFString"] }
 

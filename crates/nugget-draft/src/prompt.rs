@@ -97,6 +97,23 @@ impl LengthBand {
         }
     }
 
+    /// The band of a continuation (ghost text): a few words when the field has text before the
+    /// caret, one short opening sentence when it is empty.
+    pub fn continuation(field: &nugget_core::ipc::FieldInfo) -> Self {
+        let (before, _, _) = split_value(&field.value, field.selection);
+        let target = if before.trim().is_empty() {
+            CONTINUE_OPENING_WORDS
+        } else {
+            CONTINUE_WORDS
+        };
+        Self {
+            target,
+            min: 1,
+            max: target,
+            hard_max: target + target / 3,
+        }
+    }
+
     /// Output-token cap for this band (about 1.6 tokens per word, plus slack).
     pub fn max_tokens(&self) -> u32 {
         self.max_tokens_for(None)
@@ -109,6 +126,11 @@ impl LengthBand {
         ((self.hard_max as f32 * per_word) as u32 + 32).clamp(64, 2048)
     }
 }
+
+/// The most words a continuation of text before the caret asks for.
+pub const CONTINUE_WORDS: usize = 12;
+/// The most words a continuation of an empty field (the opening of the reply) asks for.
+pub const CONTINUE_OPENING_WORDS: usize = 20;
 
 /// The fixed rules, identical for every draft (prompt-cache friendly).
 pub const SYSTEM_RULES: &str = "\
@@ -496,6 +518,10 @@ pub struct PromptInput<'a> {
     pub limits: PromptLimits,
     /// Render the context as a grounded facts block (see `DraftConfig::grounding`).
     pub grounding: bool,
+    /// Ghost text: ask for a short continuation at the caret instead of the whole reply
+    /// (`DraftMode::Continue`). Only the closing instruction differs, so the prompt's prefix
+    /// (and a read-ahead's cache) is shared with the reply.
+    pub continuation: bool,
 }
 
 /// The system prompt: fixed rules, then the voice.
@@ -662,6 +688,10 @@ it for context only).\n",
             untrusted(i, limits.instruction_chars)
         ));
     }
+    if input.continuation {
+        out.push_str(&continuation_close(input, before.trim().is_empty()));
+        return out;
+    }
     // Whose reply this is, in which language and how long (QA GG7-1, JJ1-7, GG1-8).
     let mut close = format!(
         "\nWrite the user's {} now",
@@ -696,6 +726,42 @@ it for context only).\n",
     close.push_str(" Output only the text to insert: no preamble, no quotes, no [n] markers.");
     out.push_str(&close);
     out
+}
+
+/// The closing instruction of a continuation: the next few words at the caret, or the opening
+/// sentence of the reply when nothing is typed yet.
+fn continuation_close(input: &PromptInput<'_>, empty: bool) -> String {
+    let ctx = input.ctx;
+    let words = LengthBand::continuation(&ctx.field).target;
+    let mut close = if empty {
+        let mut c = format!(
+            "\nWrite only the opening of the user's {}, as the user",
+            input.kind.as_str().replace('_', " ")
+        );
+        if let Some(author) = newest_other(ctx)
+            .and_then(|m| m.author.as_deref())
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
+            let author = attr(author);
+            c.push_str(&format!(
+                ", replying to {author}'s last message (you are the user, not {author})"
+            ));
+        }
+        c.push_str(&format!(": one short sentence, at most {words} words."));
+        c
+    } else {
+        format!(
+            "\nContinue the user's text at the caret (‸) as the user would: only the next few \
+words, at most {words}, ending where the current sentence or thought ends. Never repeat the text \
+before the caret and never start a new paragraph."
+        )
+    };
+    if let Some(lang) = reply_language(ctx) {
+        close.push_str(&format!(" Write in {lang}."));
+    }
+    close.push_str(" Output only the words to insert: no preamble, no quotes, no [n] markers.");
+    close
 }
 
 /// The provider request: system prefix, one user message (plus the screenshot when allowed),
@@ -784,6 +850,7 @@ mod tests {
             band: LengthBand::for_draft(FieldKind::ChatMessage, voice),
             limits: PromptLimits::default(),
             grounding: false,
+            continuation: false,
         }
     }
 

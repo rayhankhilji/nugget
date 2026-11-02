@@ -22,6 +22,34 @@ is ever sent for you.
 
 Whether you accepted, edited or cancelled is fed back into your voice profile.
 
+## Ghost text
+
+Suggestions appear as faint text right at the caret, in any app where Nugget can place the caret
+(most native and web text fields on macOS, Windows and Linux X11):
+
+- **As you type.** After you pause for about 400 ms, Nugget suggests the rest of your sentence, or
+  the opening of your reply when the field is empty after you clear it. Turn this off with
+  **Suggest as you type** on the Double Tap page.
+- **On demand.** The Double Tap trigger shows the whole draft as ghost text at the caret.
+
+| Key | While a suggestion is visible |
+|---|---|
+| **Tab** | Insert the whole suggestion. |
+| **⌥→** (macOS), **Ctrl+→** (Windows, Linux) | Insert its next word. |
+| **Esc** | Dismiss it. No new suggestion appears until the text changes. |
+| Anything else | Goes to your app as usual. If you type what the suggestion says, it shrinks as you type; anything else makes it disappear. |
+
+Tab, ⌥→ and Esc are taken only while a suggestion is on screen; at all other times they reach
+your app untouched. Clicking anywhere, switching fields or switching apps dismisses the
+suggestion. The suggestion window never takes the keyboard or the mouse.
+
+Suggestions follow the same rules as drafts: never in password, PIN, one-time code, card or bank
+fields, excluded apps or terminals; never while the kill switch is engaged. The same grounding and
+checks apply, so a suggestion can't add a link, number or claim that a draft couldn't. The key tap
+learns only whether a key was Tab, Esc, an arrow or something else, never which key you typed.
+On macOS it needs the Accessibility permission Nugget already asks for. On Wayland, and anywhere
+the caret can't be placed, Double Tap opens the overlay below instead.
+
 ## The overlay
 
 | Key | In the overlay |
@@ -100,9 +128,11 @@ falls back to the chat model.
   any sentence of the draft that writes out a credential from a sensitive item, a link, email
   address, phone, account or card number that neither the thread nor your own text has, or an
   amount or date the thread and your items don't support. `[draft] grounding = false` keeps the
-  credential and link checks but stops checking values; `grounding_check = "sentences"` is
-  stricter but delays the first character by a few seconds (see
-  [Configuration](../reference/config.md#draft)).
+  credential and link checks but stops checking values; `grounding_check = "sentences"` also
+  checks times and small numbers (see [Configuration](../reference/config.md#draft)). Each
+  sentence appears once it is checked, so a draft never stops mid-sentence. If the sentence
+  that answered was dropped, the rest is not offered on its own: the overlay says the draft was
+  held back, and nothing is inserted.
 - **Record keystrokes.** For a double tap only modifier presses are observed; a chord is registered
   with the OS. No key or text is logged.
 

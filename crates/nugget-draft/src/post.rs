@@ -203,6 +203,10 @@ impl PostProcessor {
             // A whole line is a preamble only when the draft goes on after it: "Sure, I'll
             // email you the slides tomorrow." on its own is the reply (QA JJ1-4).
             let more = !rest[line.len()..].trim().is_empty();
+            if !last && !more && lower.starts_with("subject:") {
+                // A body may still follow the subject line.
+                return None;
+            }
             match preamble_len(&lower, complete, more) {
                 Some(k) => pos = skip_ws(raw, pos + k),
                 None if !last && !more && preamble_len(&lower, complete, true).is_some() => {
@@ -392,7 +396,10 @@ fn preamble_len(lower: &str, complete: bool, more: bool) -> Option<usize> {
         return None;
     }
     if lower.starts_with("subject:") {
-        return complete.then_some(lower.len());
+        // A subject line before a body goes; alone (a Subject field), only its label does
+        // (MM1 on GG1, cls-gmail-subject).
+        let len = if more { lower.len() } else { "subject:".len() };
+        return complete.then_some(len);
     }
     let has_meta = |s: &str| META_WORDS.iter().any(|m| s.contains(m));
     // "Sure! Here's a reply: Hi Sam, ..." – the preamble ends at the colon.
@@ -959,6 +966,7 @@ mod tests {
             "g|Hola, Ana:\n\nPide 40 cajas, por favor.|Pide 40 cajas, por favor.",
             "g|Hi, thanks for the update.|thanks for the update.",
             "s|Die Lieferung kommt Montag.\n\nMit freundlichen Grüßen\nKlara Brandt|Die Lieferung kommt Montag.",
+            "l|Subject: Offsite headcount|Offsite headcount",
             // QA JJ1-4: a complete one-line reply is not a preamble.
             "p|Sure, I'll email you the slides tomorrow.|Sure, I'll email you the slides tomorrow.",
             "p|Great, the new version looks good to me!|Great, the new version looks good to me!",

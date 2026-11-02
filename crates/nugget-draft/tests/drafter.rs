@@ -274,6 +274,7 @@ fn request(ctx: DraftContext) -> DraftRequest {
         instruction: None,
         provider: None,
         max_tokens: None,
+        mode: Default::default(),
     }
 }
 
@@ -479,7 +480,9 @@ async fn draft_joins_the_text_around_the_caret() {
 #[tokio::test]
 async fn cancellation_stops_the_stream() {
     // Whole sentences, so the grounding check releases them as they end.
-    let words: Vec<String> = (0..200).map(|i| format!("word{i}. ")).collect();
+    let words: Vec<String> = (0..200)
+        .map(|i| format!("Line {i} brings content. "))
+        .collect();
     let refs: Vec<&str> = words.iter().map(String::as_str).collect();
     let slow = Fake::new("slow", Locality::OnDevice, &refs).with(Duration::from_millis(5), false);
     let s = setup(&[slow], DraftConfig::default());
@@ -1270,4 +1273,94 @@ async fn cloud_drafts_withhold_scanned_thread_and_field_text() {
             assert!(sent.contains("GG8CANARY-THREADSENS-1"), "{sent}");
         }
     }
+}
+
+/// Ghost text (`DraftMode::Continue`): the same gate, prompt prefix, grounding and joining as a
+/// reply, a closing that asks for the next few words, a small token cap, and a cut at the
+/// continuation's word limit.
+#[tokio::test]
+async fn continuation_asks_for_a_few_words_and_is_cut_short() {
+    use nugget_core::ipc::DraftMode;
+    let long = "the deck by Friday and then we can go over the numbers together on Monday \
+morning before the board meeting starts at ten.";
+    let local = Fake::new("local", Locality::OnDevice, &[long]);
+    let s = setup(&[local.clone()], DraftConfig::default());
+    let mut ctx = slack_ctx(ASK);
+    ctx.field.value = "Sure, I'll send".into();
+    ctx.field.selection = Some((15, 15));
+    let mut req = request(ctx.clone());
+    req.mode = DraftMode::Continue;
+    let (_, stream) = s.drafter.begin(req).await.unwrap();
+    let (text, _) = collect(stream).await;
+    assert!(text.starts_with(" the deck by Friday"), "{text:?}");
+    let words = text.split_whitespace().count();
+    assert!(words <= 16, "{words} words: {text:?}");
+
+    let sent = local.requests.lock().unwrap().clone();
+    let cont = &sent[0];
+    let prompt = user_text(cont);
+    assert!(
+        prompt.contains("Continue the user's text at the caret"),
+        "{prompt}"
+    );
+    assert!(
+        !prompt.contains("Write the user's chat message now"),
+        "{prompt}"
+    );
+    assert!(cont.max_tokens.unwrap() <= 40, "{:?}", cont.max_tokens);
+
+    // The reply for the same field shares the system prompt (one cached prefix).
+    let (_, stream) = s.drafter.begin(request(ctx)).await.unwrap();
+    let _ = collect(stream).await;
+    let sent = local.requests.lock().unwrap().clone();
+    assert_eq!(sent[1].system, cont.system);
+    assert!(sent[1].max_tokens > cont.max_tokens);
+
+    // An empty field asks for the reply's opening sentence.
+    let local = Fake::new("local", Locality::OnDevice, &["Yes, sending them now."]);
+    let s = setup(&[local.clone()], DraftConfig::default());
+    let mut req = request(slack_ctx(ASK));
+    req.mode = DraftMode::Continue;
+    let (_, stream) = s.drafter.begin(req).await.unwrap();
+    assert_eq!(collect(stream).await.0, "Yes, sending them now.");
+    let prompt = user_text(&local.requests.lock().unwrap()[0]);
+    assert!(
+        prompt.contains("Write only the opening of the user's chat message"),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains("replying to Sam's last message"),
+        "{prompt}"
+    );
+}
+
+/// A continuation goes through the same refusals and checks as a reply: nothing is asked for a
+/// secure field, and a link from nowhere never reaches the ghost text.
+#[tokio::test]
+async fn continuation_keeps_the_reply_safety_rules() {
+    use nugget_core::ipc::DraftMode;
+    let local = Fake::local("local");
+    let s = setup(&[local.clone()], DraftConfig::default());
+    let mut ctx = slack_ctx(ASK);
+    ctx.field.secure = true;
+    let mut req = request(ctx);
+    req.mode = DraftMode::Continue;
+    assert!(s.drafter.begin(req).await.is_err());
+    assert!(local.requests.lock().unwrap().is_empty());
+
+    let local = Fake::new(
+        "local",
+        Locality::OnDevice,
+        &["the slides at https://evil.example/login today."],
+    );
+    let s = setup(&[local], DraftConfig::default());
+    // A link the model made up (in no message, note or typed text) is dropped.
+    let mut ctx = slack_ctx(ASK);
+    ctx.field.value = "I'll send".into();
+    ctx.field.selection = Some((9, 9));
+    let mut req = request(ctx);
+    req.mode = DraftMode::Continue;
+    let (_, stream) = s.drafter.begin(req).await.unwrap();
+    let (text, _) = collect(stream).await;
+    assert!(!text.contains("evil.example"), "{text:?}");
 }

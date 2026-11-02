@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 
 use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
 use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
+use crate::geometry::{Rgba, TextStyle};
 use crate::platform::{hints, text_map};
 use crate::role::{Role, role_from_uia, uia as ct};
 use crate::sanitize;
@@ -321,6 +322,18 @@ impl Platform for UiaPlatform {
     fn caret_bounds(&self, el: &UiaEl, _state: &FieldState) -> Option<Rect> {
         el.caret_rect()
             .map(|r| scale_rect(r, uia::foreground_scale()))
+    }
+
+    fn text_style(&self, el: &UiaEl, _state: &FieldState) -> TextStyle {
+        // The engine never asks for a password field; refuse one here too (a cached property).
+        if el.info().is_password {
+            return TextStyle::default();
+        }
+        let (font_size, color) = el.caret_style();
+        TextStyle {
+            font_size,
+            color: color.and_then(Rgba::from_colorref),
+        }
     }
 
     fn insert_text(&self, el: &UiaEl, text: &str, before: &FieldState) -> Result<()> {

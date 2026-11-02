@@ -13,7 +13,9 @@ use futures::future::{BoxFuture, Shared};
 use futures::{FutureExt, Stream, StreamExt};
 use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
-use nugget_core::ipc::{ContextResponse, DraftContext, DraftFeedback, DraftRequest, DraftStarted};
+use nugget_core::ipc::{
+    ContextResponse, DraftContext, DraftFeedback, DraftMode, DraftRequest, DraftStarted,
+};
 use nugget_core::{Error, Result};
 use nugget_infer::router::DEFAULT_COOLDOWN;
 use nugget_infer::{
@@ -730,7 +732,15 @@ impl Drafter {
                 .capabilities(provider)
                 .is_some_and(|c| c.vision)
             && (!cloud || config.allow_cloud_screenshots);
+        // The system prompt keeps the reply's band (one cached prefix per channel); a
+        // continuation only caps the output and the post-processor.
         let band = LengthBand::for_draft(kind, voice);
+        let continuation = req.mode == DraftMode::Continue;
+        let out_band = if continuation {
+            LengthBand::continuation(&ctx.field)
+        } else {
+            band
+        };
         let input = PromptInput {
             kind,
             ctx,
@@ -741,10 +751,18 @@ impl Drafter {
             band,
             limits: self.limits_for(cloud),
             grounding: config.grounding,
+            continuation,
         };
         let max_tokens = req
             .max_tokens
-            .unwrap_or_else(|| band.max_tokens_for(crate::prompt::draft_chars_per_word(ctx)))
+            .unwrap_or_else(|| {
+                let cpw = crate::prompt::draft_chars_per_word(ctx);
+                if continuation {
+                    continuation_max_tokens(&out_band, cpw)
+                } else {
+                    band.max_tokens_for(cpw)
+                }
+            })
             .clamp(16, 4_096);
         let mut chat = build_request(&input, max_tokens, config.temperature);
         if !cloud {
@@ -752,7 +770,7 @@ impl Drafter {
             // requests stay exactly as they were.
             chat = chat.with_cache(CacheHint::keyed(cache_key(kind)));
         }
-        (chat, screenshot, band)
+        (chat, screenshot, out_band)
     }
 
     /// Read ahead while a reply field keeps focus: prefill the whole prompt `begin` would send
@@ -1393,6 +1411,13 @@ fn stream_check(
             .with_check(check)
             .with_values(grounded),
     )
+}
+
+/// The output cap of a continuation: its few words (about 1.6 tokens each, more for scripts
+/// written without spaces) plus a little slack, far below a reply's.
+fn continuation_max_tokens(band: &LengthBand, chars_per_word: Option<f32>) -> u32 {
+    let per_word = chars_per_word.map_or(1.6, |c| (c * 1.2).max(1.6));
+    (band.hard_max as f32 * per_word) as u32 + 8
 }
 
 /// Post-processing settings for this field.
@@ -2057,8 +2082,11 @@ mod tests {
             assert_eq!(g.report().secrets_dropped, 1);
             // QA GG1-1: an injected link is dropped with grounding off too.
             let mut g = stream_check(&config, screenshot, &ctx, &plain, None, &voice).unwrap();
-            let out = g.feed("Thanks. Pay at https://pay.example.com/fast today.", true);
-            assert_eq!(out, "Thanks.");
+            let out = g.feed(
+                "Sounds good. Pay at https://pay.example.com/fast today.",
+                true,
+            );
+            assert_eq!(out, "Sounds good.");
         }
     }
 }

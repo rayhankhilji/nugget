@@ -46,6 +46,7 @@ use zbus::proxy::CacheProperties;
 
 use crate::clipboard::Clipboard;
 use crate::engine::{FieldRead, Platform, Target};
+use crate::geometry::TextStyle;
 use crate::platform::{hints, text_map};
 use crate::role::{Role, role_from_atspi};
 use crate::sanitize;
@@ -850,6 +851,34 @@ impl Platform for AtspiPlatform {
             });
         }
         None
+    }
+
+    fn text_style(&self, el: &AtspiEl, state: &FieldState) -> TextStyle {
+        // The engine never asks for a secure field; refuse one here too (one D-Bus call).
+        if role_name(&el.acc()) == "password text" {
+            return TextStyle::default();
+        }
+        // The character before the caret (at it when the caret is at the start), in the text
+        // of the object that holds the caret.
+        let Some((el, _, end)) = Self::own_range(el, state) else {
+            return TextStyle::default();
+        };
+        let Some(t) = el.text() else {
+            return TextStyle::default();
+        };
+        let offset = i32::try_from(end.saturating_sub(1)).unwrap_or(i32::MAX);
+        let Ok((mut attrs, _, _)) = t.get_attribute_run(offset, true) else {
+            return TextStyle::default();
+        };
+        // Some toolkits leave the defaults out of the run even when asked for them.
+        if !(attrs.contains_key("size") && attrs.contains_key("fg-color"))
+            && let Ok(defaults) = t.get_default_attributes()
+        {
+            for (k, v) in defaults {
+                attrs.entry(k).or_insert(v);
+            }
+        }
+        TextStyle::from_atspi_attrs(&attrs)
     }
 
     fn insert_text(&self, el: &AtspiEl, text: &str, before: &FieldState) -> Result<()> {

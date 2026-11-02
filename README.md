@@ -119,7 +119,7 @@ cargo build --release -p nuggetd
 ./target/release/nuggetd status           # from another terminal
 # desktop app (optional; starts the daemon for you)
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
-cargo build --release -p nugget-desktop && ./target/release/nugget-desktop
+cargo build --release -p nugget-desktop --features tauri/custom-protocol && ./target/release/nugget-desktop
 ```
 
 A source release build downloads Nugget's own local models only if `nuggetd` was built with

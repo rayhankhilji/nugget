@@ -32,12 +32,13 @@ use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 use objc2_app_kit::NSRunningApplication;
 use objc2_application_services::AXUIElement;
-use objc2_core_foundation::{CFArray, CFBoolean, CFRetained, CFString, CFType, CFURL};
+use objc2_core_foundation::{CFArray, CFBoolean, CFNumber, CFRetained, CFString, CFType, CFURL};
 use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventTapLocation};
 
 use crate::clipboard::Clipboard;
 use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
 use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
+use crate::geometry::{Rgba, TextStyle};
 use crate::platform::hints;
 use crate::platform::text_map::{self, TextMap, chars_to_utf16, utf16_to_chars};
 use crate::role::{Role, role_from_ax};
@@ -493,6 +494,34 @@ impl AxEl {
         Some((loc, loc + len))
     }
 
+    /// Font size and colour of the character before the caret (at it when the caret is at the
+    /// start) from `AXAttributedStringForRange`. `None` for editors without
+    /// `AXSelectedTextRange` or a placeable `AXValue` (text-marker web editors).
+    fn style_at_caret(&self, state: &FieldState) -> Option<TextStyle> {
+        let caret = match self.selection_utf16() {
+            Some((_, e)) => e,
+            None => {
+                let (_, e) = state.selection?;
+                let live = self.get("AXValue").and_then(|t| cf_string(&t))?;
+                let map = text_map::normalize_newlines(&live);
+                chars_to_utf16(&live, map.to_source(e))
+            }
+        };
+        let param = ax::range_value(caret.saturating_sub(1), 1)?;
+        let attributed = ax::param_attr(&self.0, "AXAttributedStringForRange", &param)?;
+        let attrs = ax::attributes_at_start(&attributed)?;
+        let font_size = ax::dict_get(&attrs, "AXFont")
+            .and_then(|font| ax::dict_get(&font, "AXFontSize"))
+            .and_then(|n| {
+                let n = n.downcast_ref::<CFNumber>()?;
+                n.as_f64().or_else(|| n.as_i64().map(|v| v as f64))
+            });
+        let color = ax::dict_get(&attrs, "AXForegroundColor")
+            .and_then(|c| ax::color_components(&c))
+            .and_then(|c| Rgba::from_cg_components(&c));
+        Some(TextStyle { font_size, color })
+    }
+
     fn bounds_for_range(&self, loc: usize, len: usize) -> Option<Rect> {
         let param = ax::range_value(loc, len)?;
         let v = ax::param_attr(&self.0, "AXBoundsForRange", &param)?;
@@ -708,6 +737,14 @@ impl Platform for AxPlatform {
         }
         // Empty field: the zero-length range still has a position in most editors.
         el.bounds_for_range(0, 0)
+    }
+
+    fn text_style(&self, el: &AxEl, state: &FieldState) -> TextStyle {
+        // The engine never asks for a secure field; refuse one here too (one attribute).
+        if el.get("AXSubrole").and_then(|t| cf_string(&t)).as_deref() == Some("AXSecureTextField") {
+            return TextStyle::default();
+        }
+        el.style_at_caret(state).unwrap_or_default()
     }
 
     fn insert_text(&self, el: &AxEl, text: &str, before: &FieldState) -> Result<()> {

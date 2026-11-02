@@ -254,6 +254,7 @@ pub fn draft_and_insert<P: nugget_a11y::Platform>(
         instruction: None,
         provider: None,
         max_tokens: None,
+        mode: Default::default(),
     };
 
     // The daemon's draft.begin.
