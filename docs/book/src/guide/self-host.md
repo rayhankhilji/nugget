@@ -112,6 +112,8 @@ Optional settings:
 - `NUGGET_LOG_FORMAT`
 - `NUGGET_APP_SCHEME`
 - `NUGGET_CLIENT_IP_HEADER`: leave it unset unless a trusted proxy in front of Caddy sets it.
+- `NUGGET_WAITLIST_SALT` and `NUGGET_RATE_WAITLIST_PER_HOUR`: for the website's waitlist route. A
+  self-hosted server can ignore both: nothing reads the list.
 - `COMPOSIO_WEBHOOK_SECRET`
 
 `cloud` reads `.env` directly. `DATABASE_URL` and `SUPABASE_URL` are set by the compose file.

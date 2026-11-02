@@ -677,6 +677,18 @@ async fn billing_off_entitles_everyone_and_closes_stripe_routes() {
             "{uri}"
         );
     }
+    let (s, v) = call(
+        &app,
+        "GET",
+        "/v1/billing/preview?plan=heed_max&interval=year",
+        Some(u),
+        None,
+    )
+    .await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (StatusCode::NOT_FOUND, Some("billing_disabled"))
+    );
     let req = Request::post("/v1/webhooks/stripe")
         .body(Body::from("{}"))
         .unwrap();
@@ -686,4 +698,83 @@ async fn billing_off_entitles_everyone_and_closes_stripe_routes() {
     );
     let (_, p) = call(&app, "GET", "/v1/billing/plans", None, None).await;
     assert_eq!(p["billing"], false);
+}
+
+#[tokio::test]
+async fn upgrade_preview_asks_stripe_and_changes_nothing() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    let get = |u: Uuid, q: &str| {
+        let uri = format!("/v1/billing/preview?{q}");
+        let app = h.app.clone();
+        async move { call(&app, "GET", &uri, Some(u), None).await }
+    };
+    // No subscription: nothing to preview.
+    let none = add_user(&h.pool).await;
+    let (s, v) = get(none, "plan=heed_max&interval=month").await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (StatusCode::CONFLICT, Some("no_subscription"))
+    );
+    let u = subscriber(&h.pool, "heed").await;
+    let sub_id = format!("sub_{}", u.simple());
+    h.stripe.subs.lock().unwrap().insert(
+        sub_id.clone(),
+        crate::stripe::Subscription {
+            id: sub_id.clone(),
+            customer: "cus_1".into(),
+            status: "active".into(),
+            price_id: "price_hm".into(),
+            trial_end: None,
+            current_period_end: None,
+            cancel_at_period_end: false,
+            user_id: Some(u.to_string()),
+        },
+    );
+    let before = time::OffsetDateTime::now_utc().unix_timestamp();
+    let (s, v) = get(u, "plan=heed_max&interval=year").await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert_eq!(v["amount_due"], 1234);
+    assert_eq!(v["currency"], "gbp");
+    assert_eq!(
+        (v["plan"].as_str(), v["interval"].as_str()),
+        (Some("heed_max"), Some("year"))
+    );
+    let date = time::OffsetDateTime::parse(
+        v["proration_date"].as_str().unwrap(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap()
+    .unix_timestamp();
+    let previews = h.stripe.previews.lock().unwrap().clone();
+    assert_eq!(previews, vec![(sub_id.clone(), "price_xa".into(), date)]);
+    assert!((before..=before + 5).contains(&date));
+    // The same price previews the plain renewal.
+    let (_, v) = get(u, "plan=heed&interval=month").await;
+    assert_eq!(v["amount_due"], 0);
+    for (q, code) in [
+        ("plan=gold&interval=month", "unknown_plan"),
+        ("plan=heed&interval=week", "bad_interval"),
+    ] {
+        let (s, v) = get(u, q).await;
+        assert_eq!(
+            (s, v["error"].as_str()),
+            (StatusCode::BAD_REQUEST, Some(code)),
+            "{q}"
+        );
+    }
+    // Read only: the subscription row and Stripe's subscription are untouched.
+    let plan: String = h
+        .pool
+        .query_one(
+            "select plan from public.subscriptions where user_id = $1",
+            &[&u],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(plan, "heed");
+    assert_eq!(h.stripe.subs.lock().unwrap()[&sub_id].price_id, "price_hm");
+    assert!(h.stripe.checkouts.lock().unwrap().is_empty());
 }

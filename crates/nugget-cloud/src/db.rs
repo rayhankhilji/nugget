@@ -1139,6 +1139,38 @@ impl Db {
         })
         .await
     }
+
+    // ---- waitlist (no user: the service may only insert) ------------------------------------
+
+    /// Adds an address; an existing one is left as it is.
+    pub async fn waitlist_add(
+        &self,
+        email: &str,
+        source: &str,
+        ip_hash: Option<&str>,
+    ) -> Result<(), DbError> {
+        self.scoped(None, async |tx| {
+            tx.execute(
+                "insert into public.waitlist (email, source, ip_hash) values ($1::text::extensions.citext, $2, $3)
+                 on conflict do nothing",
+                &[&email, &source, &ip_hash],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Removes an address from the waitlist; whether it was there.
+    pub async fn waitlist_forget(&self, email: &str) -> Result<bool, DbError> {
+        self.scoped(None, async |tx| {
+            Ok(tx
+                .query_one("select nugget_private.waitlist_forget($1)", &[&email])
+                .await?
+                .get(0))
+        })
+        .await
+    }
 }
 
 #[cfg(test)]

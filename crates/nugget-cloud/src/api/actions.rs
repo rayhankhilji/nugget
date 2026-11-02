@@ -5,8 +5,10 @@
 //! | Route | |
 //! |---|---|
 //! | `POST /v1/actions` | propose `{kind, toolkit, input, idempotency_key}` → the action, `pending` |
-//! | `GET /v1/actions?status=` | the user's recent actions |
+//! | `GET /v1/actions?status=&include=snoozed` | the user's recent actions (snoozed ones only with `include=snoozed`) |
 //! | `GET /v1/actions/{id}` | status |
+//! | `PATCH /v1/actions/{id}` | `{input}`: edit the editable fields → new preview and NEW digest |
+//! | `POST /v1/actions/{id}/snooze` | `{until}` (RFC 3339, capped at the expiry; null shows it again) |
 //! | `GET /v1/actions/{id}/preview` | the dry run: fields, diff, digest (no side effects) |
 //! | `POST /v1/actions/{id}/approve` | `{digest}` → runs it once |
 //! | `POST /v1/actions/{id}/cancel` | `{}` |
@@ -38,7 +40,8 @@ const STATUSES: &[&str] = &[
 pub(super) fn routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/v1/actions", post(propose).get(list))
-        .route("/v1/actions/{id}", get(status))
+        .route("/v1/actions/{id}", get(status).patch(update))
+        .route("/v1/actions/{id}/snooze", post(snooze))
         .route("/v1/actions/{id}/preview", get(preview))
         .route("/v1/actions/{id}/approve", post(approve))
         .route("/v1/actions/{id}/cancel", post(cancel))
@@ -121,6 +124,8 @@ async fn propose(
 #[derive(Deserialize)]
 struct ListQuery {
     status: Option<String>,
+    /// `snoozed` lists snoozed actions too.
+    include: Option<String>,
 }
 
 async fn list(
@@ -134,7 +139,15 @@ async fn list(
     {
         return Err(bad("unknown status"));
     }
-    let actions = s.actions().list(u.id, q.status.as_deref()).await?;
+    let include_snoozed = match q.include.as_deref() {
+        None | Some("") => false,
+        Some("snoozed") => true,
+        Some(_) => return Err(bad("include may only be snoozed")),
+    };
+    let actions = s
+        .actions()
+        .list(u.id, q.status.as_deref(), include_snoozed)
+        .await?;
     Ok(Json(json!({ "actions": actions })))
 }
 
@@ -176,6 +189,56 @@ async fn approve(
         .check(&u.id)
         .map_err(|w| ApiError::rate_limited("action", w))?;
     Ok(Json(s.actions().approve(u.id, id, &b.digest).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateBody {
+    input: Value,
+}
+
+/// The user's edit: like a proposal, it needs a live subscription and counts against the
+/// action rate limit; it re-validates, re-plans and re-assesses, and returns a new digest.
+async fn update(
+    State(s): State<Arc<AppState>>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<UpdateBody>,
+) -> ApiResult<Json<ActionView>> {
+    let c = caller(&s, &h).await?;
+    c.entitled()?;
+    let u = c.user;
+    s.limits
+        .action
+        .check(&u.id)
+        .map_err(|w| ApiError::rate_limited("action", w))?;
+    Ok(Json(s.actions().edit(u.id, id, &b.input).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnoozeBody {
+    /// RFC 3339; null (or absent) shows the action again.
+    #[serde(default)]
+    until: Option<String>,
+}
+
+async fn snooze(
+    State(s): State<Arc<AppState>>,
+    h: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(b): Json<SnoozeBody>,
+) -> ApiResult<Json<ActionView>> {
+    let u = user(&s, &h).await?;
+    let until = b
+        .until
+        .as_deref()
+        .map(|t| {
+            time::OffsetDateTime::parse(t, &time::format_description::well_known::Rfc3339)
+                .map_err(|_| bad("until must be an RFC 3339 time"))
+        })
+        .transpose()?;
+    Ok(Json(s.actions().snooze(u.id, id, until).await?))
 }
 
 async fn cancel(

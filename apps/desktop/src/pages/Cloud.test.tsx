@@ -50,7 +50,7 @@ const billing = { cloud_me: trialing, cloud_billing_plans: plans };
 const answer: CloudAnswer = {
   conversation_id: "c1",
   answer: "Your flight is on Tuesday [1]. Not a cite [9].",
-  citations: [{ n: 1, item_id: "i1", title: "Booking confirmed", source: "gmail", url: "https://mail.example/i1", occurred_at: "2026-10-30T09:00:00Z", snippet: "Flight BA1 departs" }],
+  citations: [{ n: 1, item_id: "i1", title: "Booking confirmed", source: "gmail", url: "https://mail.example/i1", occurred_at: "2026-10-30T09:00:00Z", snippet: "Flight BA1 departs", author: null }],
   usage: { input_tokens: 10, output_tokens: 5 },
 };
 
