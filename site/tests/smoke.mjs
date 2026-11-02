@@ -69,6 +69,14 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1d. With release URLs set, /download offers the direct downloads.
+{
+  const page = await browser.newPage();
+  await page.goto(base + "/download");
+  check((await page.getAttribute('[data-dl="arm"]', "href"))?.endsWith(".dmg") === true, "download links to the configured release");
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

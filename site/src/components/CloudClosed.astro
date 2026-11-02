@@ -4,9 +4,9 @@
  * (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_CLOUD_URL): a calm "not open
  * yet" note pointing at the free app and the waitlist, instead of an error.
  */
-import { supportEmail } from "../lib/config";
+import { notifyHref } from "../lib/config";
 import { GITHUB_URL } from "../lib/plans";
-const waitlist = `mailto:${supportEmail}?subject=${encodeURIComponent("Heed Cloud waitlist")}&body=${encodeURIComponent("Please let me know when Heed Cloud opens.")}`;
+const waitlist = notifyHref("Heed Cloud waitlist", "Please let me know when Heed Cloud opens.");
 ---
 <section class="wrap closed" data-cloud-closed>
   <p class="eyebrow">Heed Cloud</p>
