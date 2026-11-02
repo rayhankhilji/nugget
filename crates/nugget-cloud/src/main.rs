@@ -34,13 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !gateway.has_llm() {
         tracing::warn!("no LLM key: /v1/ask will answer 503");
     }
+    let logo_http = http.clone();
     let auth = SupabaseAuth::new(
         http,
         cfg.supabase_url.clone(),
         cfg.supabase_anon_key.clone(),
         cfg.supabase_service_role_key.clone(),
     );
-    let state = Arc::new(AppState::new(
+    let mut state = AppState::new(
         db,
         Arc::new(auth),
         composio,
@@ -48,7 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cfg.composio_auth_configs.clone(),
         cfg.composio_webhook_secret.clone(),
         cfg.connect_callback.clone(),
-    ));
+    );
+    state.logos = nugget_cloud::apps::logos::LogoCache::new(logo_http);
+    let state = Arc::new(state);
     if let Some(ingest) = state.ingest() {
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(300));

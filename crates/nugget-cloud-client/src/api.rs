@@ -109,7 +109,11 @@ pub struct Answer {
 pub struct AppInfo {
     pub slug: String,
     pub name: String,
+    /// A `data:` URI (the desktop CSP allows no remote images).
     pub logo: Option<String>,
+    /// The remote logo (for the website); servers before the data: change omit it.
+    #[serde(default)]
+    pub logo_url: Option<String>,
     /// `mail`, `calendar`, `chat`, `docs` or `files`.
     pub category: String,
     pub syncs: bool,

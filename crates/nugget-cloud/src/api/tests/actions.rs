@@ -578,8 +578,14 @@ async fn apps_catalogue_lists_logos_capabilities_and_connections() {
         (Some(false), Some(true))
     );
     assert_eq!(
-        slack["logo"], "https://logos.composio.dev/api/slack",
+        slack["logo_url"], "https://logos.composio.dev/api/slack",
         "fallback when the catalogue has none"
+    );
+    // The desktop CSP allows only data: images; the test state never fetches, so a monogram.
+    assert!(
+        apps.iter()
+            .all(|a| a["logo"].as_str().unwrap().starts_with("data:image/")),
+        "{v}"
     );
     assert_eq!(
         app("notion")["connectable"],

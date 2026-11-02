@@ -21,7 +21,11 @@ use crate::apps::{CATALOG, Category, SyncMode};
 struct AppView {
     slug: &'static str,
     name: &'static str,
+    /// A `data:` URI (the desktop allows no remote images): fetched, checked, sanitised,
+    /// capped at 32 KB and cached; a generated monogram when that fails.
     logo: String,
+    /// The remote logo, for the website.
+    logo_url: String,
     /// The first of `categories`, for a UI that shows one.
     category: Category,
     categories: &'static [Category],
@@ -47,14 +51,28 @@ async fn list_apps(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Js
             .map(|c| c.toolkit)
             .collect();
     let catalog = s.catalog().await;
+    // Fetch (or read from the cache) every logo at once.
+    let mut set = tokio::task::JoinSet::new();
+    for (i, a) in CATALOG.iter().enumerate() {
+        let url = catalog
+            .iter()
+            .find(|t| t.slug == a.slug)
+            .and_then(|t| t.logo.clone())
+            .unwrap_or_else(|| a.fallback_logo());
+        let logos = s.logos.clone();
+        set.spawn(async move {
+            let data = logos.data_uri(&url, a.name).await;
+            (i, url, data)
+        });
+    }
+    let mut logos = vec![(String::new(), String::new()); CATALOG.len()];
+    for (i, url, data) in set.join_all().await {
+        logos[i] = (url, data);
+    }
     let apps: Vec<AppView> = CATALOG
         .iter()
-        .map(|a| {
-            let logo = catalog
-                .iter()
-                .find(|t| t.slug == a.slug)
-                .and_then(|t| t.logo.clone())
-                .unwrap_or_else(|| a.fallback_logo());
+        .zip(logos)
+        .map(|(a, (logo_url, logo))| {
             let mode = if a.default_mode == SyncMode::Trigger && s.webhook_secret.is_some() {
                 SyncMode::Trigger
             } else {
@@ -64,6 +82,7 @@ async fn list_apps(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Js
                 slug: a.slug,
                 name: a.name,
                 logo,
+                logo_url,
                 category: a.categories[0],
                 categories: a.categories,
                 syncs: a.syncs,

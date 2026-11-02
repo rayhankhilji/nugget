@@ -25,6 +25,7 @@ use crate::composio::ComposioError;
 use crate::db::NewItem;
 
 pub mod google;
+pub mod logos;
 pub mod microsoft;
 pub mod notion;
 pub mod slack;

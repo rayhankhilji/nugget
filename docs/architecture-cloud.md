@@ -78,7 +78,16 @@ These run inside `nugget-cloud`, as a tokio task per process:
 
 ## 2a. Apps
 
-`GET /v1/apps` is the Connections catalogue. Each entry has the slug, name, logo, categories, `syncs`, the action kinds, `sync_mode`, `connectable` (this deployment has a Composio auth config for it) and `connected`. Logos come from Composio's `GET /toolkits` (`meta.logo`). When that call fails, they come from `https://logos.composio.dev/api/<slug>`, which serves every slug but is not documented.
+`GET /v1/apps` is the Connections catalogue. Each entry has the slug, name, logo, `logo_url`, categories, `syncs`, the action kinds, `sync_mode`, `connectable` (this deployment has a Composio auth config for it) and `connected`.
+
+The desktop CSP is `img-src 'self' data:`, so the desktop cannot load remote images. `logo` is therefore always a `data:` URI:
+- The service fetches it from Composio's `GET /toolkits` (`meta.logo`). When that call fails, it uses `https://logos.composio.dev/api/<slug>`, which serves every slug but is not documented.
+- It is capped at 32 KB and cached (24 hours, or 1 hour after a failure).
+- Rasters are accepted only when their magic bytes match.
+- SVG is rebuilt from an allowlist: no scripts, styles, `foreignObject`, images, event handlers, DTDs, or references outside the document.
+- Anything else gets a generated monogram.
+
+`logo_url` keeps the remote URL, for the website. `/v1/connections` serves its `available[].logo` the same way.
 
 | App | Toolkit | Syncs | Mode | Actions |
 |---|---|---|---|---|

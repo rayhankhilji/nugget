@@ -69,7 +69,10 @@ export type CloudAppCategory = "mail" | "calendar" | "chat" | "docs" | "files";
 export interface CloudAppInfo {
   slug: string;
   name: string;
+  /** A `data:` URI, safe under the desktop CSP (`img-src 'self' data:`). */
   logo: string | null;
+  /** The remote logo URL (for the website, not the desktop). */
+  logo_url?: string;
   /** One of {@link CloudAppCategory}; other strings are possible from a newer server. */
   category: CloudAppCategory | (string & {});
   syncs: boolean;

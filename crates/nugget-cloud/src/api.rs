@@ -40,6 +40,9 @@ pub struct AppState {
     /// Shared by every sync, so per-account rate limits hold across requests and the scheduler.
     pub limiter: RateLimiter,
     pub actions: Actions,
+    /// Logos as `data:` URIs (the desktop CSP allows no remote images). Never fetches unless
+    /// built with a client ([`crate::apps::logos::LogoCache::new`]).
+    pub logos: crate::apps::logos::LogoCache,
     catalog: Mutex<Option<(Instant, Vec<Toolkit>)>>,
 }
 
@@ -68,6 +71,7 @@ impl AppState {
             connect_callback,
             limiter: RateLimiter::default(),
             actions,
+            logos: Default::default(),
             catalog: Mutex::new(None),
         }
     }
@@ -308,6 +312,17 @@ async fn list_connections(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiRe
         .collect();
     available.sort_by(|a, b| b.connectable.cmp(&a.connectable).then(a.name.cmp(&b.name)));
     available.truncate(60);
+    // The desktop CSP allows only data: images. Apps we support get their fetched, sanitised
+    // logo; the rest of Composio's catalogue gets a monogram (no fetch).
+    for a in &mut available {
+        a.logo = Some(match (apps::spec(&a.slug), a.logo.take()) {
+            (Some(spec), url) => {
+                let url = url.unwrap_or_else(|| spec.fallback_logo());
+                s.logos.data_uri(&url, &a.name).await
+            }
+            (None, _) => apps::logos::monogram(&a.name),
+        });
+    }
     Ok(Json(
         json!({"connections": connections, "available": available}),
     ))
