@@ -21,6 +21,7 @@ pub mod generators;
 pub mod judge;
 pub mod score;
 pub mod text;
+pub mod view;
 
 use std::borrow::Cow;
 use std::collections::HashSet;

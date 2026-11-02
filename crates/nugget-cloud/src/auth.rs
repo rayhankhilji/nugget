@@ -59,6 +59,29 @@ impl SupabaseAuth {
     }
 }
 
+/// How long a verified token may be served from the cache: 60 seconds, but never past the
+/// token's own `exp`. The payload is read without checking the signature, which is safe because
+/// it can only shorten the time (Supabase has just verified the token).
+pub fn cache_ttl(token: &str, now_unix: i64) -> Duration {
+    use base64::Engine;
+    let exp = token
+        .split('.')
+        .nth(1)
+        .and_then(|p| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(p.trim_end_matches('='))
+                .ok()
+        })
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v["exp"].as_i64());
+    match exp {
+        Some(exp) => TTL.min(Duration::from_secs(
+            exp.saturating_sub(now_unix).max(0) as u64
+        )),
+        None => TTL,
+    }
+}
+
 fn unavailable(e: impl std::fmt::Display) -> AuthError {
     AuthError::Unavailable(e.to_string())
 }
@@ -70,12 +93,12 @@ impl AuthProvider for SupabaseAuth {
             return Err(AuthError::Invalid);
         }
         let key: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        if let Some((u, at)) = self
+        if let Some((u, until)) = self
             .cache
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .get(&key)
-            && at.elapsed() < TTL
+            && Instant::now() < *until
         {
             return Ok(u.clone());
         }
@@ -105,7 +128,10 @@ impl AuthProvider for SupabaseAuth {
         if cache.len() >= MAX_CACHE {
             cache.clear();
         }
-        cache.insert(key, (user.clone(), Instant::now()));
+        let ttl = cache_ttl(token, time::OffsetDateTime::now_utc().unix_timestamp());
+        if !ttl.is_zero() {
+            cache.insert(key, (user.clone(), Instant::now() + ttl));
+        }
         Ok(user)
     }
 
@@ -172,6 +198,22 @@ mod tests {
             a.delete_user(u.id).await.is_err(),
             "no service key, no deletion"
         );
+    }
+
+    #[test]
+    fn cache_never_outlives_the_token() {
+        use base64::Engine;
+        let jwt = |payload: &str| {
+            let b = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+            format!("eyJhbGciOiJIUzI1NiJ9.{b}.sig")
+        };
+        assert_eq!(
+            cache_ttl(&jwt(r#"{"exp":1010}"#), 1000),
+            Duration::from_secs(10)
+        );
+        assert_eq!(cache_ttl(&jwt(r#"{"exp":999999}"#), 1000), TTL);
+        assert_eq!(cache_ttl(&jwt(r#"{"exp":900}"#), 1000), Duration::ZERO);
+        assert_eq!(cache_ttl("opaque", 1000), TTL);
     }
 
     #[tokio::test]

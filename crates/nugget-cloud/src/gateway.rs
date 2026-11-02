@@ -57,6 +57,9 @@ pub trait Embedder: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<(Vec<Vec<f32>>, u32), GatewayError>;
 }
 
+/// Inputs per embedding request.
+pub const EMBED_BATCH: usize = 100;
+
 /// What a user's plan lets them spend on AI this month (from `plans.toml`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Allowance {
@@ -234,6 +237,7 @@ impl Gateway {
         req.model = model.clone();
         let res = llm.complete(&req).await?;
         let cost = cost_micros(&model, res.input_tokens, res.output_tokens);
+        crate::ops::METRICS.gateway_cost(cost);
         db.record_usage(
             user,
             UsageKind::Llm,
@@ -256,25 +260,28 @@ impl Gateway {
         let Some(e) = &self.embedder else {
             return Ok(None);
         };
-        if texts.is_empty() {
-            return Ok(Some(Vec::new()));
+        let mut out = Vec::with_capacity(texts.len());
+        // One provider call per EMBED_BATCH inputs (OpenAI accepts up to 2,048 per request).
+        for batch in texts.chunks(EMBED_BATCH) {
+            let (vecs, tokens) = e.embed(batch).await?;
+            if vecs.len() != batch.len() || vecs.iter().any(|v| v.len() != e.dims()) {
+                return Err(GatewayError::Provider(
+                    "embedding count or size mismatch".into(),
+                ));
+            }
+            crate::ops::METRICS.gateway_cost(cost_micros(e.model(), tokens, 0));
+            db.record_usage(
+                user,
+                UsageKind::Embed,
+                e.model(),
+                tokens,
+                0,
+                cost_micros(e.model(), tokens, 0),
+            )
+            .await?;
+            out.extend(vecs);
         }
-        let (vecs, tokens) = e.embed(texts).await?;
-        if vecs.len() != texts.len() || vecs.iter().any(|v| v.len() != e.dims()) {
-            return Err(GatewayError::Provider(
-                "embedding count or size mismatch".into(),
-            ));
-        }
-        db.record_usage(
-            user,
-            UsageKind::Embed,
-            e.model(),
-            tokens,
-            0,
-            cost_micros(e.model(), tokens, 0),
-        )
-        .await?;
-        Ok(Some(vecs))
+        Ok(Some(out))
     }
 }
 

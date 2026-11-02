@@ -2344,6 +2344,8 @@
   "cloud.connected": "Verbunden",
   "cloud.connectInBrowser": "Schließe die Verbindung mit {name} im Browser ab und kehre dann hierher zurück.",
   "cloud.sync": "Jetzt synchronisieren",
+  "cloud.importing": "Import läuft… {count} Einträge",
+  "cloud.syncRunning": "Der Import läuft im Hintergrund. Der erste Import kann einige Minuten dauern; die Liste aktualisiert sich laufend.",
   "cloud.syncing": "Wird synchronisiert…",
   "cloud.syncResults": "Ergebnisse der Synchronisierung",
   "cloud.syncResult": "{name}: {added} neu, {updated} aktualisiert",

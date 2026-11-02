@@ -10,8 +10,11 @@ use crate::{CloudConfig, CloudError, Result};
 
 /// Where Supabase sends the browser back (allow-listed in the project's URL configuration).
 pub const REDIRECT_URL: &str = "heed://auth/callback";
-/// Schemes the callback may arrive on: `heed`, and `nugget` from before the rename to Heed (a
-/// project still allow-listing `nugget://auth/callback` keeps working).
+
+/// Deep-link schemes a callback may arrive on: `heed` (the new name) and `nugget` (until every
+/// installed build and the Supabase allow-list have moved). Any app can claim a scheme on
+/// macOS, Windows and Linux, so the scheme is not a secret: PKCE (the verifier never leaves
+/// this process) is what makes an intercepted or forged code useless.
 pub const CALLBACK_SCHEMES: &[&str] = &["heed", "nugget"];
 
 const MAX_CALLBACK_LEN: usize = 2048;
@@ -336,6 +339,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn callbacks_parse_strictly_on_both_schemes() {
+        assert_eq!(
+            parse_callback("heed://auth/callback?code=abc").unwrap(),
+            Callback::Code("abc".into())
+        );
+        assert_eq!(
+            parse_callback("HEED://auth/callback?code=abc").unwrap(),
+            Callback::Code("abc".into()),
+            "schemes are case-insensitive"
+        );
+    }
+
+    #[test]
     fn callbacks_parse_strictly() {
         assert_eq!(
             parse_callback("heed://auth/callback?code=0b5c-9f1e_A.~").unwrap(),
@@ -373,6 +389,9 @@ pub(crate) mod tests {
             "https://auth/callback?code=a",
             "heed://auth/callback?error=%0A",
             "heed://auth/callback?error=x&error_description=a%07b",
+            "heedx://auth/callback?code=a",
+            "nugget://auth/callback?error=%0A",
+            "nugget://auth/callback?error=x&error_description=a%07b",
         ] {
             assert!(parse_callback(bad).is_err(), "{bad}");
         }

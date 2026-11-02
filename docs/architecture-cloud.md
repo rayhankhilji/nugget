@@ -60,22 +60,165 @@ The Rust service costs about £2–3 a month and lets us keep a single language,
 
 ### Ingest workers
 These run inside `nugget-cloud`, as a tokio task per process:
-1. **Sync loop.** Every 5 minutes it asks `nugget_private.due_connections()` for connections that are due. Gmail and Calendar are synced every 30 minutes while the user's desktop app is active (it sends a heartbeat), and once every 24 hours otherwise. A user can also run a sync on demand with `POST /v1/sync`.
+1. **Sync loop.** Every minute it claims due connections with a lease (`nugget_private.claim_due_connections`). The cadence comes from the plan (see section 6) while the user is active, and is once a day otherwise. A user can also start a sync with `POST /v1/sync`. That waits up to 20 s, then answers `202 {running: true}` while the import continues in the background.
+   - Each connection has a run lease (`syncing_until`), so a request and the scheduler never sync the same connection at once.
+   - Progress (`syncing`, `items_synced`, `backfill_done`) is in `GET /v1/connections`, which the desktop polls while an import runs.
+   - A long Gmail backfill resumes where it stopped, one minute later.
 2. **Fetch.** It calls Composio tools as that user: `GMAIL_FETCH_EMAILS` with an `after:` query built from the cursor, and `GOOGLECALENDAR_EVENTS_LIST` with `timeMin`/`timeMax` and `updatedMin`.
 3. **Normalise.** Each email or event becomes an `items` row. HTML is stripped, quoted replies are trimmed, and the body is capped at 64 KB. If the content hash has not changed, the item is skipped, so re-syncs cost nothing.
 4. **Chunk and embed.** Text is split into chunks of about 1,200 characters with overlap. Chunks get embeddings only if an embedder is configured (see the AI gateway). Full-text search always works.
-5. **Extract** (M2). `nugget-knowledge` extraction runs on new items, using the gateway's cheap model, and writes to `entities` and `claims`.
+   - Unchanged items are skipped with one hash lookup per page.
+   - All new chunks on a page are embedded together, at most 100 inputs per provider call, not one call per item.
+5. **Extract** (M2). `nugget-knowledge` extraction runs on new items, using the gateway's cheap model, and writes to `entities` and `claims`. See [Intelligence](#intelligence-m2m3).
+
+### Intelligence (M2/M3)
+Knowledge, cards, the brief and search reuse the local crates as libraries rather than porting them. Each job loads one user's recent items (180 days, at most 4,000, plus future events) into an **in-memory `nugget_store::Store` snapshot** (`nugget-cloud/src/snapshot.rs`), with the metadata shape the local pipeline writes:
+- Mail gets `mime: message/rfc822`, `extracted` headers (from, to, cc, subject, Message-ID, In-Reply-To, References, List-Unsubscribe, Precedence, Auto-Submitted) and the Gmail `labels` and `thread_id`. Calendar events get the local Google connector's `source` shape (start/end objects, attendees and organizer with emails and responses). Ingest stores these fields since M2; older event rows are upgraded on the fly.
+- **Privacy labels** come from `nugget_ingest::rule_labels`: the PII scan, connector flags and the sensitivity rules, as the local pipeline applies them with no local triage model (`assume_unflagged_safe`). A rule hit makes the item *confirmed* sensitive; everything else is not sensitive. The local model-based triage (junk and sensitive labels from a local LLM) does **not** run in the cloud.
+- Item keys are the Postgres item ids, so every piece of evidence maps back to an `items` row.
+
+The jobs (`intel.rs`), per user:
+1. **Knowledge.** `nugget-knowledge` runs on the snapshot: deterministic extractors, people and project resolution, and the quote-gated LLM extractor. The model is the gateway's fast model through `llm_bridge.rs`, a `nugget_infer::Provider` that is metered in `usage_events`, held to the quota, and cached in `llm_cache` by prompt hash, so an unchanged item is never paid for twice. Each run sends at most 40 uncached requests; the rest wait for later runs. Confirmed-sensitive items never reach the model (the crate's own gate). When the month's quota is spent, the run is deterministic only. The graph is projected into `entities` (stable ids, keyed by the "me" entity, then the strongest identifier, then kind and name) and `claims` (active claims with every evidence item and quote).
+2. **Cards.** `nugget-proactive` runs on the same snapshot and graph: unanswered mail, commitments and follow-ups, meeting prep, renewals; its scoring model and the learned per-sender, per-domain and per-kind feedback with decay; the multilingual text rules and `LocalText` keys. The state lives in `proactive_state` as JSON, saved with a compare-and-swap on `updated_at` (a refresh never loses a dismissal made while it ran), and every save projects the cards into `cards`. Cards go to the desktop as the daemon's `CardView` (`nugget_proactive::view`), with quotes withheld on sensitive cards.
+3. **Brief.** From 07:00 in the user's time zone (`profiles.timezone`, sent by the desktop as `tz`), `nugget-proactive`'s morning brief plus two to five sentences of prose with `[n]` citations from the fast model. Sensitive cards stay in the structured brief but never go to the model. It is generated once per local day and kept in `briefs`; without a model or quota the brief has no prose.
+
+**Hardening** (SEC1):
+- Vector queries widen the HNSW scan per transaction (`hnsw.ef_search`, and `hnsw.iterative_scan` on pgvector ≥ 0.8; threat model finding 31).
+- `cards.item_ids` holds only ids of the user's own items (checked on every save).
+- Every prompt built here (extraction, the brief, reply drafts) passes item text through `ask::neutralise_tags`.
+- `/v1/export` includes `briefs`, `proactive_state`, `intel_runs` and `llm_cache`.
+- Card refreshes share the ask rate limit, and card-accept proposals share the actions limit.
+
+**Plans.** Every endpoint below needs a live subscription (`plans::entitlement`; 402 `subscription_required` otherwise), cards need the plan's `needs_you_inbox` and the brief its `daily_brief` (403 `not_in_plan`). Model calls go through the plan's `Allowance` (`Gateway::choose`, fast tier): past the hard cap, extraction and the brief's prose are skipped and search drops to full text. The snapshot also honours the plan's `history_days`.
+
+**Scheduling.** Every 5 minutes, `nugget_private.intel_due` lists subscribed users whose items changed since their last run, or whose last run is more than 6 hours old (cards depend on the clock), and `nugget_private.brief_due` lists subscribed users past 07:00 local with no brief for today. Both are `security definer` and callable only by `nugget_service`.
+
+**Endpoints** (each in its own module under `api/`):
+- `POST /v1/search {q, sources?, person?, from?, to?, limit?, tz?}`: full text (`tsvector`) and pgvector hits fused with `nugget_retrieve::rank::convex_fuse`, grouped per item, normalised, recency-boosted and diversified with MMR. A date phrase in `q` ("last week") becomes the range when `from`/`to` are unset. `facets` (sources, people) and `timeline` (by day for ranges up to 62 days, else by month) count the items that match the words and filters; vector-only matches rank results but are not counted. With no words it browses newest first.
+- `GET /v1/cards?tz=`, `POST /v1/cards/refresh`, `POST /v1/cards/seen {ids}`, `POST /v1/cards/{id}/accept|done`, `POST /v1/cards/{id}/dismiss {reason, note?}` (`not_relevant`, `already_handled`, `wrong_info`, `not_important`, `other`), `POST /v1/cards/{id}/snooze {until}`.
+- `GET /v1/brief?tz=`: today's brief (generating it if due), else the latest earlier one, else null.
+
+The desktop shell exposes them as `cloud_search`, `cloud_cards`, `cloud_cards_refresh`, `cloud_cards_seen`, `cloud_card_action` and `cloud_brief`; `src/cloud.ts` has typed wrappers.
+
+**Card actions** (`card_actions.rs`): a card's `draft_reply` maps to a `reply_mail` in the app the message came from, and its `create_event` to a calendar `create_event`. An action is `supported` only when CL4's actions have a tool for it **and** the user has that app connected. `POST /v1/cards/{id}/accept {action?, body?}` proposes it through the same path as `POST /v1/actions` (validated, assessed by `nugget-policy`, previewed, idempotent per card and action) and returns `{card, action}`. A reply's text is the user's (`body`), or is drafted by the fast model from the card's evidence within the plan's allowance. Sensitive cards are never drafted (422 `body_required`). Nothing is sent until `POST /v1/actions/{id}/approve` with the preview's digest.
+
+Not done yet: the local LLM judge that enriches cards is not used; snapshots are rebuilt on every run, which is fine at M2 volumes but should become incremental before large mailboxes.
 
 ## 2. Composio
 - **Identity.** The Composio `user_id` is the Supabase user UUID. One Composio project serves all users, and the API key lives only in the server environment (`COMPOSIO_API_KEY`). The REST base URL is `https://backend.composio.dev/api/v3.1`, with the header `x-api-key`. `v3` is frozen but still supported.
 - **Auth configs.** These are created once per toolkit in the Composio dashboard, using Composio-managed OAuth for Gmail and Google Calendar. Their ids go in `COMPOSIO_AUTH_CONFIGS`, for example `gmail=ac_…,googlecalendar=ac_…`.
 - **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = heed://connections/callback` (`NUGGET_CONNECT_CALLBACK` overrides it; the app also accepts the pre-rename `nugget://connections/callback`) → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
 - **Triggers or polling.** Composio's Gmail and Calendar triggers are themselves polling-based, with a 2–15 minute floor. They cost **$0.003 per event** on the paid tier, ten times the price of a tool call ($0.0003). A user receiving 1,000 emails a month would cost $3 in trigger events alone. **M1 therefore polls with tool calls**, adaptively as described above, which costs about 1,500–3,000 calls per active user per month. `POST /v1/webhooks/composio` is implemented: it verifies the signature, and for an event it only marks that connection due (it does not ingest the payload). This lets us switch triggers on per toolkit later, for example for low-volume apps, without a second ingest path.
-- **Actions** (M3) are sending mail and creating events. The agent proposes a tool call, and `nugget-policy` assesses it: Send-class actions are always `Confirm`. The proposal is stored as a `pending_actions` row (added in M3) with a preview. The desktop shows the existing confirmation UI, and only `POST /v1/actions/{id}/approve` executes `tools/execute`. Each step is written to the hash-chained action log. Composio never acts without that approval.
+- **Actions** are described under [Actions](#actions) below.
 - **Pricing** (composio.dev/pricing, for signups after 2026-08-15):
   - Hobby: $0, with 100k tool calls and 50k trigger events a month. Usage *pauses* at the cap.
   - Pro: $29/month, with the same allowance as a credit, then $0.0003 per call and $0.003 per trigger event.
   - **The decision: start on Hobby** (confirmed by the founder). With paid plans' sync cadence it covers development and roughly the first 10–15 subscribers. Move to Pro before the cap, because a pause stops ingest for everyone.
+
+## 2a. Apps
+
+`GET /v1/apps` is the Connections catalogue. Each entry has the slug, name, logo, `logo_url`, categories, `syncs`, the action kinds, `sync_mode`, `connectable` (this deployment has a Composio auth config for it) and `connected`.
+
+The desktop CSP is `img-src 'self' data:`, so the desktop cannot load remote images. `logo` is therefore always a `data:` URI:
+- The service fetches it from Composio's `GET /toolkits` (`meta.logo`). When that call fails, it uses `https://logos.composio.dev/api/<slug>`, which serves every slug but is not documented.
+- The fetch is SSRF-guarded:
+  - https only, with no proxy;
+  - at most 3 redirects, each re-checked;
+  - a DNS resolver that refuses loopback, private, link-local and metadata (169.254.169.254, `fd00:ec2::254`), CGNAT and other non-public addresses, so the check applies to the address actually connected to;
+  - IP-literal hosts are checked the same way.
+- It is capped at 32 KB and 5 seconds, and cached (24 hours, or 1 hour after a failure).
+- Rasters are accepted only when their magic bytes match.
+- SVG is rebuilt from an allowlist: no scripts, styles, `foreignObject`, images, event handlers, DTDs, or references outside the document.
+- Anything else gets a generated monogram.
+
+`logo_url` keeps the remote URL, for the website. `/v1/connections` serves its `available[].logo` the same way.
+
+| App | Toolkit | Syncs | Mode | Actions |
+|---|---|---|---|---|
+| Gmail | `gmail` | `GMAIL_FETCH_EMAILS` | poll | send, reply |
+| Google Calendar | `googlecalendar` | `GOOGLECALENDAR_EVENTS_LIST` (`updatedMin`, `showDeleted`) | poll | create, update (`PATCH_EVENT`) |
+| Google Drive | `googledrive` | `FIND_FILE` backfill, then `GET_CHANGES_START_PAGE_TOKEN` / `LIST_CHANGES`; Docs text via `DOWNLOAD_FILE` (`text/plain`) | poll | none |
+| Outlook | `outlook` (mail and calendar) | `OUTLOOK_LIST_MESSAGES` (`response_detail: full`), `OUTLOOK_LIST_EVENTS` | poll | send, reply, create event |
+| Slack | `slack` | `SLACK_LIST_ALL_CHANNELS`, `SLACK_FETCH_CONVERSATION_HISTORY` | poll | post (`SLACK_SEND_MESSAGE`, `markdown_text`) |
+| Microsoft Teams | `microsoft_teams` | `CHATS_GET_ALL_CHATS`, `LIST_USER_CHAT_MESSAGES` | poll (Composio has no Teams triggers) | none |
+| Notion | `notion` | `NOTION_SEARCH_NOTION_PAGE`, `NOTION_GET_PAGE_MARKDOWN` | trigger (`NOTION_PAGE_CREATED`, `NOTION_PAGE_CONTENT_UPDATED`) | create page |
+
+Tool names and inputs were checked against Composio's toolkit pages (`docs.composio.dev/toolkits/<slug>`) on 2026-11-02. Composio documents outputs only as `data`. The parsers therefore read the upstream APIs' own field names (Gmail, Calendar, Drive v3, Slack, Notion, Graph), accept a few other spellings, and skip what they cannot read; they never fill it in. Each adapter's module comment says what is verified and what is defensive.
+
+**Adapters** (`crates/nugget-cloud/src/apps/`). There is one `SyncAdapter` per app, so adding an app means writing one file. An adapter gets a `Tools` handle bound to one connected account. That handle:
+- allows only the adapter's declared read tools,
+- enforces the app's rate limit (a per-account token bucket),
+- caps the number of calls per sync,
+- meters every call.
+
+The adapter returns a `Pull` containing:
+- items to upsert; unchanged items are skipped by content hash,
+- explicit deletes (trashed, cancelled or archived items, and Slack tombstones),
+- complete listings of time windows. A stored item in a fully listed window that is missing from the listing is deleted.
+
+An empty listing never deletes anything. A rate-limited sync keeps its cursor and retries within 15 minutes.
+
+**Rate limits.** Slack throttles non-Marketplace apps, which includes Composio's managed app, to 1 `conversations.history` call a minute and 15 messages a page. Each Slack sync therefore reads 3 channels, least recently synced first, and resumes long histories from the page cursor. A Slack app of our own on the Marketplace would lift this limit. The other apps run well under their upstream limits: Notion about 3 a second, Graph 10,000 per 10 minutes, Google per-user quotas.
+
+**Triggers versus polling, and cost.** A trigger event costs $0.003 on Composio Pro, ten times a tool call ($0.0003). With Composio-managed OAuth it costs $0.005 against $0.0005, and the free allowance is 10K events and 20K calls. So:
+- High-volume apps (mail, chat) poll.
+- Notion uses webhook triggers, because pages change rarely. Triggers are enabled once per connection, and only when `COMPOSIO_WEBHOOK_SECRET` is set. They mark the connection due. A daily poll is the safety net.
+- Gmail's and Drive's triggers are polling-based on Composio's side anyway, so they would add cost without saving anything.
+
+A webhook is accepted only with a valid signature, and only if its `metadata.user_id` (when present) matches the account's owner.
+
+**Not synced yet:**
+- Slack thread replies and user display names (authors are user ids).
+- Teams channel messages.
+- Notion pages deleted for good. Archived and trashed pages are handled.
+- Drive files other than Google Docs are indexed by name only. Docs text is used when Composio returns it inline; `downloaded_file_content`'s shape is not documented.
+
+## Actions
+
+The actions are:
+- send mail (Gmail, Outlook)
+- reply in a thread (Gmail, Outlook)
+- create an event (Google Calendar, Outlook)
+- update a Google Calendar event
+- post a Slack message
+- create a Notion page
+
+They all go through `pending_actions` (migration `20261102120001_apps_actions.sql`) and the `/v1/actions` routes:
+
+| Route | |
+|---|---|
+| `POST /v1/actions` | `{kind, toolkit, input, idempotency_key}` → the action, `pending` |
+| `GET /v1/actions[?status=]` | recent actions |
+| `GET /v1/actions/{id}` | status |
+| `GET /v1/actions/{id}/preview` | the dry run: fields, a before/after diff (an update compares against the synced event), and the digest |
+| `POST /v1/actions/{id}/approve` | `{digest}`: runs it once |
+| `POST /v1/actions/{id}/cancel` | |
+
+**Proposing.** A proposal goes through these steps:
+1. The input is validated: addresses, ids, lengths, one-line subjects, end after start.
+2. It is turned into the exact Composio call.
+3. `nugget-policy` assesses the call. Every action is Send-class, so the answer is Confirm, or Deny under a deny rule. A denied action is stored as `denied` and never runs. Nothing is ever auto-approved.
+
+The call has some explicit settings:
+- Calendar events set `create_meeting_room: false`.
+- `send_updates` is `none` when there are no attendees.
+- Whenever invitations will be emailed, the preview says so.
+
+**Approving.**
+- The digest is SHA-256 over the account, the tool and the canonical arguments. An approval must echo it, or it is refused (`412 digest_mismatch`).
+- `pending` becomes `executing` under a row lock. Approving twice, approving concurrently, or proposing again with the same idempotency key never sends twice. The same key with a different call is a `409`.
+- A failed send is not retried. Actions expire after 24 hours.
+- Proposing and approving need a live subscription (`402`), and share a per-user rate limit (`NUGGET_RATE_ACTION_PER_MIN`, default 10, `429 rate_limited`). Listing, status, preview and cancel stay open.
+- Approval is scoped to the owner: another user gets `404`, even with the digest. Only the stored call runs; fields in the approval body other than `digest` are ignored. A stored call that no longer matches its digest is refused (`412`) and audited.
+- Tool slugs come only from a fixed table (`actions::tool_for`, and each adapter's declared read tools). No tool name or URL is ever taken from synced content, model output or a request.
+- Same-user foreign keys (`20261102120002`): an action can only point at its own user's connection, and an audit entry only at its own user's action.
+
+**Audit.** Every step is appended to `action_audit`, a per-user SHA-256 hash chain (`prev_hash`, `hash`) without message bodies:
+- `proposed`, `denied`, `approval_rejected`, `approved`, `succeeded`, `failed`, `cancelled`, `expired`.
+
+Neither the service role nor the user can update or delete the chain. The GDPR export includes both tables.
+
+**Clients.** `nugget-cloud-client` has typed methods for these routes, and the desktop has the Tauri commands `cloud_apps`, `cloud_actions_list`, `cloud_action_propose`, `cloud_action_preview`, `cloud_action_status`, `cloud_action_approve` and `cloud_action_cancel`, wrapped thinly in `cloud.ts`. The confirmation UI belongs to the design work.
 
 ## 3. AI gateway
 All model calls go through `nugget-cloud`'s gateway module. No provider key is ever sent to a client.

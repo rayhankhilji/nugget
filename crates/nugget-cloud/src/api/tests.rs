@@ -19,6 +19,8 @@ use crate::testkit::{
 
 mod billing;
 
+mod security;
+
 struct Harness {
     app: Router,
     db: crate::db::Db,
@@ -27,24 +29,42 @@ struct Harness {
     llm: Arc<FakeLlm>,
     auth: Arc<crate::testkit::FakeAuth>,
     stripe: Arc<FakeStripe>,
+    embedder: Arc<FakeEmbedder>,
 }
 
+mod actions;
+
 async fn harness(embeddings: bool) -> Option<Harness> {
+    harness_with(
+        embeddings,
+        &[("gmail", "ac_gmail"), ("googlecalendar", "ac_cal")],
+    )
+    .await
+}
+
+async fn harness_with(embeddings: bool, auth_configs: &[(&str, &str)]) -> Option<Harness> {
+    harness_opts(embeddings, auth_configs, std::time::Duration::from_secs(20)).await
+}
+
+async fn harness_opts(
+    embeddings: bool,
+    auth_configs: &[(&str, &str)],
+    sync_wait: std::time::Duration,
+) -> Option<Harness> {
     let (db, pool) = test_db().await?;
     let (auth, composio, llm) = fakes();
-    let embedder = embeddings.then(|| Arc::new(FakeEmbedder) as Arc<dyn Embedder>);
+    let fake_embedder = Arc::new(FakeEmbedder::default());
+    let embedder = embeddings.then(|| fake_embedder.clone() as Arc<dyn Embedder>);
     let gateway = Gateway::new(
         Some(llm.clone() as Arc<dyn Llm>),
         embedder,
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let configs = [
-        ("gmail".to_owned(), "ac_gmail".to_owned()),
-        ("googlecalendar".to_owned(), "ac_cal".to_owned()),
-    ]
-    .into_iter()
-    .collect();
+    let configs = auth_configs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
     let plans = Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap();
     let stripe = Arc::new(FakeStripe::default());
     let mut state = AppState::new(db.clone(), auth.clone(), gateway, Arc::new(plans));
@@ -55,6 +75,9 @@ async fn harness(embeddings: bool) -> Option<Harness> {
     state.stripe_webhook_secret = Some("whsec_stripe".into());
     state.public_url = Some("https://api.test".into());
     state.site_origins = vec!["https://heed.test".into()];
+    state.sync_wait = sync_wait;
+    // Functional tests run without rate limits; tests/security.rs covers them.
+    let state = state.with_limits(crate::ratelimit::Limits::unlimited());
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),
         json!({"messages": [
@@ -78,6 +101,7 @@ async fn harness(embeddings: bool) -> Option<Harness> {
         llm,
         auth,
         stripe,
+        embedder: fake_embedder,
     })
 }
 
@@ -495,14 +519,146 @@ async fn scheduler_syncs_due_connections() {
     }
     call(&h.app, "GET", "/v1/connections", Some(u), None).await; // records them active, due now
     let gateway = Gateway::new(None, None, String::new(), String::new());
-    let ingest = Ingest {
-        db: h.db.clone(),
-        composio: h.composio.clone(),
+    let ingest = Ingest::new(
+        h.db.clone(),
+        h.composio.clone(),
         gateway,
-        catalog: Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
-    };
+        Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
+    );
     assert_eq!(ingest.run_due(10).await, 2);
     assert_eq!(ingest.run_due(10).await, 0, "next sync scheduled later");
+    let n: i64 = h
+        .pool
+        .query_one("select count(*) from public.items", &[])
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 3);
+}
+
+#[tokio::test]
+async fn embeddings_are_batched_per_page() {
+    let Some(h) = harness(true).await else { return };
+    let u = subscriber(&h.pool, "heed").await;
+    // A Gmail page of 60 messages and a calendar page of 1 event.
+    let messages: Vec<Value> = (0..60)
+        .map(|i| json!({"messageId": format!("b{i}"), "subject": format!("Note {i}"), "messageText": "short body"}))
+        .collect();
+    h.composio
+        .data
+        .lock()
+        .unwrap()
+        .insert("GMAIL_FETCH_EMAILS".into(), json!({"messages": messages}));
+    connect_and_sync(&h, u).await;
+    let calls = h.embedder.calls.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        calls, 2,
+        "one call per page (60 chunks, then 1), not one per item"
+    );
+    let n: i64 = h
+        .pool
+        .query_one(
+            "select count(*) from public.chunks where embedding is not null",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 61);
+    // Large pages split at EMBED_BATCH inputs.
+    let texts: Vec<String> = (0..250).map(|i| format!("text {i}")).collect();
+    let before = h.embedder.calls.load(std::sync::atomic::Ordering::SeqCst);
+    let gateway = Gateway::new(
+        None,
+        Some(h.embedder.clone() as Arc<dyn Embedder>),
+        String::new(),
+        String::new(),
+    );
+    let v = gateway.embed(&h.db, u, &texts).await.unwrap().unwrap();
+    assert_eq!(v.len(), 250);
+    assert_eq!(
+        h.embedder.calls.load(std::sync::atomic::Ordering::SeqCst) - before,
+        3
+    );
+}
+
+#[tokio::test]
+async fn slow_first_backfill_runs_in_background_with_progress() {
+    let Some(h) = harness_opts(
+        false,
+        &[("gmail", "ac_gmail"), ("googlecalendar", "ac_cal")],
+        std::time::Duration::from_millis(50),
+    )
+    .await
+    else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    for t in ["gmail", "googlecalendar"] {
+        call(
+            &h.app,
+            "POST",
+            "/v1/connections",
+            Some(u),
+            Some(json!({"toolkit": t})),
+        )
+        .await;
+    }
+    call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+    h.composio
+        .delay_ms
+        .store(300, std::sync::atomic::Ordering::SeqCst);
+    let (s, v) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
+    assert_eq!(
+        (s, v["running"].as_bool()),
+        (StatusCode::ACCEPTED, Some(true)),
+        "{v}"
+    );
+    let (_, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+    assert!(
+        v["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["syncing"] == true),
+        "{v}"
+    );
+    // A second request while it runs does not start a parallel run.
+    let calls_before = h.composio.calls.lock().unwrap().len();
+    let (_, v2) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
+    // Wait for the background work to finish.
+    let mut done = Value::Null;
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let (_, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+        if v["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["syncing"] == false)
+        {
+            done = v;
+            break;
+        }
+    }
+    let conns = done["connections"]
+        .as_array()
+        .expect("background sync finished");
+    let gmail = conns.iter().find(|c| c["toolkit"] == "gmail").unwrap();
+    assert_eq!(
+        (
+            gmail["items_synced"].as_i64(),
+            gmail["backfill_done"].as_bool()
+        ),
+        (Some(2), Some(true)),
+        "{done}"
+    );
+    assert!(gmail["last_synced_at"].is_string());
+    let calls_after = h.composio.calls.lock().unwrap().len();
+    assert!(
+        calls_after - calls_before <= 2,
+        "the overlapping request found runs in progress: {v2}"
+    );
     let n: i64 = h
         .pool
         .query_one("select count(*) from public.items", &[])

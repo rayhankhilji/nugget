@@ -2344,6 +2344,8 @@
   "cloud.connected": "متصل",
   "cloud.connectInBrowser": "أكمل ربط {name} في متصفحك، ثم عد إلى هنا.",
   "cloud.sync": "المزامنة الآن",
+  "cloud.importing": "جارٍ الاستيراد… {count} عنصر",
+  "cloud.syncRunning": "يستمر الاستيراد في الخلفية. قد يستغرق الاستيراد الأول بضع دقائق، وتُحدَّث هذه القائمة أثناء ذلك.",
   "cloud.syncing": "جارٍ المزامنة…",
   "cloud.syncResults": "نتائج المزامنة",
   "cloud.syncResult": "{name}: {added} جديدة، {updated} محدّثة",

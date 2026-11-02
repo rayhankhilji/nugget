@@ -2344,6 +2344,8 @@
   "cloud.connected": "已连接",
   "cloud.connectInBrowser": "请在浏览器中完成 {name} 的连接，然后回到这里。",
   "cloud.sync": "立即同步",
+  "cloud.importing": "正在导入… {count} 项",
+  "cloud.syncRunning": "正在后台导入。首次导入可能需要几分钟，此列表会随进度更新。",
   "cloud.syncing": "正在同步…",
   "cloud.syncResults": "同步结果",
   "cloud.syncResult": "{name}：新增 {added}，更新 {updated}",

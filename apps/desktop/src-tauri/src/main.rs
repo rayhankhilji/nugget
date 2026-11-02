@@ -113,7 +113,7 @@ fn main() {
         .manage(daemon::Daemon::new())
         .manage(lifecycle::Lifecycle::default())
         .manage(notify::PendingOpen::default())
-        // Nugget Cloud (or why it is off in this build); tokens stay in Rust (`cloud.rs`).
+        // the Heed cloud (or why it is off in this build); tokens stay in Rust (`cloud.rs`).
         .manage(cloud::Cloud::from_env())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
@@ -259,6 +259,19 @@ fn main() {
             cloud::cloud_disconnect,
             cloud::cloud_sync,
             cloud::cloud_ask,
+            cloud::intel::cloud_search,
+            cloud::intel::cloud_cards,
+            cloud::intel::cloud_cards_refresh,
+            cloud::intel::cloud_cards_seen,
+            cloud::intel::cloud_card_action,
+            cloud::intel::cloud_brief,
+            cloud::cloud_apps,
+            cloud::cloud_actions_list,
+            cloud::cloud_action_propose,
+            cloud::cloud_action_preview,
+            cloud::cloud_action_status,
+            cloud::cloud_action_approve,
+            cloud::cloud_action_cancel,
             cloud::cloud_me,
             cloud::cloud_billing_plans,
             cloud::cloud_billing_checkout,
