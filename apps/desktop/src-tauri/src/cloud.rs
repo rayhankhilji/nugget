@@ -34,6 +34,9 @@ pub enum Cloud {
 
 impl Cloud {
     pub fn from_env() -> Self {
+        // The desktop's single rustls provider is `ring` (see the updater); make it the process
+        // default before building the client, which brings no provider of its own.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let built = CloudConfig::from_env().and_then(|cfg| {
             let session = Session::new(
                 cfg,

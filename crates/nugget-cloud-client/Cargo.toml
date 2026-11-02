@@ -13,8 +13,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true }
 tracing.workspace = true
-# The workspace's single HTTP/TLS stack (rustls + aws-lc-rs); only the non-TLS `json` feature.
-reqwest = { workspace = true, features = ["json"] }
+# reqwest on rustls WITHOUT a built-in crypto provider: the caller installs the process default.
+# The desktop shell uses `ring` (as its updater already does), so linking this crate does not add
+# a second provider (aws-lc-rs) to that binary. Not the workspace entry, which pulls aws-lc-rs.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy", "json"] }
 # PKCE: verifier from the OS CSPRNG, S256 challenge, base64url without padding.
 getrandom = "0.3"
 sha2 = "0.10"
@@ -32,6 +34,8 @@ keyring = { workspace = true, features = ["async-secret-service", "async-io", "c
 
 [dev-dependencies]
 wiremock = "0.6"
+# A process-default provider for the tests (the same one the desktop installs).
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
 [lints]
 workspace = true

@@ -414,7 +414,7 @@ pub(crate) mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let auth = SupabaseAuth::new(cfg(&server.uri()), reqwest::Client::new());
+        let auth = SupabaseAuth::new(cfg(&server.uri()), crate::test_http());
         auth.send_magic_link("me@example.com", "CHAL")
             .await
             .unwrap();
@@ -456,7 +456,7 @@ pub(crate) mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let auth = SupabaseAuth::new(cfg(&server.uri()), reqwest::Client::new());
+        let auth = SupabaseAuth::new(cfg(&server.uri()), crate::test_http());
         let t = auth.exchange("CODE", "VER").await.unwrap();
         assert_eq!(
             (t.access_token.as_str(), t.refresh_token.as_str()),
@@ -487,7 +487,7 @@ pub(crate) mod tests {
             .respond_with(ResponseTemplate::new(503))
             .mount(&server)
             .await;
-        let auth = SupabaseAuth::new(cfg(&server.uri()), reqwest::Client::new());
+        let auth = SupabaseAuth::new(cfg(&server.uri()), crate::test_http());
         assert!(matches!(
             auth.refresh("rt").await,
             Err(CloudError::Api { status: 503, .. })

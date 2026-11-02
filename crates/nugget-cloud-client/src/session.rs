@@ -390,7 +390,7 @@ pub(crate) mod tests {
     }
 
     pub fn session(base: &str, store: Arc<MemoryStore>, clock: Arc<FakeClock>) -> Session {
-        Session::new(cfg(base), reqwest::Client::new(), store, clock)
+        Session::new(cfg(base), crate::test_http(), store, clock)
     }
 
     async fn mount_pkce(server: &MockServer, expires_at: i64) {

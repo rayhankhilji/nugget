@@ -154,13 +154,21 @@ fn base_url(name: &str, raw: &str) -> Result<String> {
     Ok(raw.trim_end_matches('/').to_owned())
 }
 
-/// The HTTP client every request uses: the workspace's rustls stack, with timeouts.
+/// The HTTP client every request uses, with timeouts. rustls takes the process-default crypto
+/// provider, so the caller must install one first (the desktop installs `ring`).
 pub fn http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(CloudError::network)
+}
+
+/// A client for tests, with `ring` installed as the process default.
+#[cfg(test)]
+pub(crate) fn test_http() -> reqwest::Client {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    http_client().expect("test http client")
 }
 
 #[cfg(test)]
