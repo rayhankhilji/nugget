@@ -37,8 +37,15 @@ describe("onboarding flow", () => {
     expect(getByRole("main").textContent).toContain(t("onboarding.stepOf", { n: 1, total: 6 }));
 
     await click(button(t("onboarding.continue")));
-    expect(heading()).toBe(t("onboarding.ai.heading"));
+    expect(heading()).toBe(t("onboarding.source.heading"));
     expect(document.activeElement).toBe(getByRole("heading", { level: 1 }));
+    await click(button(t("onboarding.source.addOther")));
+    expect(getByRole("dialog", { name: t("addSource.title") })).toBeTruthy();
+    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.cancel") }));
+    expect(queryByRole("dialog")).toBeNull();
+
+    await click(button(t("onboarding.continue")));
+    expect(heading()).toBe(t("onboarding.ai.heading"));
 
     // Local AI: install the recommended model.
     await click(radio("local"));
@@ -49,23 +56,17 @@ describe("onboarding flow", () => {
     expect(d.count("models_list")).toBeGreaterThanOrEqual(2);
 
     await click(button(t("onboarding.continue")));
-    expect(heading()).toBe(t("onboarding.source.heading"));
-    await click(button(t("onboarding.source.addOther")));
-    expect(getByRole("dialog", { name: t("addSource.title") })).toBeTruthy();
-    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.cancel") }));
-    expect(queryByRole("dialog")).toBeNull();
-
-    await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.perm.heading"));
     // Back goes one step back without losing progress.
     await click(button(t("onboarding.back")));
-    expect(heading()).toBe(t("onboarding.source.heading"));
+    expect(heading()).toBe(t("onboarding.ai.heading"));
     await click(button(t("onboarding.continue")));
     await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.trigger.heading"));
 
     await click(button(t("onboarding.skipStep")));
-    expect(heading()).toBe(t("onboarding.done.heading"));
+    // The last step asks the first question; what setup did sits below it.
+    expect(getByRole("heading", { level: 2, name: t("onboarding.done.heading") })).toBeTruthy();
     expect(getByRole("main").textContent).toContain(t("onboarding.done.pending", { count: 1 }));
     expect(loadState()).toMatchObject({ ai: "local", skipped: ["trigger"], finished: false });
 
@@ -82,14 +83,14 @@ describe("onboarding flow", () => {
     expect(d.commands).toContain("connection_info");
 
     await click(button(t("onboarding.continue")));
-    await click(radio("local"));
-    expect(getByRole("main").textContent).toContain(t("onboarding.offline"));
-    expect(d.count("models_list")).toBe(0);
-
-    await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.source.heading"));
     expect(queryByRole("button", { name: t("onboarding.source.addFolder") })).toBeNull();
     expect(getByRole("main").textContent).toContain(t("onboarding.offline"));
+
+    await click(button(t("onboarding.continue")));
+    await click(radio("local"));
+    expect(getByRole("main").textContent).toContain(t("onboarding.offline"));
+    expect(d.count("models_list")).toBe(0);
 
     await click(button(t("onboarding.skipAll")));
     expect(getByRole("heading", { name: t("offline.title") })).toBeTruthy();

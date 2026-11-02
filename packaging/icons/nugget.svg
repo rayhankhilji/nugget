@@ -1,7 +1,20 @@
-<!-- Heed app icon master (original artwork, Apache-2.0). Regenerate the platform icons with
-     packaging/scripts/icons.sh; never edit apps/desktop/src-tauri/icons/* by hand. -->
+<!-- Heed app icon master (original artwork, Apache-2.0): an attention dot above a line on a
+     graphite tile. Regenerate the platform icons with packaging/scripts/icons.sh; never edit
+     apps/desktop/src-tauri/icons/* by hand. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
-  <rect x="2" y="2" width="60" height="60" rx="14" fill="#1f1d1a"/>
-  <path d="M32 10c10.5 0 21 7.8 22.7 20.1C56.5 43.2 46.9 55 32 55S7.5 43.2 9.3 30.1C11 17.8 21.5 10 32 10Z" fill="#e8a72a"/>
-  <path d="M23 25c2.6-4.4 7-6.3 11.4-5.4" fill="none" stroke="#fffaf0" stroke-width="3.6" stroke-linecap="round" opacity="0.8"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26272d"/>
+      <stop offset="1" stop-color="#16171b"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff5a3c" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ff5a3c" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#tile)"/>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+  <circle cx="32" cy="25" r="14" fill="url(#glow)"/>
+  <circle cx="32" cy="25" r="7.5" fill="#ff5a3c"/>
+  <rect x="19" y="39" width="26" height="5.5" rx="2.75" fill="#f7f7f5"/>
 </svg>

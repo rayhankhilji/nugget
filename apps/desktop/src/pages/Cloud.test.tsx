@@ -72,7 +72,7 @@ describe("CloudPage", () => {
   it("says so when this build has no cloud", async () => {
     mockDaemon({ cloud_session: { configured: false, signed_in: false, email: null } });
     const { container } = await render(<CloudPage />);
-    expect(container.textContent).toContain("Nugget Cloud isn't set up in this build");
+    expect(container.textContent).toContain("Heed Cloud isn't set up in this build");
     expect(byText(container, "button", "Continue with Google")).toBeUndefined();
   });
 
@@ -86,7 +86,7 @@ describe("CloudPage", () => {
       },
     });
     const { container } = await render(<CloudPage />);
-    expect(container.querySelector("h1")?.textContent).toBe("Sign in to Nugget Cloud");
+    expect(container.querySelector("h1")?.textContent).toBe("Sign in to Heed Cloud");
     await click(byText(container, "button", "Continue with Google"));
     expect(container.textContent).toContain("Finish signing in in your browser");
     expect(byText(container, "button", "Continue with Apple")).toBeUndefined();

@@ -52,14 +52,18 @@ describe("ghost text rendering", () => {
     await render(<Ghost />);
     await flush(5);
     const el = document.querySelector<HTMLElement>(".ghost")!;
+    /** The suggestion as drawn (plain part and streaming tail), without the Tab hint. */
+    const shown = () => Array.from(el.querySelectorAll(".ghost-text, .ghost-tail"), (n) => n.textContent).join("");
     expect(el.getAttribute("aria-hidden")).toBe("true");
     expect(el.textContent).toBe("");
     await act(async () => {
       await emit(GHOST_EVENT, paint);
     });
     await flush(5);
-    expect(el.textContent).toBe(" the deck by Friday.");
-    expect(el.style.opacity).toBe("0.45");
+    expect(shown()).toBe(" the deck by Friday.");
+    expect(el.querySelector<HTMLElement>(".ghost-text")!.style.opacity).toBe("0.45");
+    // No Tab hint while it is still streaming.
+    expect(el.querySelector(".ghost-chip")).toBeNull();
     expect(el.style.textIndent).toBe("101px");
     expect(el.dataset.streaming).toBe("true");
     // Typing consumed part of it; then it was accepted and hidden.
@@ -67,7 +71,8 @@ describe("ghost text rendering", () => {
       await emit(GHOST_EVENT, { ...paint, text: " by Friday.", streaming: false });
     });
     await flush(5);
-    expect(el.textContent).toBe(" by Friday.");
+    expect(shown()).toBe(" by Friday.");
+    expect(el.querySelector(".ghost-chip")?.textContent).toContain("Tab");
     expect(el.dataset.streaming).toBeUndefined();
     await act(async () => {
       await emit(GHOST_EVENT, { ...paint, visible: false, text: "" });

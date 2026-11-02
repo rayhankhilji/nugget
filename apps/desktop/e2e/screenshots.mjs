@@ -316,6 +316,15 @@ const SHOTS = [
     },
   },
   {
+    name: "needs",
+    page: "needs",
+    async prepare(p) {
+      await p.getByRole("heading", { name: t("today.inbox"), level: 1 }).waitFor();
+      await settle(p);
+    },
+  },
+  { name: "connections", page: "connections" },
+  {
     name: "search",
     page: "search",
     async prepare(p) {

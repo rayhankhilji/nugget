@@ -10,11 +10,10 @@
   gap: 12px;
 }
 
+/* The brief reads like a page: blocks separated by a hairline and space, not boxes. */
 .today-brief-block {
-  padding: 10px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: var(--space-3) 0 0;
+  border-top: 0.5px solid var(--border);
 }
 
 .today-brief-block h3 {

@@ -1,4 +1,6 @@
-/* First-run onboarding. Logical properties only, so the layout mirrors in right-to-left locales. */
+/* First-run onboarding: sign in → connect apps → first answer.
+   Logical properties only, so the layout mirrors in right-to-left locales. Sizes come from the
+   design tokens in styles.css (the newer ones with a fallback); only hairlines are literal. */
 
 /* The footer follows the content (no dead space above it in a tall window) and sticks to the
    bottom of the window once the content is taller than it. */
@@ -7,7 +9,7 @@
   grid-template-rows: auto auto auto auto;
   align-content: start;
   min-height: 100%;
-  max-inline-size: 880px;
+  max-inline-size: 55rem;
   margin-inline: auto;
   padding-inline: var(--space-5);
 }
@@ -21,97 +23,92 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding-block: 18px 10px;
+  padding-block: var(--space-4) var(--space-2);
 }
 
 .ob-top .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   font-weight: 650;
 }
 
 .ob-top-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
+
+/* ---- progress: three thin segments (sign in, connect apps, first answer) ---- */
 
 .ob-progress ol {
   display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
-  border-block-end: 1px solid var(--border);
-  padding-block-end: 10px;
 }
 
-.ob-step button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 32px;
-  padding-block: 4px;
-  padding-inline: 8px;
-  border: 1px solid transparent;
+.ob-seg button {
+  display: grid;
+  place-items: center;
+  min-block-size: var(--space-5);
+  padding-inline: var(--space-1);
+  border: 0;
   border-radius: var(--radius-small);
   background: transparent;
-  color: var(--muted);
-  font: inherit;
   cursor: pointer;
 }
 
-.ob-step button:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 6%, transparent);
+.ob-seg button[aria-current="step"] {
+  cursor: default;
 }
 
-.ob-step button[aria-current="step"] {
-  color: var(--text);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  font-weight: 600;
-}
-
-.ob-step-num {
-  display: inline-grid;
-  place-items: center;
-  inline-size: 20px;
-  block-size: 20px;
-  border-radius: 50%;
-  border: 1px solid currentColor;
-  font-size: 11px;
-}
-
-.ob-step-done .ob-step-num {
-  background: var(--good);
-  border-color: var(--good);
-  color: var(--surface);
-}
-
-/* Skipped: an amber dash, distinct from both the green check (done) and the plain number (to do). */
-.ob-step-skipped .ob-step-num {
-  border-color: var(--warn);
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-
-.ob-step-num svg {
+.ob-seg-bar {
   display: block;
+  inline-size: var(--space-5);
+  block-size: calc(var(--space-1) * 0.75);
+  border-radius: var(--space-1);
+  background: var(--border);
+  transition: background-color var(--dur-2, 180ms) var(--ease-out, ease-out);
 }
+
+.ob-seg-done .ob-seg-bar {
+  background: var(--muted);
+}
+
+.ob-seg-current .ob-seg-bar {
+  background: var(--accent);
+}
+
+.ob-seg button:hover .ob-seg-bar {
+  background: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+/* ---- the step ---- */
 
 .ob-main {
-  padding-block: 18px var(--space-6);
+  padding-block: var(--space-5) var(--space-6);
 }
 
 /* Sections revealed by a choice scroll into view clear of the sticky footer. */
 .ob-main h2 {
-  scroll-margin-block-end: 96px;
+  scroll-margin-block-end: calc(var(--space-6) * 3);
+}
+
+/* A big, confident heading and a short lead, centred over the step. */
+.ob-main h1 {
+  margin-block: 0 var(--space-2);
+  font-size: var(--fs-3xl, 2.5rem);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  text-align: center;
+  text-wrap: balance;
 }
 
 .ob-main h1:focus {
@@ -119,69 +116,346 @@
 }
 
 .ob-main h1:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 4px;
+  outline: calc(var(--space-1) / 2) solid var(--focus);
+  outline-offset: var(--space-1);
 }
 
 .ob-count {
-  margin-block-end: 4px;
+  margin-block: 0 var(--space-2);
+  text-align: center;
 }
 
 .ob-lead {
-  font-size: 15px;
-  max-inline-size: 64ch;
-  margin-block: 8px 16px;
+  max-inline-size: 60ch;
+  margin-block: 0 var(--space-6);
+  margin-inline: auto;
+  color: var(--muted);
+  font-size: var(--fs-lg);
+  text-align: center;
+  text-wrap: pretty;
 }
 
 .ob-panel {
-  animation: ob-enter 180ms ease-out;
+  animation: ob-enter var(--dur-2, 180ms) var(--ease-out, ease-out);
 }
 
 @keyframes ob-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(var(--space-2));
   }
 }
 
 .ob-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
-  margin-block: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin-block: var(--space-3);
 }
 
 .ob-card {
-  padding-block: 4px 8px;
-  padding-inline: 16px;
+  padding-block: var(--space-1) var(--space-2);
+  padding-inline: var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
 }
 
 .ob-card h2 {
-  margin-block: 12px 6px;
+  margin-block: var(--space-3) var(--space-2);
 }
 
 .ob-card ul,
 .ob-perm-list {
   min-inline-size: 0;
   margin: 0;
-  padding-inline-start: 20px;
+  padding-inline-start: var(--space-5);
   display: grid;
-  gap: 6px;
+  gap: var(--space-2);
 }
+
+/* ---- 1. sign in ---- */
+
+.ob-signin {
+  display: grid;
+  gap: var(--space-4);
+  max-inline-size: 26rem;
+  margin-inline: auto;
+}
+
+.ob-signin-google {
+  inline-size: 100%;
+  min-block-size: calc(var(--control-h) * 1.25);
+  font-size: var(--fs-lg);
+}
+
+.ob-signin-email {
+  display: grid;
+  gap: var(--space-1);
+  padding-block-start: var(--space-4);
+  border-block-start: 1px solid var(--border);
+}
+
+.ob-signin-email label {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.ob-signin-row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ob-signin-row input {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.ob-signin-local {
+  max-inline-size: 26rem;
+  margin-block: var(--space-5) 0;
+  margin-inline: auto;
+  text-align: center;
+}
+
+/* ---- 2. connect apps ---- */
+
+.ob-connect {
+  max-inline-size: 42rem;
+  margin-inline: auto;
+}
+
+.ob-apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-app {
+  display: grid;
+  gap: var(--space-1);
+  min-inline-size: 0;
+}
+
+.ob-app-tile {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  inline-size: 100%;
+  padding-block: var(--space-3);
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-2, var(--shadow));
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+  transition:
+    border-color var(--dur-1, 120ms) var(--ease-out, ease-out),
+    transform var(--dur-1, 120ms) var(--ease-out, ease-out);
+}
+
+button.ob-app-tile {
+  cursor: pointer;
+}
+
+button.ob-app-tile:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+}
+
+button.ob-app-tile:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+button.ob-app-tile:disabled {
+  cursor: default;
+}
+
+.ob-app-connected .ob-app-tile {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    var(--shadow-2, var(--shadow));
+}
+
+/* Logos are drawn for a white ground in both themes, as on the Connections page. */
+.ob-app-logo {
+  display: grid;
+  place-items: center;
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  margin-block-end: var(--space-1);
+  overflow: hidden;
+  border-radius: calc(var(--radius) * 0.8);
+  background: white;
+  color: rgb(0 0 0 / 0.78);
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.ob-app-logo img {
+  inline-size: 70%;
+  block-size: 70%;
+  object-fit: contain;
+}
+
+.ob-app-name {
+  max-inline-size: 100%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ob-app-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-block-size: calc(var(--fs-sm) * 1.4);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.ob-app-connected .ob-app-state {
+  color: var(--good);
+}
+
+.ob-app-authorising .ob-app-state {
+  color: var(--accent);
+}
+
+.ob-app-failed .ob-app-tile {
+  border-color: color-mix(in srgb, var(--bad) 60%, var(--border));
+}
+
+.ob-app-soon .ob-app-tile {
+  opacity: 0.6;
+}
+
+.ob-app-error {
+  color: var(--bad);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.ob-app-check {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+  inline-size: var(--space-4);
+  block-size: var(--space-4);
+  padding: calc(var(--space-1) / 2);
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.ob-connect-status {
+  margin-block-start: var(--space-4);
+  text-align: center;
+}
+
+.ob-connect-status p,
+.ob-sync-results {
+  margin: 0;
+}
+
+.ob-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* An indeterminate bar while the first sync runs. */
+.ob-sync-bar {
+  position: relative;
+  inline-size: 7.5rem;
+  block-size: calc(var(--space-1) * 0.75);
+  overflow: hidden;
+  border-radius: var(--space-1);
+  background: var(--border);
+}
+
+.ob-sync-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 40%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: ob-sweep 1.2s var(--ease-out, ease-in-out) infinite;
+}
+
+@keyframes ob-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+[dir="rtl"] .ob-sync-bar::after {
+  animation-direction: reverse;
+}
+
+.ob-sync-results {
+  padding: 0;
+  list-style: none;
+}
+
+.ob-signin-first {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  max-inline-size: 42rem;
+  margin-block: 0 var(--space-4);
+  margin-inline: auto;
+  padding-block: var(--space-3);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.ob-signin-first p {
+  margin: 0;
+}
+
+/* The local sources: under the apps when signed in, the whole step without an account. */
+.ob-source-local {
+  max-inline-size: 42rem;
+  margin-inline: auto;
+}
+
+.ob-local-heading {
+  margin-block: var(--space-6) var(--space-2);
+  color: var(--muted);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+/* ---- AI, permissions, Double Tap ---- */
 
 .ob-fieldset {
   border: 0;
-  margin: 0 0 12px;
+  margin: 0 0 var(--space-3);
   padding: 0;
 }
 
 .ob-choices .kind-label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .ob-section {
@@ -194,7 +468,7 @@
 
 /* Model cards: three short cards share one row in a wide window instead of leaving one orphaned. */
 .cards.ob-models {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
 }
 
 .ob-models-group {
@@ -217,12 +491,12 @@
 .ob-byok-fields .field,
 .ob-byok-form > .field,
 .ob-fields .field {
-  max-inline-size: 480px;
+  max-inline-size: 30rem;
 }
 
 .ob-fields .field {
   margin: 0;
-  min-inline-size: 200px;
+  min-inline-size: 12.5rem;
 }
 
 .ob-byok-form {
@@ -235,7 +509,7 @@
 
 /* One search model would stretch across the row: keep it card-sized. */
 .cards.ob-models-search {
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
 }
 
 .ob-fields {
@@ -247,7 +521,7 @@
 
 /* Two trigger kinds: fill the row rather than leave an empty third column. */
 .kind-picker.ob-choices-two {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
 }
 
 /* "Your trigger: [Ctrl] [Alt] [Space]" as key caps, not a full-width band. */
@@ -272,56 +546,21 @@
   gap: var(--space-1);
 }
 
-/* What setup did, on the last step. */
-.ob-summary {
-  display: grid;
-  gap: var(--space-2);
-  margin-block: var(--space-4);
-  padding-block: var(--space-3);
-  padding-inline: var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  max-inline-size: 640px;
-}
-
-.ob-summary > div {
-  display: grid;
-  grid-template-columns: minmax(8em, max-content) 1fr;
-  gap: var(--space-3);
-  align-items: baseline;
-}
-
-.ob-summary dt {
-  color: var(--muted);
-}
-
-.ob-summary dd {
-  margin: 0;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.ob-summary-unset dd {
-  font-weight: 400;
-  color: var(--muted);
-}
-
 .ob-guide {
   display: grid;
-  gap: 8px;
-  padding-inline-start: 20px;
+  gap: var(--space-2);
+  padding-inline-start: var(--space-5);
 }
 
 .ob-guide h3 {
-  font-size: 14px;
-  margin-block: 8px 4px;
+  font-size: var(--fs-md);
+  margin-block: var(--space-2) var(--space-1);
 }
 
 .ob-snippet {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: var(--space-2);
   margin-block: var(--space-2);
 }
 
@@ -329,19 +568,20 @@
   flex: 1;
   min-inline-size: 0;
   margin: 0;
-  padding: 8px 12px;
+  padding-block: var(--space-2);
+  padding-inline: var(--space-3);
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--text) 4%, var(--surface));
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   text-align: start;
   white-space: pre;
 }
 
 .ob-details {
-  margin-block: 12px;
+  margin-block: var(--space-3);
 }
 
 /* Disclosures: a drawn chevron instead of the browser's triangle, turned when open. */
@@ -367,12 +607,12 @@
 .ob-details summary::before,
 .ob-manual > summary::before {
   content: "";
-  inline-size: 6px;
-  block-size: 6px;
-  border-block-end: 2px solid currentColor;
-  border-inline-end: 2px solid currentColor;
+  inline-size: calc(var(--space-2) * 0.75);
+  block-size: calc(var(--space-2) * 0.75);
+  border-block-end: calc(var(--space-1) / 2) solid currentColor;
+  border-inline-end: calc(var(--space-1) / 2) solid currentColor;
   transform: rotate(-45deg);
-  transition: transform 120ms ease-out;
+  transition: transform var(--dur-1, 120ms) var(--ease-out, ease-out);
 }
 
 /* The inline-end border flips sides in right-to-left text, so the turns mirror too. */
@@ -397,24 +637,23 @@
 }
 
 .ob-details h3 {
-  font-size: 14px;
-  margin-block: 12px 4px;
+  font-size: var(--fs-md);
+  margin-block: var(--space-3) var(--space-1);
 }
 
-.ob-pending {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 12px;
-  padding: 0;
-  list-style: none;
+.ob-manual {
+  margin-block: var(--space-3);
+}
+
+.ob-manual > summary {
+  margin-block-end: var(--space-2);
 }
 
 /* Live indexing progress for the sources added during setup. */
 .ob-index {
   display: grid;
-  gap: 6px;
-  margin: 0 0 12px;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
 }
@@ -422,7 +661,7 @@
 .ob-index > li {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   margin: 0;
 }
 
@@ -433,8 +672,154 @@
 
 .ob-row-start {
   justify-content: flex-start;
-  margin-block: 8px;
+  margin-block: var(--space-2);
 }
+
+/* What a folder scan skipped, under its row (setup step and Sources page). */
+.ob-skipped {
+  margin-block-start: var(--space-1);
+}
+
+.ob-skipped p,
+.ob-skipped ul {
+  margin-block: calc(var(--space-1) / 2);
+  margin-inline: 0;
+}
+
+.ob-skipped ul {
+  padding-inline-start: var(--space-5);
+}
+
+/* ---- 3. first answer ---- */
+
+.ob-ask {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-inline-size: 40rem;
+  margin-inline: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.4);
+  background: var(--surface);
+  box-shadow: var(--shadow-2, var(--shadow));
+  transition:
+    border-color var(--dur-1, 120ms) var(--ease-out, ease-out),
+    box-shadow var(--dur-1, 120ms) var(--ease-out, ease-out);
+}
+
+.ob-ask:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 calc(var(--space-1) - 1px) var(--accent-soft),
+    var(--shadow-2, var(--shadow));
+}
+
+.ob-ask textarea {
+  flex: 1;
+  min-inline-size: 0;
+  min-block-size: calc(var(--fs-lg) * 3);
+  padding: var(--space-1);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-lg);
+  resize: none;
+}
+
+.ob-ask textarea:focus,
+.ob-ask textarea:focus-visible {
+  outline: none;
+}
+
+.ob-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  max-inline-size: 40rem;
+  margin-block: var(--space-3) 0;
+  margin-inline: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-suggestion {
+  padding-block: var(--space-1);
+  padding-inline: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: 100vmax;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition:
+    color var(--dur-1, 120ms) var(--ease-out, ease-out),
+    border-color var(--dur-1, 120ms) var(--ease-out, ease-out);
+}
+
+.ob-suggestion:hover {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--text);
+}
+
+/* What setup did, under the composer. */
+.ob-setup {
+  margin-block-start: var(--space-6);
+  padding-block-start: var(--space-5);
+  border-block-start: 1px solid var(--border);
+}
+
+.ob-setup > h2 {
+  margin-block: 0 var(--space-2);
+}
+
+.ob-summary {
+  display: grid;
+  gap: var(--space-2);
+  margin-block: var(--space-4);
+  padding-block: var(--space-3);
+  padding-inline: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  max-inline-size: 40rem;
+}
+
+.ob-summary > div {
+  display: grid;
+  grid-template-columns: minmax(8em, max-content) 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+}
+
+.ob-summary dt {
+  color: var(--muted);
+}
+
+.ob-summary dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ob-summary-unset dd {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.ob-pending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+/* ---- footer ---- */
 
 .ob-actions {
   position: sticky;
@@ -442,21 +827,15 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  padding-block: 12px 18px;
+  gap: var(--space-2);
+  padding-block: var(--space-3) var(--space-4);
   border-block-start: 1px solid var(--border);
   background: var(--bg);
 }
 
 /* Content continues under the footer: a shadow says there's more to scroll. */
 .ob-actions-stuck {
-  box-shadow: 0 -10px 12px -10px rgb(0 0 0 / 0.35);
-}
-
-@media (prefers-color-scheme: dark) {
-  .ob-actions-stuck {
-    box-shadow: 0 -12px 14px -10px rgb(0 0 0 / 0.8);
-  }
+  box-shadow: 0 calc(var(--space-3) * -1) var(--space-3) calc(var(--space-3) * -1) var(--backdrop);
 }
 
 .ob-hint {
@@ -468,7 +847,8 @@
   flex: 1;
 }
 
-/* Sidebar settings (language, run setup again). */
+/* ---- sidebar settings (language, run setup again) ---- */
+
 .sidebar-settings {
   display: grid;
   gap: var(--space-2);
@@ -479,13 +859,13 @@
 /* Language: the label always sits above a full-width select. */
 .sidebar-language {
   display: grid;
-  gap: 2px;
+  gap: calc(var(--space-1) / 2);
   min-inline-size: 0;
   color: var(--muted);
 }
 
 .sidebar-language label {
-  padding-inline: 2px;
+  padding-inline: calc(var(--space-1) / 2);
 }
 
 .sidebar-settings select {
@@ -501,27 +881,21 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ob-panel {
+  .ob-panel,
+  .ob-sync-bar::after {
     animation: none;
   }
-}
 
-.ob-manual {
-  margin-block: 0.75rem;
-}
+  .ob-seg-bar,
+  .ob-app-tile,
+  .ob-ask,
+  .ob-suggestion,
+  .ob-details summary::before,
+  .ob-manual > summary::before {
+    transition: none;
+  }
 
-.ob-manual > summary {
-  margin-block-end: 0.5rem;
-}
-
-/* What a folder scan skipped, under its row (setup step and Sources page). */
-.ob-skipped {
-  margin-block-start: 0.4rem;
-}
-.ob-skipped p,
-.ob-skipped ul {
-  margin: 0.15rem 0;
-}
-.ob-skipped ul {
-  padding-inline-start: 1.2rem;
+  button.ob-app-tile:active:not(:disabled) {
+    transform: none;
+  }
 }

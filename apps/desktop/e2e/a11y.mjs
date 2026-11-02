@@ -366,7 +366,7 @@ export async function a11yScenario({ browser, socket, pages }) {
 
       await check(`a11y ${theme} today card sources and action`, async () => {
         let stubbed;
-        const { page } = await open("today", theme, { before: async (p) => (stubbed = await cardsOrStub(p)) });
+        const { page } = await open("needs", theme, { before: async (p) => (stubbed = await cardsOrStub(p)) });
         try {
           const card = page.locator("li.today-card").filter({ has: page.locator("button[aria-controls]") }).first();
           await card.waitFor();
@@ -467,23 +467,25 @@ export async function a11yScenario({ browser, socket, pages }) {
           };
           await step("onboarding.welcome.heading", "welcome");
           await cont();
-          await heading("onboarding.ai.heading").waitFor();
-          for (const choice of ["local", "byok", "later"]) {
-            await page.getByRole("radio", { name: startsWith(`onboarding.ai.${choice}`) }).check();
-            await audit(page, `onboarding-ai-${choice}`, theme);
-          }
-          await cont();
           await step("onboarding.source.heading", "source");
           await page.getByRole("button", { name: new RegExp(`^(${escapeRe(t("onboarding.source.addFolder"))}|${escapeRe(t("onboarding.source.addAnother"))})$`) }).click();
           await dialog(page).getByRole("button", { name: exactName("addSource.folder.choose") }).waitFor();
           await audit(page, "onboarding-source-folder", theme, "dialog[open]");
           await closeDialog(page);
           await cont();
+          await heading("onboarding.ai.heading").waitFor();
+          for (const choice of ["local", "byok", "later"]) {
+            await page.getByRole("radio", { name: startsWith(`onboarding.ai.${choice}`) }).check();
+            await audit(page, `onboarding-ai-${choice}`, theme);
+          }
+          await cont();
           await step("onboarding.perm.heading", "permissions");
           await cont();
           await step("onboarding.trigger.heading", "trigger");
           await cont();
-          await step("onboarding.done.heading", "done");
+          // The first-answer step: what setup did is its level-2 section.
+          await page.getByRole("heading", { level: 2, name: t("onboarding.done.heading"), exact: true }).waitFor();
+          await audit(page, "onboarding-done", theme);
           expect(errors.length === 0, `uncaught page errors: ${JSON.stringify(errors)}`);
         } finally {
           await ctx.close().catch(() => {});

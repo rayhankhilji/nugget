@@ -275,14 +275,6 @@ export async function keyboardScenario({ browser }) {
     await flow("onboarding from an empty home to the source step", async () => {
       await page.goto(`${bridge.url}index.html`);
       await heading("onboarding.welcome.heading").waitFor();
-      await next("onboarding.ai.heading");
-      // A radio group is one Tab stop; arrows choose inside it.
-      const radios = page.locator(".ob-fieldset input[type=radio]");
-      const later = page.getByRole("radio", { name: startsWith("onboarding.ai.later") });
-      await tabTo(page, radios, { what: "the AI choices" });
-      for (let i = 0; i < 4 && !(await later.isChecked()); i++) await step(page, "ArrowDown");
-      expect(await later.isChecked(), `arrow keys did not reach "${t("onboarding.ai.later")}"`);
-      expect(await hasFocus(later), "the checked AI choice does not have focus");
       await next("onboarding.source.heading");
     });
 
@@ -322,10 +314,23 @@ export async function keyboardScenario({ browser }) {
       );
     });
 
-    await flow("onboarding through Permissions and Double Tap to Done", async () => {
+    await flow("onboarding through AI, Permissions and Double Tap to the first answer", async () => {
+      await next("onboarding.ai.heading");
+      // A radio group is one Tab stop; arrows choose inside it.
+      const radios = page.locator(".ob-fieldset input[type=radio]");
+      const later = page.getByRole("radio", { name: startsWith("onboarding.ai.later") });
+      await tabTo(page, radios, { what: "the AI choices" });
+      for (let i = 0; i < 4 && !(await later.isChecked()); i++) await step(page, "ArrowDown");
+      expect(await later.isChecked(), `arrow keys did not reach "${t("onboarding.ai.later")}"`);
+      expect(await hasFocus(later), "the checked AI choice does not have focus");
       await next("onboarding.perm.heading");
       await next("onboarding.trigger.heading");
-      await next("onboarding.done.heading");
+      // The last step asks the first question; what setup did is its level-2 section.
+      await tabTo(page, continueBtn, { what: "Continue" });
+      await page.keyboard.press("Enter");
+      await page.getByRole("heading", { level: 2, name: t("onboarding.done.heading"), exact: true }).waitFor();
+      const first = page.locator(".ob-main h1");
+      await until("the first-answer step's heading takes focus", async () => [await hasFocus(first), (await focusOf(page)).desc]);
       const toSearch = footer.getByRole("button", { name: exactName("onboarding.done.search") });
       await tabTo(page, toSearch, { what: t("onboarding.done.search") });
       await page.keyboard.press("Enter");
@@ -358,7 +363,7 @@ export async function keyboardScenario({ browser }) {
     });
 
     await flow("ask in Chat and follow a citation", async () => {
-      await page.keyboard.press(`${MOD}+2`);
+      await page.keyboard.press(`${MOD}+5`);
       await pageMain(page, "app.nav.chat").waitFor();
       const sources = page.getByRole("checkbox", { name: startsWith("chat.useSources") });
       if ((await sources.count()) > 0 && !(await sources.isChecked())) {
@@ -417,8 +422,12 @@ export async function keyboardScenario({ browser }) {
       const rule = { id: "e2e-keyboard-confirm-drafts", targets: ["mail"], verbs: ["save_draft"], effect: "confirm" };
       await rpc(daemon.socket, "policy.set", { config: { ...policy.config, rules: [...(policy.config.rules ?? []), rule] } });
 
-      await page.keyboard.press(`${MOD}+1`);
-      await pageMain(page, "app.nav.today").waitFor();
+      await page.keyboard.press(`${MOD}+2`);
+      await pageMain(page, "app.nav.needs").waitFor();
+      // Needs you lists the cards; the selected one opens in the pane with its actions.
+      const item = page.locator(`button.needs-item[data-card="${card.id}"]`);
+      await tabTo(page, item, { what: `the card "${card.title}" in the list`, max: 60 });
+      await page.keyboard.press("Enter");
       // Known action kinds show a short verb ("Draft reply"); the accessible name adds the
       // daemon's full label ("Draft reply: Draft a reply to Ana") so two such actions differ.
       let actionName = action.label;
@@ -474,7 +483,10 @@ export async function keyboardScenario({ browser }) {
     });
 
     await flow("stop all agents from Safety", async () => {
-      await page.keyboard.press(`${MOD}+9`);
+      // Safety is a Settings page without a digit shortcut: open it from the command palette.
+      await page.keyboard.press(`${MOD}+K`);
+      await page.keyboard.type(t("app.nav.safety"));
+      await page.keyboard.press("Enter");
       await pageMain(page, "app.nav.safety").waitFor();
       const stop = page.getByRole("button", { name: exactName("safety.kill.stop") });
       const resume = page.getByRole("button", { name: exactName("safety.kill.resume") });

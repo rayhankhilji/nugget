@@ -110,8 +110,8 @@ describe("Double Tap settings page", () => {
     await render(<App />);
     await flush(10);
     const box = document.querySelector<HTMLElement>(".dt-recover")!;
-    expect(box.textContent).toContain("Turn on Nugget in System Settings");
-    expect(box.textContent).toContain("Started Nugget from Terminal?");
+    expect(box.textContent).toContain("Turn on Heed in System Settings");
+    expect(box.textContent).toContain("Started Heed from Terminal?");
     // No Messages source: Full Disk Access is not asked for.
     expect(box.textContent).not.toContain("Full Disk Access");
     await click(byText(box, "button", "Open Input Monitoring settings"));

@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { ghostApi, type GhostPaint } from "../api";
-import { ghostStyle, ghostText } from "./ghost";
+import { isMac } from "../hooks.shortcuts";
+import { ghostStyle, ghostText, splitTail } from "./ghost";
+
+/** Key names on the hint, the same in every language. */
+const TAB_KEY = "Tab";
+const WORD_KEY_MAC = "⌥→";
+const WORD_KEY = "Ctrl+→";
 
 const HIDDEN: GhostPaint = {
   visible: false,
@@ -37,11 +43,24 @@ export function Ghost({ initial = HIDDEN }: { initial?: GhostPaint }) {
     };
   }, []);
   const text = ghostText(paint);
+  const { opacity, ...box } = ghostStyle(paint);
+  // While it streams, the newest words shimmer in the brand colour; the rest is plain ghost text.
+  const [head, tail] = paint.streaming ? splitTail(text) : [text, ""];
   // Read by no one: the window is not in the accessibility tree's focus path, and the user's
   // screen reader stays in their app.
   return (
-    <div className="ghost" aria-hidden="true" data-streaming={paint.streaming || undefined} style={ghostStyle(paint)}>
-      {text}
+    <div className="ghost" aria-hidden="true" data-streaming={paint.streaming || undefined} style={box}>
+      <span className="ghost-text" style={{ opacity }}>
+        {head}
+      </span>
+      {tail && <span className="ghost-tail">{tail}</span>}
+      {text && !paint.streaming && (
+        <span className="ghost-chip">
+          <i />
+          {paint.words && <kbd>{isMac() ? WORD_KEY_MAC : WORD_KEY}</kbd>}
+          <kbd>{TAB_KEY}</kbd>
+        </span>
+      )}
     </div>
   );
 }

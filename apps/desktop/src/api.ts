@@ -1109,7 +1109,7 @@ export const api = {
   mcpClientsCreate: async (request: McpClientCreate) => {
     const created = await call<unknown>("mcp_clients_create", { request });
     if (!isMcpClientCreated(created)) {
-      throw new ApiError({ kind: "protocol", message: "Unexpected response from Nugget when creating the app." });
+      throw new ApiError({ kind: "protocol", message: "Unexpected response from Heed when creating the app." });
     }
     return created;
   },
@@ -1160,7 +1160,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "connections" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
+export type PageId = "today" | "needs" | "chat" | "search" | "knowledge" | "sources" | "connections" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -2882,7 +2882,7 @@ export const lifecycleApi = {
   togglePause: () => call<ShellInfo>("indexing_pause_toggle"),
 };
 
-/** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
+/** A validated `heed://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
 export type DeepLink =
   | { kind: "page"; page: PageId }
   | { kind: "search"; query: string }

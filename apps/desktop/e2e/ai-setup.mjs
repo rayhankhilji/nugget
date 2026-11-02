@@ -10,7 +10,7 @@ import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { CORPUS, locateE2eBinaries, rpc, rpcStream, startDaemon } from "./daemon.mjs";
 import {
-  check, checkWire, DIST, exactName, expect, expectNoErrorState, log, newContext, onboardingAddFolder, OUT, settle, shot, startsWith, stopDaemon, t, tPattern, until,
+  check, checkWire, DIST, exactName, expect, expectNoErrorState, log, navTo, newContext, onboardingAddFolder, OUT, settle, shot, startsWith, stopDaemon, t, tPattern, until,
 } from "./harness.mjs";
 
 /** The model the manifest recommends for a 16 GB machine, and one that needs more RAM. */
@@ -163,14 +163,17 @@ export async function aiSetupScenario({ browser }) {
     const heading = (key) => page.getByRole("heading", { level: 1, name: t(key), exact: true });
     const cont = () => page.locator("footer.ob-actions").getByRole("button", { name: exactName("onboarding.continue") }).click();
     const nav = async (key) => {
-      await page.locator("nav .nav-item", { hasText: exactName(key) }).first().click();
-      await page.locator(`main[aria-label="${t(key)}"]`).waitFor();
+      await navTo(page, key.replace(/^app\.nav\./, ""));
     };
 
     await check("ai setup: install the recommended model in onboarding, with progress", async () => {
       try {
         await page.goto(`${bridge.url}index.html`);
         await heading("onboarding.welcome.heading").waitFor();
+        await cont();
+
+        await heading("onboarding.source.heading").waitFor();
+        await onboardingAddFolder(page, CORPUS);
         await cont();
 
         await heading("onboarding.ai.heading").waitFor();
@@ -209,13 +212,11 @@ export async function aiSetupScenario({ browser }) {
         expect(served.stats.served >= MODEL_BYTES, `the mock server sent ${served.stats.served} of ${MODEL_BYTES} bytes`);
         await cont();
 
-        await heading("onboarding.source.heading").waitFor();
-        await onboardingAddFolder(page, CORPUS);
-        for (const h of ["onboarding.source.heading", "onboarding.perm.heading", "onboarding.trigger.heading"]) {
+        for (const h of ["onboarding.perm.heading", "onboarding.trigger.heading"]) {
           await heading(h).waitFor();
           await cont();
         }
-        await heading("onboarding.done.heading").waitFor();
+        await page.getByRole("heading", { level: 2, name: t("onboarding.done.heading"), exact: true }).waitFor();
         await page.locator("footer.ob-actions").getByRole("button", { name: exactName("onboarding.done.search") }).click();
         await page.locator("main[aria-label]").first().waitFor();
       } catch (e) {

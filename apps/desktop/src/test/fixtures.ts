@@ -62,7 +62,7 @@ export const knowledgeStatus: KnowledgeStatus = {
   pending_items: 0,
   last_run: now,
   extractor_provider: null,
-  vault: { path: "/home/me/Nugget vault", pages: 2, last_render: now, conflicts: [], invalid: [] },
+  vault: { path: "/home/me/Heed vault", pages: 2, last_render: now, conflicts: [], invalid: [] },
 };
 
 export const graph: GraphView = {

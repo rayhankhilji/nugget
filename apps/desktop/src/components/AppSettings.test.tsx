@@ -62,7 +62,7 @@ describe("UpdateSettings", () => {
   it("renders translated, accessible settings with the app section", async () => {
     mockDaemon({ updates_status: updateStatus });
     const { container } = await render(<UpdateSettings />);
-    expect(container.textContent).toContain("Nugget 0.0.2 is available");
+    expect(container.textContent).toContain("Heed 0.0.2 is available");
     expect(container.textContent).toContain("Install 0.0.2 and restart");
     expect(container.textContent).toContain("Faster search");
     expect(checkbox(container, /background service at login/).checked).toBe(true);

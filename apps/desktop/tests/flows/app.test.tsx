@@ -26,7 +26,8 @@ const pill = () => {
   const labels = [t("app.conn.up"), t("app.conn.down"), t("app.conn.pending")];
   return within(getByRole("complementary")).getAllByRole("status").find((s) => labels.includes((s.textContent ?? "").trim()))!;
 };
-const navButton = (page: string) => within(getByRole("navigation", { name: t("app.navLabel") })).getByRole("button", { name: page });
+/** A sidebar entry: on a Settings page the sidebar lists the Settings pages. */
+const navButton = (page: string) => within(getByRole("complementary")).getByRole("button", { name: page });
 
 describe("app shell", () => {
   it("shows the offline screen when the daemon isn't running, and retries", async () => {

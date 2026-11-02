@@ -92,7 +92,7 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
           </div>
           {!executed && <p className="muted small">{t("today.action.dryRun")}</p>}
           {preview.diff.length > 0 ? (
-            <ul className="today-diff" aria-label={t("today.action.diffLabel")}>
+            <ul className="today-diff" aria-label={t("today.action.diffLabel")} tabIndex={0}>
               {preview.diff.map((line, i) => (
                 <li key={i} className={`today-diff-${line.op === "add" || line.op === "remove" ? line.op : "context"}`}>
                   <span aria-hidden="true" className="today-diff-marker">
