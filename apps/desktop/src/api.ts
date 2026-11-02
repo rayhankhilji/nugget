@@ -1658,6 +1658,8 @@ export interface DoubleTapStatus {
   accessibility: "granted" | "denied" | "not_required";
   /** macOS only; `not_required` elsewhere. */
   input_monitoring: PermissionState;
+  /** macOS only (`not_required` elsewhere): Full Disk Access, which the Messages source needs. Older shells omit it. */
+  full_disk_access?: PermissionState;
   /** i18n key of an onboarding hint, e.g. `doubletap.hint.atspi`. */
   hint: string | null;
   modifiers: ModifierOption[];
@@ -1725,7 +1727,7 @@ export const doubletapApi = {
   /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
   requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
   /** macOS: open System Settings at a Privacy pane; `false` where there is none. */
-  openPrivacySettings: (pane: "accessibility" | "input_monitoring") => call<boolean>("doubletap_open_privacy_settings", { pane }),
+  openPrivacySettings: (pane: "accessibility" | "input_monitoring" | "full_disk_access") => call<boolean>("doubletap_open_privacy_settings", { pane }),
   defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
   /** Start a draft as if the trigger fired. */
   fire: () => call<void>("doubletap_fire"),

@@ -90,6 +90,68 @@ describe("Double Tap settings page", () => {
     expect(box.querySelector('[role="alert"]')?.textContent).toContain("Open it from the Apple menu");
   });
 
+  it("macOS: Input Monitoring off alone gets its own pane, and the page looks again on return", async () => {
+    const panes: string[] = [];
+    let granted = false;
+    const mac = (): DoubleTapStatus => ({
+      ...status,
+      platform: "macos",
+      session: "macos",
+      trigger_error: null,
+      hint: null,
+      accessibility: "granted",
+      input_monitoring: granted ? "granted" : "denied",
+      full_disk_access: "denied",
+    });
+    setup({
+      doubletap_status: () => mac(),
+      doubletap_open_privacy_settings: (args: unknown) => (panes.push((args as { pane: string }).pane), true),
+    });
+    await render(<App />);
+    await flush(10);
+    const box = document.querySelector<HTMLElement>(".dt-recover")!;
+    expect(box.textContent).toContain("Turn on Nugget in System Settings");
+    expect(box.textContent).toContain("Started Nugget from Terminal?");
+    // No Messages source: Full Disk Access is not asked for.
+    expect(box.textContent).not.toContain("Full Disk Access");
+    await click(byText(box, "button", "Open Input Monitoring settings"));
+    expect(panes).toEqual(["input_monitoring"]);
+    expect(box.querySelectorAll("button")).toHaveLength(2);
+    granted = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush(10);
+    expect(document.querySelector(".dt-recover")).toBeNull();
+  });
+
+  it("macOS: asks for Full Disk Access once a Messages source is set up", async () => {
+    const panes: string[] = [];
+    const mac: DoubleTapStatus = {
+      ...status,
+      platform: "macos",
+      session: "macos",
+      trigger_error: null,
+      hint: null,
+      accessibility: "granted",
+      input_monitoring: "granted",
+      full_disk_access: "denied",
+    };
+    setup({
+      doubletap_status: mac,
+      sources_list: [{ id: "m", kind: "imessage", name: "Messages", enabled: true, state: "error", items: 0 }],
+      doubletap_open_privacy_settings: (args: unknown) => (panes.push((args as { pane: string }).pane), true),
+    });
+    await render(<App />);
+    await flush(10);
+    expect(document.querySelector("main")!.textContent).toContain("Full Disk Access");
+    const box = document.querySelector<HTMLElement>(".dt-recover")!;
+    await click(byText(box, "button", "Open Full Disk Access settings"));
+    expect(panes).toEqual(["full_disk_access"]);
+    const results = await axe.run(box);
+    expect(results.violations).toEqual([]);
+  });
+
   it("edits and saves normalised settings", async () => {
     const { sent } = setup();
     await render(<App />);

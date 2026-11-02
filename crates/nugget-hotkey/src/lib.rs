@@ -445,6 +445,38 @@ fn capabilities_for(session: Session) -> Capabilities {
     }
 }
 
+/// macOS Input Monitoring (System Settings → Privacy & Security → Input Monitoring) for this
+/// app: `Some(true)` when granted, `Some(false)` when not, `None` where there is no such
+/// permission (Linux, Windows). Reading it never prompts.
+///
+/// The trigger itself does not need it (see the table above), but macOS lists an app under Input
+/// Monitoring as soon as it observes keys, and a user who turned Nugget off there sees key
+/// events go missing, so the settings page reports it.
+pub fn input_monitoring() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(objc2_core_graphics::CGPreflightListenEventAccess())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// macOS: ask for Input Monitoring. The first time this shows the system prompt and adds Nugget
+/// to the Input Monitoring list (off); afterwards it only answers. Returns what
+/// [`input_monitoring`] would; `None` off macOS.
+pub fn request_input_monitoring() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(objc2_core_graphics::CGRequestListenEventAccess())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
 /// A trigger that works on this machine: a right-Command double tap on macOS, a right-Ctrl double
 /// tap on Windows and X11 (every PC keyboard has one; many laptops have no right Win key), and
 /// `Ctrl+Alt+Space` where double taps are unsupported (Wayland).
