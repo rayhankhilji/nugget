@@ -750,6 +750,9 @@ impl End {
     }
 }
 
+/// The `chat.done` error (an overlay i18n key) when the draft check held back every sentence.
+pub const HELD_BACK: &str = "doubletap.error.held_back";
+
 /// Forward a draft as `chat.delta` notifications, then one `chat.done`, and audit its end.
 async fn run_draft(
     state: Arc<State>,
@@ -781,6 +784,11 @@ async fn run_draft(
             done.error = match stop {
                 StopReason::Refusal => Some("the model declined to answer".into()),
                 StopReason::ContentFilter => Some("the provider filtered the output".into()),
+                // The check held every sentence back: say so, rather than offer an empty
+                // draft (the overlay shows this i18n key).
+                _ if chars == 0 && timings.grounding.as_ref().is_some_and(|g| g.fallback) => {
+                    Some(HELD_BACK.into())
+                }
                 _ => None,
             };
         }

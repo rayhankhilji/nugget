@@ -2275,6 +2275,7 @@
   "doubletap.overlay.refineMissed": "Couldn't make that change this time. This is the closest draft.",
   "doubletap.error.field_changed": "The cursor moved to another field, so nothing was inserted. The draft is on the clipboard.",
   "doubletap.error.field_changed_no_copy": "The cursor moved to another field, so nothing was inserted. Find the draft in Recent drafts on the Double Tap page.",
+  "doubletap.error.held_back": "Nugget held this draft back: it would have included a private value, a link or a detail your messages don't support. Nothing was inserted.",
   "status.disk.full": "Your disk is almost full ({free} free). Nugget can't index or save changes until you free up some space. Nothing is lost, and indexing picks up again by itself once there is room.",
   "status.disk.fullUnknown": "Your disk is full. Nugget can't index or save changes until you free up some space. Nothing is lost, and indexing picks up again by itself once there is room.",
   "status.disk.low": "Your disk is getting full ({free} free). Free up some space so Nugget can keep indexing.",

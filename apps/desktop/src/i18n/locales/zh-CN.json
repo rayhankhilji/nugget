@@ -2275,6 +2275,7 @@
   "doubletap.overlay.refineMissed": "这次未能做出该修改。这是最接近的草稿。",
   "doubletap.error.field_changed": "光标移到了另一个字段，因此未插入任何内容。草稿已复制到剪贴板。",
   "doubletap.error.field_changed_no_copy": "光标移到了另一个字段，因此未插入任何内容。可在 Double Tap 页面的“最近的草稿”中找到草稿。",
+  "doubletap.error.held_back": "Nugget 已拦下这份草稿：其中会包含私密信息、链接或你的消息无法佐证的内容。未插入任何内容。",
   "status.disk.full": "磁盘空间即将用尽（剩余 {free}）。在你释放空间之前，Nugget 无法建立索引或保存更改。不会丢失任何内容，一旦有了空间，索引会自动继续。",
   "status.disk.fullUnknown": "磁盘已满。在你释放空间之前，Nugget 无法建立索引或保存更改。不会丢失任何内容，一旦有了空间，索引会自动继续。",
   "status.disk.low": "磁盘空间不足（剩余 {free}）。请释放一些空间，以便 Nugget 继续建立索引。",

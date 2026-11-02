@@ -480,7 +480,9 @@ async fn draft_joins_the_text_around_the_caret() {
 #[tokio::test]
 async fn cancellation_stops_the_stream() {
     // Whole sentences, so the grounding check releases them as they end.
-    let words: Vec<String> = (0..200).map(|i| format!("word{i}. ")).collect();
+    let words: Vec<String> = (0..200)
+        .map(|i| format!("Line {i} brings content. "))
+        .collect();
     let refs: Vec<&str> = words.iter().map(String::as_str).collect();
     let slow = Fake::new("slow", Locality::OnDevice, &refs).with(Duration::from_millis(5), false);
     let s = setup(&[slow], DraftConfig::default());

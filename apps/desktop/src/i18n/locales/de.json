@@ -2275,6 +2275,7 @@
   "doubletap.overlay.refineMissed": "Diese Änderung hat diesmal nicht geklappt. Das ist der nächstliegende Entwurf.",
   "doubletap.error.field_changed": "Der Cursor ist in ein anderes Feld gewechselt, daher wurde nichts eingefügt. Der Entwurf ist in der Zwischenablage.",
   "doubletap.error.field_changed_no_copy": "Der Cursor ist in ein anderes Feld gewechselt, daher wurde nichts eingefügt. Den Entwurf finden Sie unter „Letzte Entwürfe“ auf der Double-Tap-Seite.",
+  "doubletap.error.held_back": "Nugget hat diesen Entwurf zurückgehalten: Er hätte einen privaten Wert, einen Link oder eine Angabe enthalten, die deine Nachrichten nicht belegen. Es wurde nichts eingefügt.",
   "status.disk.full": "Ihr Datenträger ist fast voll ({free} frei). Nugget kann erst wieder indexieren oder Änderungen speichern, wenn Sie Speicherplatz freigeben. Es geht nichts verloren, und die Indexierung läuft von selbst weiter, sobald wieder Platz ist.",
   "status.disk.fullUnknown": "Ihr Datenträger ist voll. Nugget kann erst wieder indexieren oder Änderungen speichern, wenn Sie Speicherplatz freigeben. Es geht nichts verloren, und die Indexierung läuft von selbst weiter, sobald wieder Platz ist.",
   "status.disk.low": "Ihr Datenträger wird voll ({free} frei). Geben Sie Speicherplatz frei, damit Nugget weiter indexieren kann.",

@@ -2082,8 +2082,11 @@ mod tests {
             assert_eq!(g.report().secrets_dropped, 1);
             // QA GG1-1: an injected link is dropped with grounding off too.
             let mut g = stream_check(&config, screenshot, &ctx, &plain, None, &voice).unwrap();
-            let out = g.feed("Thanks. Pay at https://pay.example.com/fast today.", true);
-            assert_eq!(out, "Thanks.");
+            let out = g.feed(
+                "Sounds good. Pay at https://pay.example.com/fast today.",
+                true,
+            );
+            assert_eq!(out, "Sounds good.");
         }
     }
 }

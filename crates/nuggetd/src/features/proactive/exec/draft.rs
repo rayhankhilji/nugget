@@ -211,7 +211,7 @@ mod tests {
         async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
             self.requests.lock().unwrap().push(req);
             Ok(futures::stream::iter(vec![
-                Ok(ChatEvent::TextDelta("Sure, attached.".into())),
+                Ok(ChatEvent::TextDelta("Sure, will do.".into())),
                 Ok(ChatEvent::Done {
                     stop_reason: StopReason::EndTurn,
                     input_tokens: None,
@@ -305,7 +305,7 @@ mod tests {
         let table: toml::Table = toml::from_str(DRAFT_TOML).unwrap();
         let drafter = EngineDrafter::new(store, retriever, router, &table);
         let text = drafter.draft_reply(&request()).await.unwrap();
-        assert_eq!(text, "Sure, attached.");
+        assert_eq!(text, "Sure, will do.");
         let req = fake.requests.lock().unwrap().pop().unwrap();
         req.system.unwrap_or_default()
     }

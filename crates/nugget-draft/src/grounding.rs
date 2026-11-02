@@ -47,6 +47,8 @@ pub struct GroundingReport {
     pub contacts_dropped: u32,
     /// Sentences dropped for repeating a message from someone else, or signing as them (GG7-1).
     pub copies_dropped: u32,
+    /// Sentences cut back to their leading clauses that passed (the rest was dropped).
+    pub clauses_dropped: u32,
     /// Facts marked superseded in the prompt.
     pub superseded_facts: u32,
     /// Every content sentence was dropped, so nothing (not even the greeting) was emitted.
@@ -95,8 +97,12 @@ pub struct Corpus {
     /// The user's instruction or field text mentions an attachment: a draft may say one is
     /// attached.
     attachment_ok: bool,
-    /// Messages from other people, [`squash`]ed: the reply must not repeat them.
-    others: Vec<String>,
+    /// Every text a draft may state things from, lower-cased: where a payee or bank it names
+    /// must appear.
+    text: String,
+    /// Messages from other people, [`squash`]ed, and whether each asks a question: the reply
+    /// must not repeat them.
+    others: Vec<(String, bool)>,
     /// Other people's names (whole and first), [`squash`]ed: the reply is not signed by them.
     other_names: Vec<String>,
 }
@@ -120,7 +126,8 @@ impl Corpus {
                 c.add(t);
             }
             if m.from_me != Some(true) {
-                c.others.push(squash(&m.text));
+                c.others
+                    .push((squash(&m.text), m.text.contains(['?', '？', '؟'])));
                 if let Some(a) = m.author.as_deref() {
                     // "Ravi Menon <ravi@example.com>" → "ravimenon" and "ravi".
                     let name = a.split('<').next().unwrap_or(a).trim();
@@ -183,9 +190,17 @@ impl Corpus {
 
     /// Whether `text` ([`squash`]ed, at least `min` characters) is part of a message from
     /// someone else.
+    ///
+    /// A statement that repeats someone's question is an answer, not a copy ("ok to send it to
+    /// the whole list today" to "ok to send it to the whole list today?").
     fn repeats_other(&self, text: &str, min: usize) -> bool {
         let sq = squash(text);
-        sq.chars().count() >= min && self.others.iter().any(|o| o.contains(sq.as_str()))
+        let asks = text.trim_end().ends_with(['?', '？', '؟']);
+        sq.chars().count() >= min
+            && self
+                .others
+                .iter()
+                .any(|(o, question)| o.contains(sq.as_str()) && (asks || !question))
     }
 
     /// Add a text the user is answering or wrote: its links and contact details may be used too.
@@ -201,6 +216,8 @@ impl Corpus {
             self.supported.extend(v.keys.into_iter().chain(v.extra));
         }
         self.words.extend(words(text));
+        self.text.push_str(&text.to_lowercase());
+        self.text.push('|');
     }
 }
 
@@ -362,6 +379,228 @@ pub(crate) fn contacts(text: &str) -> Vec<String> {
     out
 }
 
+/// Words that make a sentence a payment instruction, in the UI languages (lower case).
+const PAYMENT_CUES: &[&str] = &[
+    "pay to",
+    "pay into",
+    "pay it to",
+    "pay it into",
+    "pay via",
+    "payable to",
+    "payment to",
+    "send payment",
+    "transfer to",
+    "transfer it to",
+    "wire to",
+    "wire it to",
+    "bank",
+    "sort code",
+    "iban",
+    "routing number",
+    "swift",
+    "paypal",
+    "venmo",
+    "zelle",
+    "überweis",
+    "zahlbar an",
+    "bankverbindung",
+    "pagar a",
+    "pague a",
+    "transferir a",
+    "transferencia",
+    "transferência",
+    "banco",
+    "payer à",
+    "virement",
+    "banque",
+    "pagar para",
+    "pague para",
+    "pix",
+    "حوالة",
+    "بنك",
+    "مصرف",
+    "ادفع",
+    "भुगतान",
+    "बैंक",
+    "振込",
+    "振り込",
+    "銀行",
+    "转账",
+    "银行",
+    "汇款",
+];
+
+/// Account nouns: a payment instruction only next to a payment word ("the account team" and
+/// "take into account" are not).
+const ACCOUNT_NOUNS: &[&str] = &[
+    "account",
+    "konto",
+    "cuenta",
+    "compte",
+    "conta",
+    "حساب",
+    "खाता",
+    "口座",
+    "账户",
+    "账号",
+];
+
+/// Payment words that make an account noun a payment instruction.
+const PAYMENT_WORDS: &[&str] = &[
+    "pay",
+    "paid",
+    "payment",
+    "deposit",
+    "transfer",
+    "wire",
+    "zahl",
+    "pag",
+    "pai",
+    "dépos",
+    "دفع",
+    "भुगतान",
+    "支払",
+    "払",
+    "支付",
+    "付款",
+];
+
+/// Bank nouns: the name next to one is the bank's.
+const BANK_NOUNS: &[&str] = &[
+    "bank",
+    "banco",
+    "banque",
+    "sparkasse",
+    "volksbank",
+    "بنك",
+    "مصرف",
+    "बैंक",
+    "銀行",
+    "银行",
+];
+
+/// Words that never name a payee: articles, pronouns and the like next to a bank noun.
+const PAYEE_FILLER: &[&str] = &[
+    "the", "our", "your", "my", "a", "an", "this", "that", "same", "usual", "die", "der", "das",
+    "den", "dem", "unsere", "unser", "ihre", "el", "la", "los", "las", "nuestro", "nuestra", "su",
+    "le", "les", "notre", "votre", "o", "os", "nosso", "nossa", "account", "konto", "cuenta",
+    "compte", "conta", "details", "transfer", "to", "into", "via", "at", "with", "in", "of", "de",
+    "du", "do", "da", "an", "à", "al",
+];
+
+fn payment_cue(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if ACCOUNT_NOUNS.iter().any(|n| lower.contains(n))
+        && PAYMENT_WORDS.iter().any(|w| lower.contains(w))
+    {
+        return true;
+    }
+    PAYMENT_CUES.iter().any(|c| {
+        // Whole words for Latin cues ("bank" is not in "embankment").
+        lower.match_indices(c).any(|(i, _)| {
+            !c.is_ascii()
+                || (lower[..i]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|p| !p.is_alphanumeric())
+                    && (c.ends_with(' ') || c.starts_with("überweis") || c.len() > 6 || {
+                        let after = &lower[i + c.len()..];
+                        after.chars().next().is_none_or(|n| !n.is_alphanumeric())
+                    }))
+        })
+    })
+}
+
+/// In a payment instruction, the first payee or bank name that no source text (`known`,
+/// lower case) has: a run of capitalised words, or the word next to a bank noun ("larkspur
+/// bank", "みずほ銀行"). Months, weekdays and the sentence's first word are not names.
+fn unsupported_payee(sentence: &str, known: &str) -> Option<String> {
+    if !payment_cue(sentence) {
+        return None;
+    }
+    let toks: Vec<&str> = sentence
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '"'))
+        .map(|t| {
+            let t = t.trim_matches(|c: char| !c.is_alphanumeric() && c != '&');
+            // "Fernway Studio's account": the name without the possessive.
+            t.strip_suffix("'s")
+                .or_else(|| t.strip_suffix("’s"))
+                .unwrap_or(t)
+        })
+        .filter(|t| !t.is_empty())
+        .collect();
+    let known_phrase = |p: &str| known.contains(&p.to_lowercase());
+    let mut names: Vec<String> = Vec::new();
+    // Capitalised runs ("Larkspur Bank", "Fernway Studio").
+    let mut run: Vec<&str> = Vec::new();
+    for (i, t) in toks.iter().chain(std::iter::once(&"")).enumerate() {
+        let lower = t.to_lowercase();
+        let cap = i > 0
+            && t.chars().next().is_some_and(char::is_uppercase)
+            && *t != "I"
+            && month(&lower).is_none()
+            && weekday(&lower).is_none()
+            && !["IBAN", "BIC", "SWIFT", "PIX"].contains(t);
+        if cap {
+            run.push(t);
+        } else if !run.is_empty() {
+            names.push(run.join(" "));
+            run.clear();
+        }
+    }
+    // The word next to a bank noun, written in lower case or in a script without capitals.
+    for (i, t) in toks.iter().enumerate() {
+        let lower = t.to_lowercase();
+        for noun in BANK_NOUNS {
+            if lower == *noun {
+                for j in [i.wrapping_sub(1), i + 1] {
+                    if let Some(n) = toks.get(j)
+                        && !PAYEE_FILLER.contains(&n.to_lowercase().as_str())
+                        && !n.chars().all(|c| c.is_ascii_digit())
+                    {
+                        let pair = if j < i {
+                            format!("{n} {t}")
+                        } else {
+                            format!("{t} {n}")
+                        };
+                        names.push(pair);
+                    }
+                }
+            } else if !noun.is_ascii() && lower.contains(noun) && lower != *noun {
+                // "みずほ銀行の口座": the characters before the noun, back to a particle.
+                let head = &lower[..lower.find(noun).unwrap_or(0)];
+                let name: String = head
+                    .chars()
+                    .rev()
+                    .take_while(|c| {
+                        !matches!(
+                            c,
+                            'の' | 'に'
+                                | 'で'
+                                | 'を'
+                                | 'は'
+                                | 'が'
+                                | 'へ'
+                                | 'と'
+                                | '、'
+                                | '的'
+                                | '到'
+                                | '向'
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                if !name.is_empty() {
+                    names.push(format!("{name}{noun}"));
+                }
+            }
+        }
+    }
+    names.into_iter().find(|n| !known_phrase(n))
+}
+
 /// Words that claim a file is attached to the message, in the UI languages.
 const ATTACHMENT_CLAIMS: &[&str] = &[
     "attached",
@@ -388,20 +627,6 @@ fn claims_attachment(text: &str) -> bool {
     ATTACHMENT_CLAIMS.iter().any(|w| lower.contains(w))
 }
 
-/// Whether a word may carry what the default check looks at (a number, amount, date, link,
-/// contact or credential): the first unit of a draft is held from such a word to its end.
-fn risky_word(w: &str) -> bool {
-    let lower = w
-        .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase();
-    w.chars()
-        .any(|c| c.is_numeric() || matches!(c, '@' | '$' | '€' | '£' | '¥' | '/'))
-        || month(&lower).is_some_and(|_| month_word(w) && lower.len() > 3)
-        || number_word(&lower).is_some_and(|_| lower != "one")
-        || CURRENCY_WORDS.contains(&lower.as_str())
-        || !contacts(w).is_empty()
-}
-
 fn words(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|c: char| !c.is_alphabetic())
         .filter(|w| !w.is_empty())
@@ -416,12 +641,12 @@ pub enum GroundingCheck {
     /// superseded values and copied credentials. Costs the first sentence's generation time
     /// before the first character.
     Sentences,
-    /// Stream the first sentence (or line) word by word, holding it from the first word that
-    /// may carry a value, link or credential to its end; hold every later sentence whole. Each
-    /// held part is checked: unsupported amounts, dates and numbers of three or more digits,
-    /// links and contact details the thread and the user's text don't have, copies of another
-    /// person's message and credentials are dropped (in the first sentence, once some of it
-    /// went out, the draft ends there instead). The first characters come as fast as before.
+    /// Hold each sentence (and the greeting) until it ends and drop it for a credential, a
+    /// link or contact detail the thread and the user's text don't have, a copy of the other
+    /// person's message, or an unsupported amount, date or number of three or more digits.
+    /// Times, weekdays and small counts are left alone. Nothing half-checked is ever emitted,
+    /// so a draft never ends in a cut sentence (the first characters wait for the first
+    /// sentence).
     #[default]
     Secrets,
 }
@@ -451,12 +676,10 @@ pub struct Grounder {
     report: GroundingReport,
     /// Check values (amounts, dates, numbers) at all; off when grounding is.
     values: bool,
-    /// `Secrets`: the first unit (streamed word by word) is over.
-    first_done: bool,
-    /// `Secrets`: the first unit is held from a value-like word to its end.
-    first_hold: bool,
-    /// `Secrets`: what went out of the first unit.
-    first_emitted: String,
+    /// A sentence was dropped and nothing standing on its own followed yet: `held` waits.
+    after_drop: bool,
+    /// Content words of the non-filler sentences in `held`.
+    held_content: usize,
 }
 
 impl Grounder {
@@ -479,9 +702,8 @@ impl Grounder {
             finished: false,
             report,
             values: true,
-            first_done: false,
-            first_hold: false,
-            first_emitted: String::new(),
+            after_drop: false,
+            held_content: 0,
         }
     }
 
@@ -530,12 +752,6 @@ impl Grounder {
         }
         self.pending.push_str(text);
         let mut out = String::new();
-        if self.check == GroundingCheck::Secrets && !self.first_done {
-            out = self.stream_first(false);
-            if !self.first_done || self.finished {
-                return out;
-            }
-        }
         loop {
             let start = self.unit_start();
             let from = start + self.scanned;
@@ -570,12 +786,6 @@ impl Grounder {
             return String::new();
         }
         let mut out = String::new();
-        if self.check == GroundingCheck::Secrets && !self.first_done {
-            out = self.stream_first(true);
-        }
-        if self.finished {
-            return out;
-        }
         self.finished = true;
         let rest = std::mem::take(&mut self.pending);
         let start = rest.len() - rest.trim_start().len();
@@ -583,13 +793,18 @@ impl Grounder {
         if !body.is_empty() {
             self.unit(&rest[..start], body, &mut out);
         }
-        if !self.body_ok {
-            if self.report.sentences_dropped > 0 {
-                self.report.fallback = true;
-            } else if !self.held.is_empty() {
+        if self.after_drop {
+            // What follows a dropped sentence goes out only if it stands on its own.
+            if self.held_content >= MIN_TAIL_WORDS {
                 out.push_str(&std::mem::take(&mut self.held));
                 self.emitted_any = true;
             }
+        } else if !self.body_ok && self.report.sentences_dropped == 0 {
+            out.push_str(&std::mem::take(&mut self.held));
+            self.emitted_any |= !out.is_empty();
+        }
+        if !self.emitted_any && self.report.sentences_dropped > 0 {
+            self.report.fallback = true;
         }
         out
     }
@@ -600,6 +815,12 @@ impl Grounder {
     }
 
     /// Check one unit (leading whitespace and a sentence or line) and emit it or drop it.
+    ///
+    /// Greetings, sign-offs and filler ("Sure.", "Let me know if you need anything else.")
+    /// wait for a content sentence. When a sentence is dropped before any content went out (it
+    /// was probably the answer), everything after it waits too, and goes out only when it holds
+    /// at least [`MIN_TAIL_WORDS`] content words: a reply whose answer was dropped is empty,
+    /// never just its tail ("Rotate in January.").
     fn unit(&mut self, ws: &str, sentence: &str, out: &mut String) {
         let sentence = sentence.trim_end();
         if sentence.is_empty() {
@@ -607,29 +828,43 @@ impl Grounder {
             return;
         }
         self.report.sentences_checked += 1;
-        if !self.check(sentence) {
+        let salvaged;
+        let sentence = if self.check(sentence) {
+            sentence
+        } else if let Some(kept) = self.leading_clauses(sentence) {
+            // "The total is $9,120, due November 14, and you can pay into account …": the
+            // clauses before the one that failed stand on their own (MM1 on GG1).
+            self.report.clauses_dropped += 1;
+            salvaged = kept;
+            salvaged.as_str()
+        } else {
             self.report.sentences_dropped += 1;
             self.carry = stronger(&self.carry, ws).to_owned();
+            // Dropped before any content went out: it was probably the answer.
+            self.after_drop |= !self.body_ok;
             return;
-        }
+        };
         let ws = stronger(&self.carry, ws).to_owned();
         self.carry.clear();
         self.remember(sentence);
-        if !self.body_ok {
-            // `emitted_any` is still false here: the body starts with the held lines.
-            if !self.held.is_empty() {
+        let filler = is_filler(sentence);
+        if self.after_drop || !self.body_ok {
+            if !self.held.is_empty() || self.emitted_any {
                 self.held.push_str(&ws);
             }
             self.held.push_str(sentence);
-            let filler = is_signoff(sentence) || {
-                let ended = sentence
-                    .trim_end_matches(['"', '\'', ')', ']', '’', '”'])
-                    .ends_with(['.', '!', '?']);
-                // A greeting line, or a short line such as a name.
-                !ended && (is_greeting_line(sentence) || sentence.split_whitespace().count() <= 3)
-            };
             if !filler {
+                self.held_content += content_words(sentence);
+            }
+            let release = if self.after_drop {
+                self.held_content >= MIN_TAIL_WORDS
+            } else {
+                !filler
+            };
+            if release {
                 self.body_ok = true;
+                self.after_drop = false;
+                self.held_content = 0;
                 out.push_str(&std::mem::take(&mut self.held));
                 self.emitted_any = true;
             }
@@ -642,131 +877,38 @@ impl Grounder {
         self.emitted_any = true;
     }
 
-    /// `Secrets`: how much of `pending[..limit]` may go out now (all of it with `complete`),
-    /// keeping a trailing partial word, a trailing run of digit groups ("4111 1111") and the
-    /// start of a possible credential until they end. `None`: a credential is already complete.
-    fn secrets_cut(&self, limit: usize, complete: bool) -> Option<usize> {
-        let mut cut = if complete {
-            limit
-        } else {
-            let mut cut = self.pending[..limit]
-                .rfind(char::is_whitespace)
-                .unwrap_or(0);
-            // A card number arrives a group at a time.
-            let partial = self.pending[cut..limit].trim();
-            if partial.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                loop {
-                    let head = self.pending[..cut].trim_end();
-                    let start = head
-                        .char_indices()
-                        .rfind(|(_, c)| c.is_whitespace())
-                        .map_or(0, |(i, c)| i + c.len_utf8());
-                    let word = &head[start..];
-                    if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                        cut = start;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            cut
-        };
-        if !self.corpus.secrets.is_empty() {
-            if self.copies_secret(&self.pending[..cut]) {
-                return None;
-            }
-            if !complete {
-                cut = self.hold_secret_start(cut);
-            }
-        }
-        Some(cut)
-    }
-
-    /// `Secrets`: stream the first unit (up to its sentence end or line break) word by word
-    /// until a word that may carry a value, link or credential; hold from there to its end and
-    /// check it. With `last`, the draft is over.
-    fn stream_first(&mut self, last: bool) -> String {
-        let start = self.unit_start();
-        let (end, complete) = match find_boundary(&self.pending, start) {
-            Scan::Boundary(e) => (e, true),
-            Scan::NeedMore(_) => (self.pending.len(), last),
-        };
-        let mut out = String::new();
-        let mut end = end;
-        if !self.first_hold {
-            let Some(cut) = self.secrets_cut(end, complete) else {
-                return self.stop_secret();
-            };
-            let mut cut = cut.max(start);
-            if let Some(r) = self.pending[start..cut]
-                .split_whitespace()
-                .find(|w| risky_word(w))
-                .map(|w| w.as_ptr() as usize - self.pending.as_ptr() as usize)
+    /// The longest run of leading clauses of a failed sentence (cut at a comma, semicolon or
+    /// " and ") that passes the check and has at least three content words, ended like the
+    /// sentence. The report and the credential memory are left as they were for the tries.
+    fn leading_clauses(&mut self, sentence: &str) -> Option<String> {
+        let end = sentence
+            .trim_end()
+            .chars()
+            .next_back()
+            .filter(|c| matches!(c, '.' | '!' | '?'))
+            .unwrap_or('.');
+        let cuts: Vec<usize> = sentence
+            .match_indices([',', ';'])
+            .map(|(i, _)| i)
+            .chain(sentence.match_indices(" and ").map(|(i, _)| i))
+            .collect();
+        let saved = (self.report.clone(), self.tail.clone(), self.digits.clone());
+        let mut best: Option<String> = None;
+        for &cut in &cuts {
+            let head = sentence[..cut].trim_end_matches([',', ';', ' ']);
+            // A payment clause is kept whole or not at all.
+            if content_words(head) < 3
+                || best.as_ref().is_some_and(|b| b.len() > head.len())
+                || payment_cue(head)
             {
-                cut = r;
-                self.first_hold = true;
+                continue;
             }
-            // Hold while the draft so far repeats the start of a message from someone else.
-            let sofar = squash(&format!("{}{}", self.first_emitted, &self.pending[..cut]));
-            if !sofar.is_empty() && self.corpus.others.iter().any(|o| o.starts_with(&sofar)) {
-                cut = 0;
+            if self.check(head) {
+                best = Some(format!("{head}{end}"));
             }
-            let cut = self.pending[..cut].trim_end().len();
-            if cut > start || (cut > 0 && self.emitted_any) {
-                let mut release: String = self.pending.drain(..cut).collect();
-                end -= cut;
-                if !self.emitted_any {
-                    release = release.trim_start().to_owned();
-                }
-                self.remember(&release);
-                self.first_emitted.push_str(&release);
-                self.emitted_any = true;
-                self.body_ok = true;
-                out.push_str(&release);
-            }
-        } else if !self.corpus.secrets.is_empty() && self.copies_secret(&self.pending[start..end]) {
-            return self.stop_secret();
+            (self.report, self.tail, self.digits) = saved.clone();
         }
-        if !complete {
-            return out;
-        }
-        // The first unit is complete: check what is held.
-        let held: String = self.pending.drain(..end).collect();
-        self.first_done = true;
-        let body = if self.emitted_any {
-            held.as_str()
-        } else {
-            held.trim_start()
-        };
-        if body.trim().is_empty() {
-            return out;
-        }
-        let sentence = format!("{}{}", self.first_emitted, body);
-        self.report.sentences_checked += 1;
-        if self.check(sentence.trim()) {
-            self.remember(body);
-            out.push_str(body);
-            self.emitted_any = true;
-            self.body_ok = true;
-        } else {
-            self.report.sentences_dropped += 1;
-            if !self.first_emitted.trim().is_empty() {
-                // Part of it went out: end the draft rather than leave a broken sentence.
-                self.pending.clear();
-                self.finished = true;
-            } else {
-                self.carry = held[..held.len() - held.trim_start().len()].to_owned();
-            }
-        }
-        out
-    }
-
-    /// A credential is complete in held text: drop everything and end the draft.
-    fn stop_secret(&mut self) -> String {
-        self.report.secrets_dropped += 1;
-        self.pending.clear();
-        self.finished = true;
-        String::new()
+        best
     }
 
     /// Whether `text`, after what was emitted before it, copies a credential from a sensitive
@@ -777,15 +919,24 @@ impl Grounder {
         }
         let new = squash(text);
         let sq = format!("{}{new}", self.tail);
-        let digits: String = self
-            .digits
-            .chars()
-            .chain(new.chars().filter(char::is_ascii_digit))
-            .collect();
+        let digits = format!("{}{}", self.digits, self.own_digits(text));
         self.corpus.secrets.iter().any(|s| {
             sq.contains(s.as_str())
                 || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
         })
+    }
+
+    /// The digits of `text`, leaving out each number (a run of digits and the separators inside
+    /// it) that the thread or the user's own text states: "$3,124 for 50 seats" copied from the
+    /// thread never adds up to a card or booking number (QA GG1-18).
+    fn own_digits(&self, text: &str) -> String {
+        text.chars()
+            .map(fold)
+            .collect::<String>()
+            .split(|c: char| !(c.is_ascii_digit() || matches!(c, ',' | '.' | '-' | ' ')))
+            .map(|run| run.chars().filter(char::is_ascii_digit).collect::<String>())
+            .filter(|d| !d.is_empty() && (d.len() < 3 || !self.corpus.user.contains(d.as_str())))
+            .collect()
     }
 
     /// Whether `text` ends with the first four or more letters and digits of a credential.
@@ -813,36 +964,10 @@ impl Grounder {
         let keep: Vec<char> = self
             .digits
             .chars()
-            .chain(new.chars().filter(char::is_ascii_digit))
+            .chain(self.own_digits(text).chars())
             .collect();
         let n = keep.len().saturating_sub(self.corpus.secret_len);
         self.digits = keep[n..].iter().collect();
-    }
-
-    /// `Secrets`: move `cut` back so no (squashed) start of a credential goes out before the
-    /// text after it shows whether it is one. The scan back is bounded; the tail catches a
-    /// credential whose start slipped out.
-    fn hold_secret_start(&self, cut: usize) -> usize {
-        let head = &self.pending[..cut];
-        let max = self.corpus.secret_len;
-        let mut best = cut;
-        // The squashed end of `head`, reversed.
-        let mut rev: Vec<char> = Vec::new();
-        for (i, c) in head.char_indices().rev().take(16 * max + 64) {
-            let sq = squash(&head[i..i + c.len_utf8()]);
-            if sq.is_empty() {
-                continue;
-            }
-            rev.extend(sq.chars().rev());
-            if rev.len() > max {
-                break;
-            }
-            let s: String = rev.iter().rev().collect();
-            if self.corpus.secrets.iter().any(|sec| sec.starts_with(&s)) {
-                best = i;
-            }
-        }
-        best
     }
 
     /// Whether every value in the sentence is supported; counts values and names.
@@ -876,6 +1001,14 @@ impl Grounder {
                 && self.corpus.other_names.contains(&sq))
         {
             self.report.copies_dropped += 1;
+            return false;
+        }
+        // A payee or bank nothing names (MM1 on GG1: "pay into Larkspur Bank").
+        if let Some(name) = unsupported_payee(sentence, &self.corpus.text) {
+            self.report.contacts_dropped += 1;
+            if self.report.unsupported.len() < MAX_REPORTED {
+                self.report.unsupported.push(name);
+            }
             return false;
         }
         if !self.corpus.attachment_ok && claims_attachment(sentence) {
@@ -920,6 +1053,65 @@ impl Grounder {
         self.report.names_flagged += unknown_names(sentence, &self.corpus.words);
         ok
     }
+}
+
+/// Content words (stopwords left out: about six plain words) a sentence must bring after a
+/// dropped one to go out ([`Grounder`]).
+const MIN_TAIL_WORDS: usize = 3;
+
+/// Words that carry no content of their own.
+const FILLER_WORDS: &[&str] = &[
+    "the", "and", "you", "are", "was", "were", "for", "with", "that", "this", "its", "our", "your",
+    "will", "can", "has", "have", "not", "but", "from", "they", "them", "she", "his", "her", "him",
+    "let", "know", "need", "just", "all", "any", "sure", "yes", "yeah", "okay", "thanks", "thank",
+    "please", "too", "also", "very", "really", "here", "there",
+];
+
+/// Openings of sentences that only close a message.
+const CLOSERS: &[&str] = &[
+    "let me know",
+    "feel free",
+    "hope this",
+    "i hope",
+    "thanks",
+    "thank you",
+    "have a ",
+    "talk soon",
+    "looking forward",
+    "any questions",
+    "if you need",
+    "if you have",
+];
+
+/// Words of three or more letters or digits that are not [`FILLER_WORDS`]; a script without
+/// spaces counts by characters.
+fn content_words(sentence: &str) -> usize {
+    if sentence
+        .chars()
+        .any(|c| nugget_voice::unspaced_weight(c).is_some())
+    {
+        return nugget_voice::word_units(sentence);
+    }
+    sentence
+        .split(|c: char| !(c.is_alphanumeric() || matches!(c, '\'' | '’' | ',' | '.')))
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|w| w.chars().count() >= 3 && !FILLER_WORDS.contains(&w.as_str()))
+        .count()
+}
+
+/// A greeting, sign-off, name line, closing courtesy or a sentence with under two content words.
+fn is_filler(sentence: &str) -> bool {
+    let ended = sentence
+        .trim_end_matches(['"', '\'', ')', ']', '’', '”'])
+        .ends_with(['.', '!', '?', '。', '！', '？']);
+    let lower = sentence.trim().to_lowercase();
+    is_signoff(sentence)
+        || (!ended && (is_greeting_line(sentence) || sentence.split_whitespace().count() <= 3))
+        || CLOSERS.iter().any(|c| lower.starts_with(c))
+        || content_words(sentence) < 2
 }
 
 /// The whitespace with more line breaks (the first on a tie or when the other is empty).
@@ -1948,8 +2140,8 @@ mod tests {
         assert_eq!(g.push("Dear Ravi,\n\n"), "");
         assert_eq!(g.push("The budget is $310,000. "), "");
         assert_eq!(
-            g.push("It was approved at $275,000. More"),
-            "Dear Ravi,\n\nIt was approved at $275,000."
+            g.push("It was approved at $275,000 for the Atlas launch and trade shows. More"),
+            "Dear Ravi,\n\nIt was approved at $275,000 for the Atlas launch and trade shows."
         );
     }
 
@@ -2082,12 +2274,14 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
             &[
                 "Hi Ravi,\n\nThe VPN password is tangerine-",
                 "Otter-42. The card is 4111-1111-",
-                "1111-1111. The team has 12 people.\n\nKind regards,\nHenrik",
+                "1111-1111. The team has 12 people across design, sales and support.\n\nKind \
+regards,\nHenrik",
             ],
         );
         assert_eq!(
             out,
-            "Hi Ravi,\n\nThe team has 12 people.\n\nKind regards,\nHenrik"
+            "Hi Ravi,\n\nThe team has 12 people across design, sales and support.\n\nKind \
+regards,\nHenrik"
         );
         assert_eq!(g.report().secrets_dropped, 2);
         assert_eq!(
@@ -2096,18 +2290,139 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         );
     }
 
+    /// MM1 on GG1 (real 4B): the default check never leaves a cut sentence ("Hi Sam, the
+    /// password is"). A sentence is emitted only once it passed; with nothing that passed, the
+    /// draft is empty.
     #[test]
-    fn secrets_mode_streams_the_first_line_and_holds_later_sentences() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        // The first line goes out word by word; later sentences are checked whole.
-        assert_eq!(g.push("Hi Ravi,\n\nThe team"), "Hi Ravi,");
-        assert_eq!(
-            g.push(" has 12 people. The VPN"),
-            "\n\nThe team has 12 people."
+    fn the_default_check_never_leaves_a_cut_sentence() {
+        for (draft, want) in [
+            ("Hi Ravi, the VPN password is tangerine-Otter-42.", ""),
+            ("Hi Ravi, the total is $9,800.", ""),
+            (
+                "the dashboard is here: https://dash.evil.example.com/q4",
+                "",
+            ),
+            ("رمز الباب: ٤٧١٩٢٥٨٣", ""),
+            ("Código de la alarma: 2580 4719.", ""),
+            ("Hi Ravi, the caterer quote for Quarry Hall is $4,150.", ""),
+            (
+                "Hi Ravi,\n\nThe team has 12 people. The VPN password is tangerine-Otter-42.\n\nBest,\nHenrik",
+                "Hi Ravi,\n\nThe team has 12 people.\n\nBest,\nHenrik",
+            ),
+        ] {
+            let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+            // Fed a few characters at a time, as a model streams.
+            let chars: Vec<char> = draft.chars().collect();
+            let parts: Vec<String> = chars.chunks(3).map(|c| c.iter().collect()).collect();
+            let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+            assert_eq!(stream(&mut g, &parts), want, "{draft}");
+        }
+    }
+
+    /// MM1 on GG1 (real 4B): when the answering sentence is dropped, its tail never goes out
+    /// alone ("Rotate in January.", "Let me know if you need anything else. Best, Dana").
+    #[test]
+    fn a_dropped_answer_leaves_no_tail() {
+        for draft in [
+            "Hi Sam,\n\nThe guest wifi password is tangerine-Otter-42. Rotate in January.\n\nBest,\nDana",
+            "Sure! The password is tangerine-Otter-42. Let me know if you need anything else.\n\nBest,\nDana",
+            "Hi Sam, the signed SOW is attached. Thanks!",
+        ] {
+            let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+            assert_eq!(stream(&mut g, &[draft]), "", "{draft}");
+            assert!(g.report().fallback, "{draft}");
+        }
+    }
+
+    /// MM1 on GG1 (safe-mixed-legit-default): the supported total and due date survive when the
+    /// same sentence goes on to an account number nothing supports.
+    #[test]
+    fn supported_clauses_survive_a_failing_one() {
+        let mut g = grounder().with_check(GroundingCheck::Secrets);
+        let out = stream(
+            &mut g,
+            &[
+                "Hi Ravi, the board approved $275,000 for the Q4 marketing budget, and you can pay \
+into account 40112277.",
+            ],
         );
-        assert_eq!(g.push(" password is tangerine-Otter-42. Kind regards"), "");
-        assert_eq!(g.finish(), " Kind regards");
-        assert_eq!(g.report().secrets_dropped, 1);
+        assert_eq!(
+            out,
+            "Hi Ravi, the board approved $275,000 for the Q4 marketing budget."
+        );
+        assert_eq!(g.report().clauses_dropped, 1);
+    }
+
+    /// MM1 on GG1 (safe-mixed-legit-default): a payee or bank no source names is dropped with
+    /// its clause, and never kept in part; the payee the facts name passes.
+    #[test]
+    fn payment_instructions_need_a_known_payee() {
+        let ctx = DraftContext {
+            thread: vec![ThreadMessage {
+                author: Some("Priya Raman".into()),
+                text: "What's the total on invoice 2207, when is it due, and which bank account \
+should we pay into?"
+                    .into(),
+                from_me: Some(false),
+                timestamp: None,
+            }],
+            ..Default::default()
+        };
+        let cr = ContextResponse {
+            text: "[1] Larkspur invoice 2207 final (notes)\nFinal invoice 2207 for Larkspur \
+Foods: total $9,120, payment due November 14. Payee: Fernway Studio."
+                .into(),
+            citations: vec![cite(1, "k90", "Larkspur invoice 2207 final", "2026-10-14")],
+            excluded_sensitive: 0,
+        };
+        for (draft, want) in [
+            (
+                "Hi Priya, the total is $9,120, due November 14, pay into Larkspur Bank.",
+                "Hi Priya, the total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Please pay into larkspur bank.",
+                "The total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Bitte überweisen Sie an die Larkspur Bank.",
+                "The total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Please pay into Fernway Studio's account.",
+                "The total is $9,120, due November 14. Please pay into Fernway Studio's account.",
+            ),
+        ] {
+            let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+                .with_check(GroundingCheck::Secrets);
+            assert_eq!(stream(&mut g, &[draft]), want, "{draft}");
+        }
+        // Ordinary mentions of an account are not payment instructions.
+        assert!(!payment_cue(
+            "Sarah from the account team at Acme will call you."
+        ));
+        assert!(!payment_cue("Taking that into account, Thursday works."));
+        assert!(payment_cue("Please pay into our account at Acme."));
+    }
+
+    /// MM1 on GG1: a number the thread states passes even when its digits, joined with the
+    /// next number's, spell a sensitive reference.
+    #[test]
+    fn numbers_from_the_thread_never_add_up_to_a_secret() {
+        let (mut ctx, _) = henrik();
+        ctx.thread[0].text = "Can we do $3,124 for 50 seats?".into();
+        let mut c = cite(1, "k80", "Booking", "2026-10-01");
+        c.sensitive = true;
+        let cr = ContextResponse {
+            text: "[1] Booking (notes)\nBooking reference 312450.".into(),
+            citations: vec![c],
+            excluded_sensitive: 0,
+        };
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["Yes, $3,124 for 50 seats works."]);
+        assert_eq!(out, "Yes, $3,124 for 50 seats works.");
+        assert_eq!(g.report().secrets_dropped, 0);
     }
 
     /// QA GG1-11: the default check drops invented and superseded amounts, spelled out too.
@@ -2117,24 +2432,19 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         let out = stream(
             &mut g,
             &[
-                "Hi Ravi,\n\nThe budget is $310,000. It was approved at $275,000. The cap is \
-twelve thousand dollars. See you Friday at 3 pm.",
+                "Hi Ravi,\n\nThe budget is $310,000. It was approved at $275,000 for the Atlas \
+launch and trade shows. The cap is twelve thousand dollars. See you Friday at 3 pm.",
             ],
         );
         assert_eq!(
             out,
-            "Hi Ravi,\n\nIt was approved at $275,000. See you Friday at 3 pm."
+            "Hi Ravi,\n\nIt was approved at $275,000 for the Atlas launch and trade shows. See you \
+Friday at 3 pm."
         );
         assert_eq!(g.report().values_superseded, 1);
         assert_eq!(
             g.report().unsupported,
             ["$310,000", "twelve thousand dollars"]
-        );
-        // In the streamed first sentence, the draft ends before the invented figure.
-        let mut g = grounder().with_check(GroundingCheck::Secrets);
-        assert_eq!(
-            stream(&mut g, &["The cover limit is €610,000 per claim. Thanks!"]),
-            "The cover limit is"
         );
     }
 
@@ -2182,24 +2492,24 @@ ravi.menon@northwind.example.com.",
             &mut g,
             &[
                 "hey henrik, weißt du noch wann genau der workshop im dezember ist? ",
-                "Ich glaube, er ist am Freitag.\n\nRavi",
+                "Ich glaube, der Workshop ist am Freitag im Raum Elbe.\n\nRavi",
             ],
         );
-        assert_eq!(out, "Ich glaube, er ist am Freitag.");
+        assert_eq!(out, "Ich glaube, der Workshop ist am Freitag im Raum Elbe.");
         assert_eq!(g.report().copies_dropped, 2);
-    }
-
-    #[test]
-    fn secrets_mode_holds_digit_groups_until_the_run_ends() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(g.push("The card is 4111 1111"), "The card is");
-        assert_eq!(g.push(" 1111 1111 for"), "");
-        assert!(g.is_finished());
-        // A harmless number streams as usual, and the end flushes everything.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let (out, _) = run(&mut g, &["We are 12 ", "people, see you at 10:00."]);
-        assert_eq!(out, "We are 12 people, see you at 10:00.");
-        assert_eq!(g.report().secrets_dropped, 0);
+        // MM1 on GG1 (cls-slack-desktop): a statement echoing their question answers it.
+        let (mut ctx, cr) = henrik();
+        ctx.thread[0].text = "ok to send it to the whole list today?".into();
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["yep, ok to send it to the whole list today!"]);
+        assert_eq!(out, "yep, ok to send it to the whole list today!");
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        assert_eq!(
+            stream(&mut g, &["ok to send it to the whole list today!"]),
+            "ok to send it to the whole list today!"
+        );
     }
 
     #[test]
@@ -2233,37 +2543,6 @@ ravi.menon@northwind.example.com.",
             out.push_str(&g.push(p));
         }
         out + &g.finish()
-    }
-
-    #[test]
-    fn secrets_mode_catches_a_credential_padded_past_any_window() {
-        // Each character of the password, with separators between them: the raw text runs far
-        // longer than the password, and arrives one word at a time.
-        let parts: Vec<String> = "tangerineOtter42"
-            .chars()
-            .map(|c| format!("{c} ,  ; "))
-            .collect();
-        let mut all = vec!["The password is "];
-        all.extend(parts.iter().map(String::as_str));
-        all.push("ok.");
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &all);
-        // Neither the password nor its start went out.
-        assert!(!squash(&out).contains("tang"), "{out:?}");
-        assert_eq!(g.report().secrets_dropped, 1);
-    }
-
-    #[test]
-    fn secrets_mode_holds_the_start_of_a_credential_split_by_a_space() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &["It is tangerine- ", "Otter-42 ", "now."]);
-        assert_eq!(out, "It is");
-        assert_eq!(g.report().secrets_dropped, 1);
-        // A word that only starts like one goes out when the next word shows it is not.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(g.push("a tangerine "), "a");
-        assert_eq!(g.push("tree now"), " tangerine tree");
-        assert_eq!(g.finish(), " now");
     }
 
     #[test]
@@ -2309,9 +2588,14 @@ ravi.menon@northwind.example.com.",
         let mut g = with_secrets();
         let out = stream(
             &mut g,
-            &["The card is ٤١١١ ١١١١ ١١١١ ١١١١. The team has 12 people."],
+            &[
+                "The card is ٤١١١ ١١١١ ١١١١ ١١١١. The team has 12 people across design, sales and support.",
+            ],
         );
-        assert_eq!(out, "The team has 12 people.");
+        assert_eq!(
+            out,
+            "The team has 12 people across design, sales and support."
+        );
         assert_eq!(g.report().secrets_dropped, 1);
         let (mut ctx, _) = henrik();
         ctx.thread[0].text = "Is the workshop still on for 2026-11-20?".into();
@@ -2330,8 +2614,17 @@ ravi.menon@northwind.example.com.",
         assert_eq!(keys("12,345 درهم"), keys("١٢٬٣٤٥ درهم"));
         // The start of a credential at the end of a line is held back with it.
         let mut g = with_secrets();
-        let out = stream(&mut g, &["Sure, it is tangerine-\nOtter-42. We are 12."]);
-        assert_eq!(out, "We are 12.");
+        let out = stream(
+            &mut g,
+            &[
+                "Sure, it is tangerine-\nOtter-42. The team has 12 people across design, sales and support.",
+            ],
+        );
+        assert_eq!(
+            out,
+            "The team has 12 people across design, sales and support."
+        );
+        assert_eq!(g.report().secrets_dropped, 2);
     }
 
     #[test]
@@ -2349,21 +2642,6 @@ ravi.menon@northwind.example.com.",
             assert!(!digits.contains("4111111111111111"), "{check:?}: {out:?}");
             assert_eq!(g.report().secrets_dropped, 1, "{check:?}");
         }
-    }
-
-    #[test]
-    fn secrets_mode_holds_the_start_of_a_credential_glued_to_a_word() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &["the code isTangerine ", "Otter-42 ok."]);
-        assert!(!squash(&out).contains("tang"), "{out:?}");
-        assert_eq!(g.report().secrets_dropped, 1);
-        // Held mid-word only while it may still be one.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(
-            stream(&mut g, &["a cat ", "sat ", "here."]),
-            "a cat sat here."
-        );
-        assert_eq!(g.report().secrets_dropped, 0);
     }
 
     #[test]

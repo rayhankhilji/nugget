@@ -2275,6 +2275,7 @@
   "doubletap.overlay.refineMissed": "Esta vez no se pudo hacer ese cambio. Este es el borrador más cercano.",
   "doubletap.error.field_changed": "El cursor pasó a otro campo, así que no se insertó nada. El borrador está en el portapapeles.",
   "doubletap.error.field_changed_no_copy": "El cursor pasó a otro campo, así que no se insertó nada. Encontrarás el borrador en Borradores recientes, en la página de Double Tap.",
+  "doubletap.error.held_back": "Nugget retuvo este borrador: habría incluido un dato privado, un enlace o un detalle que tus mensajes no respaldan. No se insertó nada.",
   "status.disk.full": "Tu disco está casi lleno ({free} libres). Nugget no puede indexar ni guardar cambios hasta que liberes espacio. No se pierde nada y la indexación se reanuda sola en cuanto haya sitio.",
   "status.disk.fullUnknown": "Tu disco está lleno. Nugget no puede indexar ni guardar cambios hasta que liberes espacio. No se pierde nada y la indexación se reanuda sola en cuanto haya sitio.",
   "status.disk.low": "Tu disco se está llenando ({free} libres). Libera espacio para que Nugget pueda seguir indexando.",
