@@ -19,7 +19,7 @@ const TYPES = {
   ".txt": "text/plain; charset=utf-8",
 };
 
-async function resolve(path) {
+async function resolve(path, DIST) {
   const clean = normalize(decodeURIComponent(path)).replace(/^(\.\.[/\\])+/, "");
   for (const p of [clean, `${clean}.html`, join(clean, "index.html")]) {
     const full = join(DIST, p);
@@ -32,11 +32,11 @@ async function resolve(path) {
   return null;
 }
 
-export function serve(port = 4173) {
+export function serve(port = 4173, dir = DIST) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
-    const file = await resolve(url.pathname);
-    const body = await readFile(file ?? join(DIST, "404.html"));
+    const file = await resolve(url.pathname, dir);
+    const body = await readFile(file ?? join(dir, "404.html"));
     const type = file ? (TYPES[extname(file)] ?? "application/octet-stream") : TYPES[".html"];
     const cache = file && /\/(_astro|fonts)\//.test(file) ? "public, max-age=31536000, immutable" : "no-cache";
     // Compress text like the production host (Cloudflare Pages) does, so Lighthouse sees real transfer sizes.

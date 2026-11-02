@@ -22,7 +22,9 @@ interface Props {
   footerCta?: boolean;
 }
 const { title, description, noindex = false, minimal = false, footerCta = true } = Astro.props;
-const canonical = new URL(Astro.url.pathname, Astro.site);
+// build.format "file" makes pathnames end in .html; the hosts serve clean URLs, so canonicals drop it.
+const cleanPath = Astro.url.pathname.replace(/(\/index)?\.html$/, "") || "/";
+const canonical = new URL(cleanPath, Astro.site);
 const fullTitle = title === "Heed" ? "Heed: your always-on chief of staff" : `${title} · Heed`;
 const og = new URL("/og.png", Astro.site);
 ---

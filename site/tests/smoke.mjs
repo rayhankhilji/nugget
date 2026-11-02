@@ -60,6 +60,15 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1c. Canonical links are clean URLs (no .html), matching cleanUrls on Vercel and Pages.
+{
+  const page = await browser.newPage();
+  await page.goto(base + "/pricing");
+  const href = await page.getAttribute('link[rel="canonical"]', "href");
+  check(!!href && href.endsWith("/pricing") && !href.includes(".html"), `canonical is clean: ${href}`);
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

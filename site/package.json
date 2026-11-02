@@ -12,7 +12,7 @@
     "preview": "astro preview --port 4321",
     "check": "astro check",
     "lint": "eslint .",
-    "test": "node tests/smoke.mjs",
+    "test": "node tests/smoke.mjs && node tests/bare.mjs",
     "apps": "node scripts/sync-apps.mjs",
     "lighthouse": "node tests/lighthouse.mjs",
     "screenshots": "node tests/screenshots.mjs"

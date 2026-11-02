@@ -124,7 +124,7 @@ npm run dev            # http://localhost:4321
 npm run build         # static build into dist/
 npm run check         # astro check (TypeScript, strictest)
 npm run lint          # eslint (typescript-eslint and eslint-plugin-astro)
-npm test              # Playwright smoke test (see below)
+npm test              # Playwright smoke test, then the bare-build test (see below)
 npm run lighthouse    # Lighthouse, mobile and desktop, every page; fails under 95
 npm run screenshots   # every page at 1440 and 390 px, light and dark, into screenshots/
 ```
@@ -144,7 +144,47 @@ are resolved with `require("playwright")`, so nothing has to be downloaded.
     following the returned URL);
   - the account page: trial status, device count, the portal, and deleting the account.
 
-## Deploy (Cloudflare Pages, free)
+## Deploy on Vercel (production)
+
+`vercel.json` holds everything, so the dashboard needs no build settings:
+- Astro framework, `npm ci`, `npm run build` and `dist`.
+- `cleanUrls` and no trailing slash, to match `build.format: "file"` and `trailingSlash: "never"`.
+- Long-lived caching for `/_astro/*` and `/fonts/*`. `/brand/*` gets one day plus
+  stale-while-revalidate, because those files keep their names when DS1 redraws them.
+- Security headers: nosniff, a referrer policy, a permissions policy, `X-Frame-Options: DENY`,
+  and a CSP. The CSP allows `'unsafe-inline'` because of the theme and auth-hint scripts in the
+  head, and `connect-src https:`, because Supabase and the cloud URL are build-time settings.
+
+**Click path:**
+1. vercel.com, then Add New, then Project, then Import the `rayhankhilji/nugget` GitHub repository.
+2. Set **Root Directory** to `site`. Vercel reads the rest from `vercel.json`.
+3. In Settings, Git, set **Production Branch** to `claude/inspiring-wozniak-z3gg3n`.
+4. Optional: add environment variables (Settings, Environment Variables, Production and Preview):
+   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_CLOUD_URL`, and the
+   `NEXT_PUBLIC_DOWNLOAD_MAC_*` URLs.
+5. Deploy. Every push to the production branch redeploys.
+
+**Defaults with no environment variables:**
+- The site URL comes from `VERCEL_PROJECT_PRODUCTION_URL`, which Vercel sets, so canonical links,
+  the sitemap and `robots.txt` point at the production domain. `SITE_URL` overrides it, for example
+  after you add a custom domain.
+- Prices fall back to the built-in copy of `plans.toml`.
+- Account, checkout, sign-in and sign-up show a calm "Heed Cloud isn't open yet" page, with
+  Download the free app and Join the waitlist, until the three cloud variables are set.
+  `tests/bare.mjs` checks that state.
+
+Add the production origin to the cloud's `NUGGET_SITE_ORIGINS` once accounts are live, and add it to
+Supabase's redirect allow-list.
+
+Check it locally the way Vercel builds it. No token is needed if you create a local project stub:
+
+```sh
+mkdir -p .vercel && echo '{"projectId":"local","orgId":"local","settings":{"framework":"astro"}}' > .vercel/project.json
+npx vercel build      # writes .vercel/output (git-ignored)
+```
+
+## Alternative: Cloudflare Pages
+
 
 `wrangler.toml` sets `pages_build_output_dir = "dist"`. `public/_headers` adds security headers
 (nosniff, a referrer policy, a permissions policy, `X-Frame-Options: DENY`, HSTS) and long-lived

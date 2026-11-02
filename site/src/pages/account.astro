@@ -1,6 +1,8 @@
 ---
 import Base from "../layouts/Base.astro";
 import { loadPlans } from "../lib/plans";
+import CloudClosed from "../components/CloudClosed.astro";
+import { cloudOpen } from "../lib/config";
 const { plans } = await loadPlans();
 // Per-plan facts the page needs in the browser: price per interval and the device limit.
 const facts = JSON.stringify(
@@ -8,94 +10,100 @@ const facts = JSON.stringify(
 );
 ---
 <Base title="Account" description="Your Heed plan, billing and devices." noindex>
-  <section class="wrap acct" data-account data-facts={facts} aria-busy="true">
-    <header class="head">
-      <div>
-        <h1>Account</h1>
-        <p class="muted" data-email>Loading…</p>
-      </div>
-      <button type="button" class="btn btn-secondary btn-sm" data-signout>Sign out</button>
-    </header>
+  {
+    cloudOpen ? (
+      <section class="wrap acct" data-account data-facts={facts} aria-busy="true">
+        <header class="head">
+          <div>
+            <h1>Account</h1>
+            <p class="muted" data-email>Loading…</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" data-signout>Sign out</button>
+        </header>
 
-    <p class="status" role="status" aria-live="polite" data-msg hidden></p>
+        <p class="status" role="status" aria-live="polite" data-msg hidden></p>
 
-    <!-- Plan strip: Plan · Cost · Renews · Usage -->
-    <section class="strip" aria-labelledby="plan-h">
-      <h2 id="plan-h" class="sr-only">Plan</h2>
-      <div class="cell">
-        <span class="k">Plan</span>
-        <span class="v"><span data-plan>…</span> <span class="pill" data-status hidden></span></span>
-      </div>
-      <div class="cell">
-        <span class="k">Cost</span>
-        <span class="v mono" data-cost>…</span>
-      </div>
-      <div class="cell">
-        <span class="k" data-when-label>Renews</span>
-        <span class="v mono" data-when>…</span>
-      </div>
-      <div class="cell usage">
-        <span class="k">Deep answers this month</span>
-        <span class="v mono" data-usage-text>…</span>
-        <span class="meter" aria-hidden="true"><i data-usage-bar></i></span>
-      </div>
-    </section>
-    <p class="trialline" data-plan-detail></p>
-    <div class="row">
-      <button type="button" class="btn btn-primary" data-portal hidden>Manage billing</button>
-      <a href="/pricing" class="btn btn-primary" data-choose hidden>Choose a plan</a>
-      <a href="/pricing" class="btn btn-ghost" data-compare>Compare plans</a>
-    </div>
-    <p class="small">Stripe handles invoices, card details and cancelling securely.</p>
-
-    <div class="grid">
-      <section class="box devices" aria-labelledby="dev-h">
-        <div class="box-h">
-          <h2 id="dev-h">Devices</h2>
-          <span class="mono small" data-dev-limit></span>
-        </div>
-        <ul data-devices><li class="muted">Loading…</li></ul>
-        <p class="small">A device counts towards your plan's limit for 30 days after it was last used.</p>
-      </section>
-
-      <section class="box" aria-labelledby="dl-h">
-        <div class="box-h"><h2 id="dl-h">Heed for Mac</h2></div>
-        <p class="muted">For macOS 11 or later, on Apple silicon and Intel. Sign in to the app with this email.</p>
-        <div class="row"><a href="/download" class="btn btn-secondary btn-sm">Download</a></div>
-      </section>
-
-      <section class="box danger" aria-labelledby="del-h">
-        <div class="box-h"><h2 id="del-h">Your data</h2></div>
-        <p class="muted">
-          Download everything Heed stores about you, or delete your account. Deleting disconnects every app and permanently
-          deletes your synced data.
-        </p>
+        <!-- Plan strip: Plan · Cost · Renews · Usage -->
+        <section class="strip" aria-labelledby="plan-h">
+          <h2 id="plan-h" class="sr-only">Plan</h2>
+          <div class="cell">
+            <span class="k">Plan</span>
+            <span class="v"><span data-plan>…</span> <span class="pill" data-status hidden></span></span>
+          </div>
+          <div class="cell">
+            <span class="k">Cost</span>
+            <span class="v mono" data-cost>…</span>
+          </div>
+          <div class="cell">
+            <span class="k" data-when-label>Renews</span>
+            <span class="v mono" data-when>…</span>
+          </div>
+          <div class="cell usage">
+            <span class="k">Deep answers this month</span>
+            <span class="v mono" data-usage-text>…</span>
+            <span class="meter" aria-hidden="true"><i data-usage-bar></i></span>
+          </div>
+        </section>
+        <p class="trialline" data-plan-detail></p>
         <div class="row">
-          <button type="button" class="btn btn-secondary btn-sm" data-export>Download my data</button>
-          <button type="button" class="btn btn-sm danger-btn" data-delete-open>Delete account…</button>
+          <button type="button" class="btn btn-primary" data-portal hidden>Manage billing</button>
+          <a href="/pricing" class="btn btn-primary" data-choose hidden>Choose a plan</a>
+          <a href="/pricing" class="btn btn-ghost" data-compare>Compare plans</a>
         </div>
-      </section>
-    </div>
+        <p class="small">Stripe handles invoices, card details and cancelling securely.</p>
 
-    <dialog class="dlg" data-delete-dialog aria-labelledby="dlg-h">
-      <form data-delete method="dialog">
-        <h2 id="dlg-h">Delete your Heed account?</h2>
-        <p class="muted">
-          This disconnects every app and permanently deletes your account and all synced data. It can't be undone. If you
-          have a plan, cancel it in Manage billing first so you aren't charged again.
-        </p>
-        <p><button type="button" class="linkish" data-export>Download your data first</button></p>
-        <label class="field">
-          <span>Type <strong>delete</strong> to confirm</span>
-          <input class="input" name="confirm" autocomplete="off" spellcheck="false" />
-        </label>
-        <div class="row end">
-          <button type="button" class="btn btn-ghost btn-sm" data-delete-cancel>Cancel</button>
-          <button type="submit" class="btn btn-sm danger-fill" data-delete-confirm disabled>Delete account</button>
+        <div class="grid">
+          <section class="box devices" aria-labelledby="dev-h">
+            <div class="box-h">
+              <h2 id="dev-h">Devices</h2>
+              <span class="mono small" data-dev-limit></span>
+            </div>
+            <ul data-devices><li class="muted">Loading…</li></ul>
+            <p class="small">A device counts towards your plan's limit for 30 days after it was last used.</p>
+          </section>
+
+          <section class="box" aria-labelledby="dl-h">
+            <div class="box-h"><h2 id="dl-h">Heed for Mac</h2></div>
+            <p class="muted">For macOS 11 or later, on Apple silicon and Intel. Sign in to the app with this email.</p>
+            <div class="row"><a href="/download" class="btn btn-secondary btn-sm">Download</a></div>
+          </section>
+
+          <section class="box danger" aria-labelledby="del-h">
+            <div class="box-h"><h2 id="del-h">Your data</h2></div>
+            <p class="muted">
+              Download everything Heed stores about you, or delete your account. Deleting disconnects every app and permanently
+              deletes your synced data.
+            </p>
+            <div class="row">
+              <button type="button" class="btn btn-secondary btn-sm" data-export>Download my data</button>
+              <button type="button" class="btn btn-sm danger-btn" data-delete-open>Delete account…</button>
+            </div>
+          </section>
         </div>
-      </form>
-    </dialog>
-  </section>
+
+        <dialog class="dlg" data-delete-dialog aria-labelledby="dlg-h">
+          <form data-delete method="dialog">
+            <h2 id="dlg-h">Delete your Heed account?</h2>
+            <p class="muted">
+              This disconnects every app and permanently deletes your account and all synced data. It can't be undone. If you
+              have a plan, cancel it in Manage billing first so you aren't charged again.
+            </p>
+            <p><button type="button" class="linkish" data-export>Download your data first</button></p>
+            <label class="field">
+              <span>Type <strong>delete</strong> to confirm</span>
+              <input class="input" name="confirm" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="row end">
+              <button type="button" class="btn btn-ghost btn-sm" data-delete-cancel>Cancel</button>
+              <button type="submit" class="btn btn-sm danger-fill" data-delete-confirm disabled>Delete account</button>
+            </div>
+          </form>
+        </dialog>
+      </section>
+    ) : (
+      <CloudClosed />
+    )
+  }
 </Base>
 
 <script>
@@ -138,6 +146,7 @@ const facts = JSON.stringify(
   };
 
   (async () => {
+    if (!document.querySelector("[data-account]")) return; // Heed Cloud isn't configured for this build
     const sb = supabase();
     if (!sb) {
       say("Accounts aren't configured for this build.", true);
