@@ -1,0 +1,105 @@
+---
+import { config } from "../lib/config";
+interface Props {
+  mode: "signin" | "signup";
+}
+const { mode } = Astro.props;
+const configured = Boolean(config.supabaseUrl && config.supabaseAnonKey);
+---
+<div class="auth" data-auth={mode}>
+  {
+    !configured && (
+      <p class="status err" role="alert">
+        Sign-in isn't configured for this build. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.
+      </p>
+    )
+  }
+  <button type="button" class="btn btn-secondary btn-lg w-full" data-google disabled={!configured}>
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.6v3h3.9c2.3-2.1 3.5-5.2 3.5-8.7z"></path>
+      <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24z"></path>
+      <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z"></path>
+      <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A12 12 0 0 0 1.3 6.6l4 3.1c.9-2.9 3.6-4.9 6.7-4.9z"></path>
+    </svg>
+    Continue with Google
+  </button>
+  <p class="or">or</p>
+  <form data-magic novalidate>
+    <label class="field">
+      Work email
+      <input class="input" type="email" name="email" autocomplete="email" required placeholder="you@company.com" />
+    </label>
+    <button type="submit" class="btn btn-primary btn-lg w-full" disabled={!configured}>Email me a sign-in link</button>
+  </form>
+  <p class="status" role="status" aria-live="polite" hidden data-msg></p>
+</div>
+
+<script>
+  import { supabase, safeNext } from "../lib/supabase";
+
+  const root = document.querySelector<HTMLElement>("[data-auth]");
+  const sb = supabase();
+  if (root && sb) {
+    const mode = root.dataset["auth"];
+    const msg = root.querySelector<HTMLElement>("[data-msg]")!;
+    const params = new URLSearchParams(location.search);
+    const next = safeNext(params.get("next"), mode === "signup" ? "/pricing" : "/account");
+    const redirectTo = `${location.origin}${next}`;
+    const say = (text: string, err = false) => {
+      msg.textContent = text;
+      msg.classList.toggle("err", err);
+      msg.hidden = false;
+    };
+
+    // Already signed in: go straight on.
+    sb.auth.getSession().then(({ data }) => {
+      if (data.session) location.replace(next);
+    });
+
+    root.querySelector("[data-google]")?.addEventListener("click", async () => {
+      const { error } = await sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo } });
+      if (error) say(error.message, true);
+    });
+
+    const form = root.querySelector<HTMLFormElement>("[data-magic]")!;
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = form.elements.namedItem("email") as HTMLInputElement;
+      const email = input.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        say("Enter a valid email address.", true);
+        input.focus();
+        return;
+      }
+      const button = form.querySelector("button")!;
+      button.disabled = true;
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: redirectTo, shouldCreateUser: mode === "signup" },
+      });
+      button.disabled = false;
+      if (error) {
+        say(
+          /signups? not allowed|not found/i.test(error.message)
+            ? "There's no Heed account for that email. Start a free trial instead."
+            : error.message,
+          true,
+        );
+        return;
+      }
+      say(`Check ${email} for a sign-in link. It works once and expires in an hour.`);
+      form.reset();
+    });
+  }
+</script>
+
+<style>
+  .auth {
+    display: grid;
+    gap: 14px;
+  }
+  form {
+    display: grid;
+    gap: 12px;
+  }
+</style>

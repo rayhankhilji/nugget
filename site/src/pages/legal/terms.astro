@@ -1,0 +1,146 @@
+---
+import Base from "../../layouts/Base.astro";
+import { privacyEmail, supportEmail } from "../../lib/config";
+const updated = "2 November 2026";
+---
+<Base title="Terms of service" description="The terms that apply when you use Heed, including trials, subscriptions, fair use and your responsibilities.">
+  <section class="wrap legal">
+    <p class="draft" role="note"><strong>Draft — needs legal review.</strong> This document has not been reviewed by a lawyer and is not yet in force. Items in square brackets are placeholders that still need to be confirmed.</p>
+    <h1>Terms of service</h1>
+    <p class="muted">Last updated {updated}</p>
+    <nav aria-label="Contents" class="toc">
+      <ol>
+        <li><a href="#agreement">Agreement</a></li>
+        <li><a href="#the-service">The service</a></li>
+        <li><a href="#accounts">Your account</a></li>
+        <li><a href="#billing">Trial, subscriptions and billing</a></li>
+        <li><a href="#fair-use">Fair use and device limits</a></li>
+        <li><a href="#acceptable-use">Acceptable use</a></li>
+        <li><a href="#your-content">Your content</a></li>
+        <li><a href="#connected-apps">Connected apps</a></li>
+        <li><a href="#ai-output">AI output</a></li>
+        <li><a href="#actions">Actions and approvals</a></li>
+        <li><a href="#availability">Availability</a></li>
+        <li><a href="#termination">Suspension and termination</a></li>
+        <li><a href="#liability">Liability</a></li>
+        <li><a href="#governing-law">Governing law</a></li>
+        <li><a href="#changes">Changes to these terms</a></li>
+        <li><a href="#contact">Contact us</a></li>
+      </ol>
+    </nav>
+    <div class="prose">
+      <h2 id="agreement">1. Agreement</h2>
+      <p>These terms are an agreement between you and [Heed Ltd, company number TBC, registered address TBC] ("Heed", "we", "us"). By creating an account or using Heed, you agree to them. If you do not agree, please do not use Heed.</p>
+      <p>Our <a href="/legal/privacy">privacy policy</a> explains how we handle your personal data and forms part of how we provide the service.</p>
+
+      <h2 id="the-service">2. The service</h2>
+      <p>Heed is a desktop AI assistant, available for macOS now, with Windows and Linux coming soon. It syncs content from apps you connect, such as Gmail and Google Calendar, so it can answer your questions, draft replies, surface what needs your attention and, with your approval, take actions for you. On Heed Max, agent tasks and computer use can act on your computer when you instruct them to.</p>
+      <p>Heed uses cloud AI providers to do this work, as described in our <a href="/legal/privacy#ai-processing">privacy policy</a>. We may improve, change or remove features over time. If a change materially reduces what you are paying for, we will tell you in advance.</p>
+
+      <h2 id="accounts">3. Your account</h2>
+      <ul>
+        <li>You must be at least 18 to use Heed.</li>
+        <li>You sign in with an email magic link or with Google. Keep access to your email account and your devices secure, because anyone with access to them may be able to access Heed.</li>
+        <li>The information you give us must be accurate. One account is for one person.</li>
+        <li>You are responsible for activity on your account. Tell us straight away at <a href={`mailto:${supportEmail}`}>{supportEmail}</a> if you think someone else has accessed it.</li>
+      </ul>
+
+      <h2 id="billing">4. Trial, subscriptions and billing</h2>
+      <h3>Plans and prices</h3>
+      <table>
+        <thead>
+          <tr><th scope="col">Plan</th><th scope="col">Monthly</th><th scope="col">Annual</th><th scope="col">Devices</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Heed</td><td>£39</td><td>£390</td><td>1</td></tr>
+          <tr><td>Heed Max</td><td>£99</td><td>£990</td><td>3</td></tr>
+        </tbody>
+      </table>
+      <p>Prices include VAT. There is no free plan. If we change our prices, we will give you notice before the new price applies to your next billing period, and you can cancel before it does.</p>
+      <h3>Free trial</h3>
+      <p>New subscribers get a 14-day free trial. A card is required to start it, and each person can have one trial. Unless you cancel before the trial ends, your subscription starts and your card is charged for your chosen plan and billing period.</p>
+      <h3>Billing</h3>
+      <p>Payments are processed by Stripe. Subscriptions renew automatically at the end of each monthly or annual period until you cancel. If a payment fails, we may pause or end your access until it is resolved.</p>
+      <h3>Cancelling</h3>
+      <p>You can cancel at any time in the Stripe customer portal, which you can open from "Manage billing" on your account page. When you cancel, you keep access until the end of the period you have already paid for, and you will not be charged again.</p>
+      <h3>Refunds and your statutory rights</h3>
+      <p>If you are a consumer in the UK, you normally have a legal right to cancel a contract for digital services within 14 days of entering into it. How this right interacts with the 14-day free trial, and whether any amount is payable if you cancel after the trial has ended but within the cancellation period, is [to be confirmed]. Nothing in these terms affects your statutory rights as a consumer.</p>
+      <p>Apart from those rights, payments are not refundable for partly used periods, but if something has gone wrong, contact <a href={`mailto:${supportEmail}`}>{supportEmail}</a> and we will look at it fairly.</p>
+
+      <h2 id="fair-use">5. Fair use and device limits</h2>
+      <p>Each plan includes generous AI usage, subject to fair-use limits that keep Heed sustainable for everyone:</p>
+      <ul>
+        <li>Past a monthly usage budget, answers switch to a faster model for the rest of the month.</li>
+        <li>Past a hard monthly cap, AI requests pause until the next month begins.</li>
+      </ul>
+      <p>Heed can be used on 1 device on the Heed plan and 3 devices on Heed Max. We count devices that have used your account in the last 30 days.</p>
+      <p>The specific usage thresholds are [to be confirmed]. We may adjust them, and will tell you if we reduce them significantly.</p>
+
+      <h2 id="acceptable-use">6. Acceptable use</h2>
+      <p>You must not use Heed to:</p>
+      <ul>
+        <li>break the law, or infringe anyone else's rights, including privacy and intellectual property rights;</li>
+        <li>send spam, harass people, or send deceptive, abusive or harmful content;</li>
+        <li>connect accounts or access data that you do not have permission to use;</li>
+        <li>try to get around plan limits, fair-use limits, device limits or the one-trial rule;</li>
+        <li>probe, disrupt, overload or gain unauthorised access to Heed or the systems it relies on;</li>
+        <li>reverse engineer the service, except where the law allows it; or</li>
+        <li>breach the usage policies of our AI providers or of the apps you connect.</li>
+      </ul>
+
+      <h2 id="your-content">7. Your content</h2>
+      <p>Your content stays yours. "Your content" means the items synced from your connected apps and everything you give Heed, such as questions, instructions and drafts.</p>
+      <p>You give us a limited licence to store, copy and process your content, including sending it to our AI providers, only as needed to provide Heed to you and keep it secure. This licence ends when you delete the content or your account, subject to the backup period described in our <a href="/legal/privacy#retention">privacy policy</a>.</p>
+      <p>We do not sell your content and we do not use it to train AI models. You can export your data at any time.</p>
+      <p>You confirm that you have the right to connect the accounts you connect and to let Heed process their content.</p>
+
+      <h2 id="connected-apps">8. Connected apps</h2>
+      <p>Heed connects to apps such as Gmail and Google Calendar through our integration provider, Composio. Those apps are run by other companies, and their own terms and policies apply to your use of them. We are not responsible for third-party apps, for changes they make to their services, or for them becoming unavailable to Heed.</p>
+      <p>You can disconnect an app at any time, which deletes the items Heed synced from it.</p>
+
+      <h2 id="ai-output">9. AI output</h2>
+      <p>Heed's answers, summaries, drafts and suggestions are generated by AI. They can be incomplete, out of date or simply wrong, even when they sound confident. Check anything important before you rely on it, and do not treat Heed as a substitute for professional advice, for example legal, financial or medical advice.</p>
+
+      <h2 id="actions">10. Actions and approvals</h2>
+      <p>Heed only takes actions in your connected apps, such as sending an email or creating a calendar event, after you approve them in the app. Agent tasks and computer use on Heed Max act on your computer on your instruction. We keep an audit log of approved actions.</p>
+      <p>Review each action before approving it. Once you approve an action or give an instruction, you are responsible for it and its consequences in the same way as if you had done it yourself. Some actions, like a sent email, cannot be undone.</p>
+
+      <h2 id="availability">11. Availability</h2>
+      <p>We work to keep Heed running reliably, but we cannot promise it will always be available or free of errors. It depends on services we do not control, including our hosting, AI and integration providers and the apps you connect. We may need to take Heed offline for maintenance, and will try to give notice where we can.</p>
+
+      <h2 id="termination">12. Suspension and termination</h2>
+      <p>You can stop using Heed and delete your account at any time from the account page or in the app. If you have a paid subscription, cancel it first so you are not charged again.</p>
+      <p>We may suspend or end your access if you seriously or repeatedly break these terms, if you do not pay, if we need to in order to comply with the law, or to protect other users or Heed. Where reasonable, we will tell you first and give you a chance to fix the problem. If we end the service for reasons other than your breach, we will refund any amount you have paid for the time remaining.</p>
+      <p>Sections that by their nature should continue after these terms end, such as liability and governing law, will continue.</p>
+
+      <h2 id="liability">13. Liability</h2>
+      <p>Nothing in these terms limits or excludes our liability for death or personal injury caused by our negligence, for fraud or fraudulent misrepresentation, or for anything else that cannot be limited or excluded under the laws of England and Wales, including your rights as a consumer.</p>
+      <p>Subject to that:</p>
+      <ul>
+        <li>If you are a consumer, we are responsible for loss or damage you suffer that is a foreseeable result of our breach of these terms or our failure to use reasonable care and skill. We are not responsible for loss that was not foreseeable. Heed is for personal and professional productivity use, and we are not liable to consumers for business losses such as lost profit or lost business opportunity.</li>
+        <li>If you use Heed for business, we are not liable for indirect or consequential loss, or for loss of profits, revenue, business or data, and our total liability to you in any 12-month period is limited to the amount you paid us for Heed in that period [cap to be confirmed].</li>
+        <li>We are not responsible for the content of AI output that you rely on without checking, or for actions you approved or instructed.</li>
+      </ul>
+
+      <h2 id="governing-law">14. Governing law</h2>
+      <p>These terms are governed by the law of England and Wales, and the courts of England and Wales have jurisdiction. If you are a consumer living in Scotland or Northern Ireland, you can also bring proceedings in your local courts, and you keep the protection of any mandatory consumer law where you live.</p>
+
+      <h2 id="changes">15. Changes to these terms</h2>
+      <p>We may update these terms, for example to reflect changes to Heed or the law. We will change the date at the top, and if a change is significant we will tell you by email or in the app before it takes effect. If you do not agree to the change, you can cancel before it applies.</p>
+
+      <h2 id="contact">16. Contact us</h2>
+      <p>Questions about these terms or your account: <a href={`mailto:${supportEmail}`}>{supportEmail}</a>.</p>
+      <p>Questions about your data: <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>.</p>
+      <p>By post: [Heed Ltd, company number TBC, registered address TBC].</p>
+    </div>
+  </section>
+</Base>
+<style>
+  .legal { padding-block: 56px 96px; }
+  .draft { max-width: 720px; margin-bottom: 32px; padding: 14px 16px; border-radius: 10px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); font-size: 15px; }
+  h1 { font-size: clamp(32px, 5vw, 48px); margin-bottom: 8px; }
+  .toc { max-width: 720px; margin: 32px 0 40px; padding: 16px 20px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-1); font-size: 14px; }
+  .toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  .toc a { display: inline-block; padding: 4px 0; color: var(--text-2); text-decoration: none; } .toc a:hover { color: var(--text); }
+  @media (max-width: 600px) { .toc ol { columns: 1; } }
+</style>

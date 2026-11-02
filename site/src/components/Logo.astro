@@ -1,0 +1,48 @@
+---
+/** Placeholder mark until DS1's final assets land: the attention dot plus the "heed" wordmark. */
+interface Props {
+  size?: number;
+  pulse?: boolean;
+}
+const { size = 22, pulse = true } = Astro.props;
+---
+<span class="logo" style={`--s:${size}px`}>
+  <span class:list={["mark", { pulse }]} aria-hidden="true"><i></i></span>
+  <span class="word">heed</span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--s) * 0.36);
+    font-size: var(--s);
+    font-weight: 650;
+    letter-spacing: -0.045em;
+    line-height: 1;
+    color: var(--text);
+  }
+  .mark {
+    position: relative;
+    width: calc(var(--s) * 0.5);
+    height: calc(var(--s) * 0.5);
+    margin-top: calc(var(--s) * 0.06);
+  }
+  .mark i,
+  .mark::after {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .mark i {
+    display: block;
+  }
+  .mark.pulse::after {
+    content: "";
+    animation: heed-pulse 2.6s var(--ease) infinite;
+  }
+  .word {
+    transform: translateY(-0.04em);
+  }
+</style>

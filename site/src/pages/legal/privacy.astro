@@ -1,0 +1,163 @@
+---
+import Base from "../../layouts/Base.astro";
+import { privacyEmail, supportEmail } from "../../lib/config";
+const updated = "2 November 2026";
+---
+<Base title="Privacy policy" description="How Heed collects, uses, stores and protects your personal data, and the rights you have over it.">
+  <section class="wrap legal">
+    <p class="draft" role="note"><strong>Draft — needs legal review.</strong> This document has not been reviewed by a lawyer and is not yet in force. Items in square brackets are placeholders that still need to be confirmed.</p>
+    <h1>Privacy policy</h1>
+    <p class="muted">Last updated {updated}</p>
+    <nav aria-label="Contents" class="toc">
+      <ol>
+        <li><a href="#who-we-are">Who we are</a></li>
+        <li><a href="#what-we-collect">What we collect</a></li>
+        <li><a href="#how-we-use-it">How we use it</a></li>
+        <li><a href="#ai-processing">AI processing</a></li>
+        <li><a href="#sharing">Sharing and processors</a></li>
+        <li><a href="#international-transfers">International transfers</a></li>
+        <li><a href="#retention">How long we keep data</a></li>
+        <li><a href="#security">Security</a></li>
+        <li><a href="#your-rights">Your rights</a></li>
+        <li><a href="#cookies">Cookies and local storage</a></li>
+        <li><a href="#children">Children</a></li>
+        <li><a href="#changes">Changes to this policy</a></li>
+        <li><a href="#contact">Contact us</a></li>
+      </ol>
+    </nav>
+    <div class="prose">
+      <p>Heed is a desktop AI assistant. To be useful, it needs to read things like your email and calendar. That is a lot of trust, so this policy sets out plainly what we collect, what we do with it, who else touches it, and how you stay in control.</p>
+
+      <h2 id="who-we-are">1. Who we are</h2>
+      <p>Heed is operated by [Heed Ltd, company number TBC, registered address TBC] ("Heed", "we", "us"). We are the controller of the personal data described in this policy. We are based in the United Kingdom, and the UK General Data Protection Regulation (UK GDPR) and the Data Protection Act 2018 apply to how we handle your data.</p>
+      <p>If you have any questions about this policy or your data, email <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>.</p>
+
+      <h2 id="what-we-collect">2. What we collect</h2>
+      <h3>Account information</h3>
+      <p>Your email address, and if you sign in with Google, your name and profile picture as provided by Google. We use these to create and identify your account.</p>
+      <h3>Content from apps you connect</h3>
+      <p>When you connect an app such as Gmail, Google Calendar or another supported service, Heed syncs content from it into your account: for example emails, calendar events, documents and chat messages, along with their metadata (senders, recipients, dates, titles). We only sync from apps you choose to connect, and you can disconnect them at any time.</p>
+      <p>We never see your Google password. The access tokens that let Heed read from your connected apps are held by our integration provider, Composio, not by us (see <a href="#sharing">section 5</a>).</p>
+      <h3>What you give Heed directly</h3>
+      <p>The questions you ask, instructions you give, drafts you edit, tasks you set up and actions you approve or decline.</p>
+      <h3>Billing information</h3>
+      <p>Your plan, subscription status and billing history. Payments are handled by Stripe. We never receive or store your full card number.</p>
+      <h3>Device and usage information</h3>
+      <p>Basic information about the devices where you use Heed (so we can apply the device limit for your plan), app version, and usage metrics such as how many AI requests you have made in a month. These metrics describe how the service is used; they do not contain the content of your mail, documents or questions.</p>
+      <h3>Audit log</h3>
+      <p>A record of actions Heed has taken on your behalf after you approved them, such as sending an email or creating a calendar event.</p>
+      <h3>Support correspondence</h3>
+      <p>If you contact us, we keep the messages you send and our replies.</p>
+
+      <h2 id="how-we-use-it">3. How we use it, and our lawful bases</h2>
+      <p>Under UK GDPR we must have a lawful basis for each use of your data. Here is what we do and why.</p>
+      <table>
+        <thead>
+          <tr><th scope="col">What we do</th><th scope="col">Lawful basis</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Create and run your account, sync your connected apps, answer your questions, write drafts, surface what needs your attention, and carry out actions you approve</td><td>Contract: this is the service you signed up for</td></tr>
+          <tr><td>Take payment, manage your trial and subscription, and apply plan limits</td><td>Contract</td></tr>
+          <tr><td>Keep tax and accounting records</td><td>Legal obligation</td></tr>
+          <tr><td>Keep the service secure, detect and prevent fraud and abuse, and enforce fair-use limits</td><td>Legitimate interests: protecting you, other users and Heed</td></tr>
+          <tr><td>Improve the product using usage metrics that do not include the content of your items or questions</td><td>Legitimate interests: making Heed better</td></tr>
+          <tr><td>Anything we specifically ask your permission for, such as optional emails about new features</td><td>Consent, which you can withdraw at any time</td></tr>
+        </tbody>
+      </table>
+      <p>We do not sell your data. We do not use your content to train AI models, and we do not use it for advertising.</p>
+
+      <h2 id="ai-processing">4. AI processing</h2>
+      <p>Heed's AI runs in the cloud, not on your device. Each time Heed answers a question, writes a draft or extracts information (such as tasks or dates) from your items, we send the text of the relevant items, along with your question or instruction, to an AI provider to generate the result.</p>
+      <ul>
+        <li><strong>Anthropic</strong> is our default AI provider.</li>
+        <li><strong>OpenAI</strong> is used as a fallback if Anthropic is unavailable. OpenAI may also be used to create embeddings: numerical representations of your items that let Heed search them by meaning.</li>
+      </ul>
+      <p>Both providers' API terms state that they do not train their models on data sent through their APIs by default. Both keep API data for a limited period to monitor for abuse, after which it is deleted under their own policies.</p>
+      <p>AI output can be wrong. Heed never sends an email, creates an event or takes any other action in your connected apps without you first approving it in the app.</p>
+      <p>On Heed Max, agent tasks and computer use act on your own computer when you instruct them to. What they do is driven by your instructions, and the same AI processing described above applies to the information they work with.</p>
+
+      <h2 id="sharing">5. Sharing and processors</h2>
+      <p>We use a small number of service providers ("processors") to run Heed. They process your data only on our instructions and under contracts that require them to protect it.</p>
+      <table>
+        <thead>
+          <tr><th scope="col">Processor</th><th scope="col">Purpose</th><th scope="col">Location</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Supabase</td><td>Sign-in (email magic link and Google sign-in) and our database, where your account and synced items are stored</td><td>London, UK (eu-west-2)</td></tr>
+          <tr><td>Fly.io</td><td>Hosting for the Heed API service</td><td>London, UK (lhr)</td></tr>
+          <tr><td>Composio</td><td>Connecting your apps (Gmail, Google Calendar and others) and holding the access tokens for them</td><td>United States [to be confirmed]</td></tr>
+          <tr><td>Anthropic</td><td>Default AI provider for answers, drafts and extraction</td><td>United States [to be confirmed]</td></tr>
+          <tr><td>OpenAI</td><td>Fallback AI provider and embeddings for search</td><td>United States [to be confirmed]</td></tr>
+          <tr><td>Stripe</td><td>Payments, subscriptions and the billing portal</td><td>United States and elsewhere [to be confirmed]</td></tr>
+        </tbody>
+      </table>
+      <p>Apart from these processors, we only share personal data if the law requires it (for example, a valid court order), to protect the rights, safety or property of our users or others, or as part of a sale or reorganisation of our business, in which case we would tell you beforehand.</p>
+      <p>When you approve an action, such as sending an email, the content goes to the recipient through your connected app, as you would expect.</p>
+
+      <h2 id="international-transfers">6. International transfers</h2>
+      <p>Your account and synced items are stored in London. However, Anthropic, OpenAI, Composio and Stripe may process data in the United States. When personal data leaves the UK, we rely on appropriate safeguards, such as the UK International Data Transfer Agreement, the UK Addendum to the EU Standard Contractual Clauses, or the UK–US data bridge where the recipient is certified under it [to be confirmed for each provider]. You can ask us for details of these safeguards.</p>
+
+      <h2 id="retention">7. How long we keep data</h2>
+      <ul>
+        <li><strong>Synced items</strong> are kept until you disconnect the app they came from, which deletes that app's items from your account, or until you delete your account.</li>
+        <li><strong>Your account</strong> is kept until you delete it. You can do this from the account page on our website or in the app. Deleting your account first revokes all your app connections at Composio, then deletes your account, which removes all of your data from our database.</li>
+        <li><strong>Backups</strong> made by our database provider may still contain your data for a limited period after deletion: [backup retention period TBC]. Backups are not used for anything other than disaster recovery.</li>
+        <li><strong>Billing and tax records</strong> are kept for as long as the law requires, [retention period TBC, typically six years in the UK].</li>
+        <li><strong>AI providers</strong> keep API data for a limited period for abuse monitoring, as described in <a href="#ai-processing">section 4</a>.</li>
+      </ul>
+
+      <h2 id="security">8. Security</h2>
+      <ul>
+        <li>All data travels over encrypted connections (TLS).</li>
+        <li>Data at rest in our database is encrypted by our provider using AES-256 encrypted disks.</li>
+        <li>Each user's data is isolated with row-level security in the database, so one account cannot read another's rows.</li>
+        <li>The access tokens for your connected apps are held and encrypted by Composio; Heed never sees them.</li>
+        <li>The desktop app stores your sign-in token in your operating system's keychain.</li>
+        <li>Actions in your connected apps only run after you approve them, and each one is recorded in an audit log.</li>
+      </ul>
+      <p>To be clear about the limits: your synced items are encrypted at rest and in transit, but they are not end-to-end encrypted, and we do not encrypt them with a separate key per user. Our systems need to read them to provide the service. No system is perfectly secure, but we work to protect your data and will tell you and the ICO if a breach puts it at risk, as the law requires.</p>
+
+      <h2 id="your-rights">9. Your rights</h2>
+      <p>Under UK data protection law you have the right to:</p>
+      <ul>
+        <li><strong>Access</strong> the personal data we hold about you.</li>
+        <li><strong>Correct</strong> data that is inaccurate or incomplete.</li>
+        <li><strong>Delete</strong> your data. You can delete your account yourself at any time.</li>
+        <li><strong>Restrict</strong> how we use your data in certain circumstances.</li>
+        <li><strong>Object</strong> to processing based on our legitimate interests.</li>
+        <li><strong>Data portability</strong>: receive your data in a machine-readable format. You can export your data from Heed.</li>
+        <li><strong>Withdraw consent</strong> where we rely on it, without affecting anything done before.</li>
+      </ul>
+      <p>To exercise any of these rights, email <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>. We will respond within one month, and we may need to confirm your identity first.</p>
+      <p>You also have the right to complain to the Information Commissioner's Office (ICO), the UK's data protection regulator, at <a href="https://ico.org.uk/make-a-complaint/">ico.org.uk/make-a-complaint</a> or on 0303 123 1113. We would appreciate the chance to put things right first, so please contact us before going to the ICO if you can.</p>
+
+      <h2 id="cookies">10. Cookies and local storage</h2>
+      <p>Our website does not use advertising or analytics cookies. It uses your browser's local storage for two things only:</p>
+      <ul>
+        <li>keeping you signed in, and</li>
+        <li>remembering your light or dark theme preference.</li>
+      </ul>
+      <p>Both are needed for features you use, and neither tracks you. You can clear them at any time in your browser settings; you will then be signed out and the theme will reset. Payment and billing pages hosted by Stripe are covered by Stripe's own privacy and cookie policies.</p>
+
+      <h2 id="children">11. Children</h2>
+      <p>Heed is not for anyone under 18. We do not knowingly collect data from children. If you believe a child has created an account, email <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a> and we will delete it.</p>
+
+      <h2 id="changes">12. Changes to this policy</h2>
+      <p>We may update this policy as Heed changes, for example if we add a new processor. We will change the date at the top, and if a change is significant we will tell you by email or in the app before it takes effect.</p>
+
+      <h2 id="contact">13. Contact us</h2>
+      <p>For privacy questions or to exercise your rights: <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>.</p>
+      <p>For anything else: <a href={`mailto:${supportEmail}`}>{supportEmail}</a>.</p>
+      <p>By post: [Heed Ltd, company number TBC, registered address TBC].</p>
+    </div>
+  </section>
+</Base>
+<style>
+  .legal { padding-block: 56px 96px; }
+  .draft { max-width: 720px; margin-bottom: 32px; padding: 14px 16px; border-radius: 10px; background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); font-size: 15px; }
+  h1 { font-size: clamp(32px, 5vw, 48px); margin-bottom: 8px; }
+  .toc { max-width: 720px; margin: 32px 0 40px; padding: 16px 20px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-1); font-size: 14px; }
+  .toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  .toc a { display: inline-block; padding: 4px 0; color: var(--text-2); text-decoration: none; } .toc a:hover { color: var(--text); }
+  @media (max-width: 600px) { .toc ol { columns: 1; } }
+</style>
