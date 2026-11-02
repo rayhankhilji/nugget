@@ -54,6 +54,7 @@ async fn harness(embeddings: bool) -> Option<Harness> {
     state.stripe = Some(stripe.clone() as Arc<dyn crate::stripe::Stripe>);
     state.stripe_webhook_secret = Some("whsec_stripe".into());
     state.public_url = Some("https://api.test".into());
+    state.site_origins = vec!["https://heed.test".into()];
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),
         json!({"messages": [

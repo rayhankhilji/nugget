@@ -51,6 +51,9 @@ pub trait Stripe: Send + Sync {
     /// Returns the customer-portal URL.
     async fn portal(&self, customer: &str, return_url: &str) -> Result<String, StripeError>;
     async fn subscription(&self, id: &str) -> Result<Subscription, StripeError>;
+    /// Deletes the customer, which cancels their subscriptions at once. Invoices stay in Stripe
+    /// (kept there for HMRC's six years); a missing customer counts as deleted.
+    async fn delete_customer(&self, id: &str) -> Result<(), StripeError>;
 }
 
 fn ts(v: &Value) -> Option<OffsetDateTime> {
@@ -199,6 +202,23 @@ impl Stripe for HttpStripe {
             .await?;
         parse_subscription(&v)
             .ok_or_else(|| StripeError::Http("unexpected subscription shape".into()))
+    }
+
+    async fn delete_customer(&self, id: &str) -> Result<(), StripeError> {
+        if !id.starts_with("cus_") || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(StripeError::Http("bad customer id".into()));
+        }
+        let res = self
+            .http
+            .delete(format!("{}/v1/customers/{id}", self.base))
+            .bearer_auth(&self.key)
+            .send()
+            .await
+            .map_err(|e| StripeError::Http(e.to_string()))?;
+        match res.status().as_u16() {
+            200..=299 | 404 => Ok(()),
+            s => Err(StripeError::Http(format!("delete customer: status {s}"))),
+        }
     }
 }
 

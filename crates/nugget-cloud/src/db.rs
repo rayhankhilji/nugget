@@ -823,6 +823,10 @@ impl Db {
                 "select device_id, first_seen_at, last_seen_at from public.devices",
             ),
             (
+                "billing_customers",
+                "select stripe_customer_id, created_at from public.billing_customers",
+            ),
+            (
                 "connections",
                 "select id, toolkit, status, last_synced_at, created_at from public.connections",
             ),

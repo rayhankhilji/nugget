@@ -60,7 +60,24 @@ fn stripe(s: &AppState) -> ApiResult<&Arc<dyn Stripe>> {
         .ok_or_else(|| StripeError::NotConfigured.into())
 }
 
-fn return_url(s: &AppState) -> ApiResult<String> {
+/// Where Stripe sends the browser afterwards: the app hand-off page, or a `requested` URL on
+/// one of the website's origins (`NUGGET_SITE_ORIGINS`). Anything else is refused, so the
+/// endpoint cannot be used as an open redirect.
+pub fn return_url(s: &AppState, requested: Option<&str>) -> ApiResult<String> {
+    if let Some(r) = requested {
+        let ok = url::Url::parse(r).ok().filter(|u| {
+            s.site_origins.contains(&u.origin().ascii_serialization())
+                && u.username().is_empty()
+                && u.password().is_none()
+        });
+        return ok.map(|u| u.to_string()).ok_or_else(|| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "bad_return_url",
+                "return_url must be on the Heed website",
+            )
+        });
+    }
     s.public_url
         .as_ref()
         .map(|u| format!("{u}/billing/done"))
@@ -77,6 +94,12 @@ fn return_url(s: &AppState) -> ApiResult<String> {
 pub(super) struct CheckoutBody {
     plan: String,
     interval: Interval,
+    return_url: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub(super) struct PortalBody {
+    return_url: Option<String>,
 }
 
 pub(super) async fn checkout(
@@ -107,7 +130,7 @@ pub(super) async fn checkout(
         )
     })?;
     let stripe = stripe(&s)?;
-    let url = return_url(&s)?;
+    let url = return_url(&s, b.return_url.as_deref())?;
     let uid = c.user.id.to_string();
     let customer = match s.db.customer(c.user.id).await? {
         Some(cus) => cus,
@@ -134,8 +157,20 @@ pub(super) async fn checkout(
     Ok(Json(json!({"url": checkout_url})))
 }
 
-pub(super) async fn portal(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Value>> {
+pub(super) async fn portal(
+    State(s): State<Arc<AppState>>,
+    h: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Json<Value>> {
+    let b: PortalBody = if body.iter().all(u8::is_ascii_whitespace) {
+        PortalBody::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| {
+            ApiError::new(StatusCode::BAD_REQUEST, "bad_request", "invalid JSON body")
+        })?
+    };
     let c = caller(&s, &h).await?;
+    let back = return_url(&s, b.return_url.as_deref())?;
     let Some(customer) = s.db.customer(c.user.id).await? else {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -143,7 +178,7 @@ pub(super) async fn portal(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiR
             "start a trial first",
         ));
     };
-    let url = stripe(&s)?.portal(&customer, &return_url(&s)?).await?;
+    let url = stripe(&s)?.portal(&customer, &back).await?;
     Ok(Json(json!({"url": url})))
 }
 
@@ -268,6 +303,6 @@ async fn apply_subscription(
         cancel_at_period_end: sub.cancel_at_period_end,
     };
     s.db.upsert_subscription(owner, &row, &sub.price_id).await?;
-    tracing::info!(%owner, plan, status = %sub.status, "subscription stored");
+    tracing::info!(plan, status = %sub.status, "subscription stored");
     Ok(())
 }

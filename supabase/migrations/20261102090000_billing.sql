@@ -93,3 +93,10 @@ language sql stable security definer set search_path = '' as $$
                 where s.user_id = c.user_id and s.status in ('active', 'trialing', 'past_due'))
   order by c.next_sync_at limit max_rows
 $$;
+
+-- Hardening (SEC1): functions are executable by PUBLIC by default; nothing in nugget_private
+-- may be callable by anon or authenticated. The trigger keeps working (EXECUTE is checked at
+-- CREATE TRIGGER), and the RLS helper stays available to the service.
+revoke all on function nugget_private.current_user_id() from public;
+revoke all on function nugget_private.handle_new_user() from public;
+grant execute on function nugget_private.current_user_id() to nugget_service;
