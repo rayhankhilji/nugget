@@ -175,6 +175,10 @@ fn follow_streams(app: &AppHandle) {
     let h = app.clone();
     app.listen(daemon::event::CHAT_DONE, move |e| {
         if let Ok(d) = serde_json::from_str::<ChatDone>(e.payload()) {
+            // Any error, including `doubletap.error.held_back` (the safety checks removed the
+            // whole answer), means "no suggestion": the machine hides quietly, with no
+            // error UI over someone else's field. Sentences the checks release stream in
+            // as deltas and are shown as they arrive.
             apply(
                 &h,
                 Event::Done {
