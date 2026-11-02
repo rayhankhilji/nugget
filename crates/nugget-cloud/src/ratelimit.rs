@@ -26,6 +26,8 @@ pub struct Limits {
     /// `POST /v1/actions` (propose) and `POST /v1/actions/{id}/approve` per minute per user,
     /// together: approvals send mail and messages as the user.
     pub action_per_min: u32,
+    /// `POST /v1/waitlist` per hour per client IP (unauthenticated).
+    pub waitlist_per_hour: u32,
 }
 
 impl Default for Limits {
@@ -36,6 +38,7 @@ impl Default for Limits {
             ask_per_min: 10,
             sync_every_secs: 60,
             action_per_min: 10,
+            waitlist_per_hour: 5,
         }
     }
 }
@@ -49,6 +52,7 @@ impl Limits {
             ask_per_min: 0,
             sync_every_secs: 0,
             action_per_min: 0,
+            waitlist_per_hour: 0,
         }
     }
 }

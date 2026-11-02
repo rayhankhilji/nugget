@@ -21,6 +21,8 @@ mod billing;
 
 mod security;
 
+mod waitlist;
+
 struct Harness {
     app: Router,
     db: crate::db::Db,

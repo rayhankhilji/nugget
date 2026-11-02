@@ -342,6 +342,26 @@ The hard caps bound the worst case. That is £10.45 for Heed (67%) and £24.12 f
 - Composio Pro is $29. It is needed once paying users exist: a heavy Max user alone makes about 23k calls a month, and Hobby stops at 100k.
 - That totals about £44 a month, which **two Heed subscriptions cover**. The founder's £99/month infrastructure ceiling holds until about 40–50 active subscribers. From there, Supabase compute and Composio overage grow with users and are paid by revenue.
 
+## 7. Waitlist
+`POST /v1/waitlist {email, source?}` takes sign-ups from the website while Heed Cloud is not open.
+
+- **No account, no auth.** The route is limited to `NUGGET_SITE_ORIGINS` by CORS, capped at 1 KiB
+  of body, and rate-limited to `NUGGET_RATE_WAITLIST_PER_HOUR` (default 5) per client IP.
+- **Nothing to enumerate.** Every well-formed JSON body gets the same empty `202`, whether the
+  address is new, already listed or invalid. Invalid addresses are not stored. Only malformed JSON
+  gets `400`.
+- **Validation.** Addresses are trimmed and lowercased. Each must be at most 254 characters, with
+  one `@`, a dot in the domain, and no spaces or control characters.
+- **Storage.** Rows go into `public.waitlist (email citext primary key, created_at, source,
+  ip_hash)`. `ip_hash` is a SHA-256 of the IP salted with `NUGGET_WAITLIST_SALT`, a per-deploy
+  secret. Without a salt, no IP is kept.
+- **Privacy.** RLS is on. `anon` and `authenticated` have no access at all, and `nugget_service`
+  may only insert.
+- **Deletion on request.** Support removes an address with
+  `select nugget_private.waitlist_forget('person@example.com')`, as the database owner.
+  `DELETE /v1/me` also removes the entry for the account's own address.
+- **Self-hosted.** The route works there too, but it is harmless: nothing reads the list.
+
 ## Migration plan
 - **M1: cloud Ask over mail and calendar.** This is "sign in, connect Gmail and Google Calendar via Composio, ask a question and get a cited answer from cloud-indexed mail". It includes:
   - The schema and RLS, the auth and cloud clients, Sign-in, the Connections page, Gmail and Calendar sync, and `/v1/ask` with citations, metering and quotas.
