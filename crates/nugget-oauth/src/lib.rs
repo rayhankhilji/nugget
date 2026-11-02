@@ -1,4 +1,4 @@
-//! OAuth 2.0 for Nugget connectors: the authorization-code flow with PKCE (S256) for installed
+//! OAuth 2.0 for Heed connectors: the authorization-code flow with PKCE (S256) for installed
 //! apps (RFC 8252), using a loopback redirect, plus token storage and automatic refresh.
 //!
 //! - [`OAuthClient::authorize`] binds `127.0.0.1` on a random port, builds the authorization URL

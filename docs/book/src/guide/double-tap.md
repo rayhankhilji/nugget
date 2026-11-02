@@ -1,6 +1,6 @@
 # Double Tap: drafting in your voice
 
-Put the cursor in a text field in any app, press the trigger, and Nugget drafts a reply in your own
+Put the cursor in a text field in any app, press the trigger, and Heed drafts a reply in your own
 writing style, grounded in your own data. You see the draft before anything is inserted, and nothing
 is ever sent for you.
 
@@ -9,7 +9,7 @@ is ever sent for you.
 1. **Trigger.** By default a double tap of right Command (macOS) or right Ctrl (Windows, Linux X11).
    On Wayland the default is the chord `Ctrl+Alt+Space` (see [Wayland](#wayland)). You can pick any
    modifier (tap window 100 ms to 2 s, default 350 ms) or any chord.
-2. **Reading the field.** Through the OS accessibility API, Nugget reads the focused field of the
+2. **Reading the field.** Through the OS accessibility API, Heed reads the focused field of the
    frontmost window: its text, role and label, and the conversation around it (chat messages, or an
    email thread with subject and recipients). Search boxes and other non-draftable fields are
    refused.
@@ -17,17 +17,17 @@ is ever sent for you.
    with citations) and your style: length, greetings, sign-offs, formality, and a few short examples
    of messages you wrote.
 4. **The draft streams into an overlay** next to the caret (see [The overlay](#the-overlay)).
-5. **Insertion.** Nugget inserts at the caret and reads the field back to check. If that isn't
+5. **Insertion.** Heed inserts at the caret and reads the field back to check. If that isn't
    possible it pastes, saving and restoring your whole clipboard.
 
 Whether you accepted, edited or cancelled is fed back into your voice profile.
 
 ## Ghost text
 
-Suggestions appear as faint text right at the caret, in any app where Nugget can place the caret
+Suggestions appear as faint text right at the caret, in any app where Heed can place the caret
 (most native and web text fields on macOS, Windows and Linux X11):
 
-- **As you type.** After you pause for about 400 ms, Nugget suggests the rest of your sentence, or
+- **As you type.** After you pause for about 400 ms, Heed suggests the rest of your sentence, or
   the opening of your reply when the field is empty after you clear it. Turn this off with
   **Suggest as you type** on the Double Tap page.
 - **On demand.** The Double Tap trigger shows the whole draft as ghost text at the caret.
@@ -47,7 +47,7 @@ Suggestions follow the same rules as drafts: never in password, PIN, one-time co
 fields, excluded apps or terminals; never while the kill switch is engaged. The same grounding and
 checks apply, so a suggestion can't add a link, number or claim that a draft couldn't. The key tap
 learns only whether a key was Tab, Esc, an arrow or something else, never which key you typed.
-On macOS it needs the Accessibility permission Nugget already asks for. On Wayland, and anywhere
+On macOS it needs the Accessibility permission Heed already asks for. On Wayland, and anywhere
 the caret can't be placed, Double Tap opens the overlay below instead.
 
 ## The overlay
@@ -158,7 +158,7 @@ to a draft). This is an open issue; read drafts before sending.
 Double Tap is tested against real apps on GitHub's macOS, Windows and Linux machines: the major
 browsers loading pages that reproduce web mail and chat composers (a plain text box, a Gmail-like
 compose, and the editors behind most chat and mail sites: ProseMirror/TipTap, Quill, Draft.js,
-Lexical, CKEditor), and each OS's own editors. For each, it checks that Nugget finds the field,
+Lexical, CKEditor), and each OS's own editors. For each, it checks that Heed finds the field,
 reads its text and the conversation around it, refuses password fields, and inserts six kinds of
 text exactly (line breaks, emoji, right-to-left text, accents, 5000 characters), with one undo
 taking the insertion back out. Latest results (2026-10-31):
@@ -167,7 +167,7 @@ taking the insertion back out. Latest results (2026-10-31):
 |---|---|---|
 | **Windows**: Chrome, Edge | Everything, on all eight page types, mail threads included | |
 | **Windows**: Notepad, WordPad | Reading and inserting | Notepad's undo is one level deep; WordPad undoes right-to-left text in two steps |
-| **Windows**: Firefox | | Not detected yet: Firefox reports no focused field to Nugget |
+| **Windows**: Firefox | | Not detected yet: Firefox reports no focused field to Heed |
 | **macOS**: Safari | Everything | Accented letters typed as two characters (e + ´) arrive combined (é): same text, different encoding |
 | **macOS**: Chrome, Edge, Firefox | | Not measured yet (the test machines could not bring them to the front) |
 | **macOS**: TextEdit, Notes | TextEdit's field is found | Inserting not measured yet; Notes not detected |
@@ -176,7 +176,7 @@ taking the insertion back out. Latest results (2026-10-31):
 | **Linux**: gedit | Everything | |
 | **Linux**: LibreOffice Writer | Reading and inserting | Only the paragraphs on screen can be read, so very long text cannot be checked |
 
-In rich editors Nugget inserts by pasting, with your clipboard saved and restored around it,
+In rich editors Heed inserts by pasting, with your clipboard saved and restored around it,
 because every editor handles a paste as one step that undo takes back whole. Every failing cell,
 with the reason, is in the [benchmark results](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md#double-tap-app-matrix-ff3).
 <!-- a11y-matrix:guide:end -->
@@ -185,7 +185,7 @@ with the reason, is in the [benchmark results](https://github.com/rayhankhilji/n
 
 | OS | What to allow |
 |---|---|
-| macOS | Accessibility for the Nugget app (reading fields, inserting, and the kill switch's Escape counter) |
+| macOS | Accessibility for the Heed app (reading fields, inserting, and the kill switch's Escape counter) |
 | Windows | Nothing extra |
 | Linux | Accessibility (AT-SPI) enabled in your desktop. On Wayland, use a chord (see [Wayland](#wayland)) |
 
@@ -196,8 +196,8 @@ registered through the desktop portal:
 
 | Desktop | What you see |
 |---|---|
-| KDE Plasma 6 | Approve the shortcut once. Change it in System Settings → Keyboard → Shortcuts → Nugget |
-| KDE Plasma 5.27 | The shortcut has no key. Assign one to "Nugget: draft a reply" in System Settings → Shortcuts |
+| KDE Plasma 6 | Approve the shortcut once. Change it in System Settings → Keyboard → Shortcuts → Heed |
+| KDE Plasma 5.27 | The shortcut has no key. Assign one to "Heed: draft a reply" in System Settings → Shortcuts |
 | GNOME 48 and later | Approve the shortcut once. Change it in Settings → Keyboard → Keyboard Shortcuts |
 | GNOME before 48, sway, other wlroots desktops | No portal. Bind a key to `nugget-desktop --double-tap` (sway: `bindsym Ctrl+Alt+Space exec nugget-desktop --double-tap`), or use **Try it** on the Double Tap page |
 

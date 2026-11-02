@@ -1,5 +1,5 @@
 //! Supabase Auth over PKCE: the authorize URL (Google; Apple is not in M1), the magic link, the token
-//! exchange and refresh, logout, and the `nugget://auth/callback` deep link.
+//! exchange and refresh, logout, and the `heed://auth/callback` deep link.
 
 use std::collections::BTreeMap;
 
@@ -9,7 +9,10 @@ use serde_json::{Value, json};
 use crate::{CloudConfig, CloudError, Result};
 
 /// Where Supabase sends the browser back (allow-listed in the project's URL configuration).
-pub const REDIRECT_URL: &str = "nugget://auth/callback";
+pub const REDIRECT_URL: &str = "heed://auth/callback";
+/// Schemes the callback may arrive on: `heed`, and `nugget` from before the rename to Heed (a
+/// project still allow-listing `nugget://auth/callback` keeps working).
+pub const CALLBACK_SCHEMES: &[&str] = &["heed", "nugget"];
 
 const MAX_CALLBACK_LEN: usize = 2048;
 const MAX_CODE_LEN: usize = 512;
@@ -232,8 +235,9 @@ impl Callback {
     }
 }
 
-/// Parse and strictly validate `nugget://auth/callback?code=…` or
-/// `nugget://auth/callback?error=…&error_description=…` (Supabase may add `error_code`).
+/// Parse and strictly validate `heed://auth/callback?code=…` or
+/// `heed://auth/callback?error=…&error_description=…` (Supabase may add `error_code`); the
+/// legacy `nugget://` scheme is accepted the same way.
 /// Anything else is refused: other hosts or paths, credentials, ports, fragments, unknown or
 /// repeated parameters, over-long values and control characters.
 pub fn parse_callback(raw: &str) -> Result<Callback> {
@@ -242,7 +246,7 @@ pub fn parse_callback(raw: &str) -> Result<Callback> {
         return Err(bad("too long"));
     }
     let url = reqwest::Url::parse(raw).map_err(|_| bad("not a link"))?;
-    if url.scheme() != "nugget" || url.host_str() != Some("auth") {
+    if !CALLBACK_SCHEMES.contains(&url.scheme()) || url.host_str() != Some("auth") {
         return Err(bad("wrong place"));
     }
     if !url.username().is_empty()
@@ -322,7 +326,7 @@ pub(crate) mod tests {
         let url = authorize_url(&cfg("https://abc.supabase.co"), Provider::Google, "CHAL").unwrap();
         assert_eq!(
             url,
-            "https://abc.supabase.co/auth/v1/authorize?provider=google&redirect_to=nugget%3A%2F%2Fauth%2Fcallback&code_challenge=CHAL&code_challenge_method=s256"
+            "https://abc.supabase.co/auth/v1/authorize?provider=google&redirect_to=heed%3A%2F%2Fauth%2Fcallback&code_challenge=CHAL&code_challenge_method=s256"
         );
         assert!(
             matches!(Provider::parse("apple"), Err(CloudError::Invalid(m)) if m.contains("isn't available yet"))
@@ -334,11 +338,11 @@ pub(crate) mod tests {
     #[test]
     fn callbacks_parse_strictly() {
         assert_eq!(
-            parse_callback("nugget://auth/callback?code=0b5c-9f1e_A.~").unwrap(),
+            parse_callback("heed://auth/callback?code=0b5c-9f1e_A.~").unwrap(),
             Callback::Code("0b5c-9f1e_A.~".into())
         );
         let err = parse_callback(
-            "nugget://auth/callback?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
+            "heed://auth/callback?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired",
         )
         .unwrap();
         assert_eq!(
@@ -346,43 +350,51 @@ pub(crate) mod tests {
             Some("Email link is invalid or has expired")
         );
         assert_eq!(
-            parse_callback("nugget://auth/callback?error=server_error").unwrap(),
+            parse_callback("heed://auth/callback?error=server_error").unwrap(),
             Callback::Error {
                 error: "server_error".into(),
                 description: None
             }
         );
         for bad in [
-            "nugget://auth/callback",
-            "nugget://auth/callback?code=",
-            "nugget://auth/callback?code=a&code=b",
-            "nugget://auth/callback?code=a&error=b",
-            "nugget://auth/callback?code=a&next=/x",
-            "nugget://auth/callback?code=a%0Ab",
-            "nugget://auth/callback?code=a%20b",
-            "nugget://auth/callback?code=a#frag",
-            "nugget://auth/other?code=a",
-            "nugget://auth/callback/x?code=a",
-            "nugget://evil/callback?code=a",
-            "nugget://u:p@auth/callback?code=a",
-            "nugget://auth:1/callback?code=a",
+            "heed://auth/callback",
+            "heed://auth/callback?code=",
+            "heed://auth/callback?code=a&code=b",
+            "heed://auth/callback?code=a&error=b",
+            "heed://auth/callback?code=a&next=/x",
+            "heed://auth/callback?code=a%0Ab",
+            "heed://auth/callback?code=a%20b",
+            "heed://auth/callback?code=a#frag",
+            "heed://auth/other?code=a",
+            "heed://auth/callback/x?code=a",
+            "heed://evil/callback?code=a",
+            "heed://u:p@auth/callback?code=a",
+            "heed://auth:1/callback?code=a",
             "https://auth/callback?code=a",
-            "nugget://auth/callback?error=%0A",
-            "nugget://auth/callback?error=x&error_description=a%07b",
+            "heed://auth/callback?error=%0A",
+            "heed://auth/callback?error=x&error_description=a%07b",
         ] {
             assert!(parse_callback(bad).is_err(), "{bad}");
         }
-        let long = format!(
-            "nugget://auth/callback?code={}",
-            "a".repeat(MAX_CODE_LEN + 1)
-        );
+        let long = format!("heed://auth/callback?code={}", "a".repeat(MAX_CODE_LEN + 1));
         assert!(parse_callback(&long).is_err());
         // The code never shows in debug output.
         let dbg = format!(
             "{:?}",
-            parse_callback("nugget://auth/callback?code=secret").unwrap()
+            parse_callback("heed://auth/callback?code=secret").unwrap()
         );
         assert!(!dbg.contains("secret"), "{dbg}");
+    }
+
+    /// A Supabase project still allow-listing the pre-rename `nugget://auth/callback` works.
+    #[test]
+    fn legacy_nugget_callbacks_are_accepted() {
+        assert_eq!(
+            parse_callback("nugget://auth/callback?code=abc").unwrap(),
+            Callback::Code("abc".into())
+        );
+        assert!(parse_callback("nugget://auth/other?code=abc").is_err());
+        assert!(parse_callback("heedx://auth/callback?code=abc").is_err());
     }
 
     pub(crate) fn token_body(access: &str, refresh: &str, expires_at: i64) -> Value {

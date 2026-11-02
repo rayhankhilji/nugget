@@ -110,7 +110,7 @@ pub async fn doubletap_status(app: AppHandle) -> Result<DoubleTapStatus, CmdErro
     Ok(status(&app).await)
 }
 
-/// macOS: show the Accessibility prompt, and the Input Monitoring one (which also lists Nugget
+/// macOS: show the Accessibility prompt, and the Input Monitoring one (which also lists Heed
 /// under Input Monitoring, so the user finds it there). Linux and Windows have nothing to prompt;
 /// the status carries the hint.
 #[tauri::command]
@@ -157,7 +157,7 @@ pub(crate) fn privacy_pane_url(pane: &str) -> Option<&'static str> {
 }
 
 /// macOS: open System Settings at the Accessibility, Input Monitoring or Full Disk Access list, so a user who
-/// denied the prompt (which macOS shows only once) can turn Nugget on. Returns `false` where
+/// denied the prompt (which macOS shows only once) can turn Heed on. Returns `false` where
 /// there is no such pane (Linux, Windows).
 #[tauri::command]
 pub async fn doubletap_open_privacy_settings(

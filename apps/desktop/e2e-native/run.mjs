@@ -240,7 +240,7 @@ async function main() {
     // The overlay takes the keyboard while a draft is open; if the window system kept it
     // elsewhere, click the overlay's text first (no button there), as a user would, and say so.
     const fg = await os_.foreground();
-    summary.overlay_focused = fg.includes("Nugget Double Tap") || Boolean(await os_.overlayIsForeground?.(fg));
+    summary.overlay_focused = fg.includes("Heed Double Tap") || Boolean(await os_.overlayIsForeground?.(fg));
     if (!summary.overlay_focused) {
       log(`overlay not focused (foreground "${fg}"); clicking it first`);
       await os_.click(winDone.x + winDone.w / 2, winDone.y + 40);

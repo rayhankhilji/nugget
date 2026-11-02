@@ -84,7 +84,7 @@ pub enum ValidationError {
     Disabled(String),
     #[error("element {0} is not editable")]
     NotEditable(String),
-    #[error("element {id} is a {kind:?} field; Nugget never fills password or payment fields")]
+    #[error("element {id} is a {kind:?} field; Heed never fills password or payment fields")]
     SensitiveField { id: String, kind: Sensitive },
     #[error("element {id} has no option {value:?}")]
     BadOption { id: String, value: String },

@@ -864,7 +864,7 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
         StopOutcome::StillRunning => return Err("it didn't stop".into()),
     }
     if is_exiting(app) {
-        return Err("Nugget is quitting".into());
+        return Err("Heed is quitting".into());
     }
     let started = app
         .state::<Daemon>()
@@ -875,19 +875,19 @@ async fn restart_owned(app: &AppHandle) -> Result<(), String> {
     // Quitting began meanwhile: don't leave a daemon behind that the quit didn't see.
     if is_exiting(app) {
         stop_owned_locked(app, "app_quit").await;
-        return Err("Nugget is quitting".into());
+        return Err("Heed is quitting".into());
     }
     started
 }
 
 /// Stop the service's daemon cleanly, then have the service manager start it again (the
 /// updated binary). If the service can't be restarted, the bundled daemon is started instead,
-/// so Nugget keeps working.
+/// so Heed keeps working.
 async fn restart_service(app: &AppHandle) -> Result<(), String> {
     let lc = app.state::<Lifecycle>();
     let _op = lc.op.lock().await;
     if is_exiting(app) {
-        return Err("Nugget is quitting".into());
+        return Err("Heed is quitting".into());
     }
     let daemon = app.state::<Daemon>();
     let _ = tokio::time::timeout(
@@ -970,7 +970,7 @@ pub fn quit_ack(app: AppHandle, window: tauri::Window) -> Result<bool, CmdError>
     Ok(asking)
 }
 
-/// The quit question was dismissed: Nugget stays open.
+/// The quit question was dismissed: Heed stays open.
 #[tauri::command]
 pub fn quit_cancel(app: AppHandle, window: tauri::Window) -> Result<(), CmdError> {
     main_only(&window)?;

@@ -18,14 +18,14 @@
 3. For more detail, start with `NUGGET_LOG=debug nuggetd` (or `nugget-desktop`); it takes `tracing`
    filters such as `NUGGET_LOG=info,nugget_ingest=debug`.
 
-## The app says "Start Nugget" or "Not running"
+## The app says "Start Heed" or "Not running"
 
 - The app looks for `nuggetd` next to its own binary, then on your `PATH`.
 - If `nuggetd` exits at once, run it in a terminal; a config error names the file and key.
 - `nuggetd is already running`: another daemon holds this data directory.
 - "exited before it was ready" or "did not answer": see the end of `nuggetd.<date>.log`.
 
-## Nugget is still running after I quit
+## Heed is still running after I quit
 
 Quitting follows your answer to "also stop background indexing and the local AI?" (change it under
 **Status → Updates → Desktop app**). A login service or a `nuggetd` you started yourself is never
@@ -36,10 +36,10 @@ stopped by the app. Stop it with `systemctl --user stop nuggetd` (Linux),
 ## The Status page says the background service is another version
 
 - **Started outside the app**: stop that `nuggetd`, then click **Check again**.
-- **Restarting the login service didn't work**: log out and in, toggle **Start the Nugget background
+- **Restarting the login service didn't work**: log out and in, toggle **Start the Heed background
   service at login**, or run `nuggetd restart-service`.
-- **Nugget couldn't restart it**: quit and reopen Nugget; the app log says what failed.
-- **Newer than this app**: an older copy of Nugget is open. Update it or open the newer copy.
+- **Heed couldn't restart it**: quit and reopen Heed; the app log says what failed.
+- **Newer than this app**: an older copy of Heed is open. Update it or open the newer copy.
 
 ## Config errors
 
@@ -54,14 +54,14 @@ are currently ignored, so check spelling against [the reference](../reference/co
   doesn't see your shell profile). Use `keychain:NAME` instead.
 - `keychain:NAME: no OS keychain` (headless Linux): use `env:VAR`.
 - A local server refuses connections: check it is running and that `base_url` ends in `/v1`.
-- The `local` Ollama example disappeared: Nugget comments out that block if it is the untouched
+- The `local` Ollama example disappeared: Heed comments out that block if it is the untouched
   default. Uncomment it if you use Ollama.
 - "not probed": probe it on the **Status** page.
 
 ## The on-device model is warming up, stopped, or won't start
 
 - **Starting** ("Warming up: 12s of about 40s"): the model is loading; questions wait for it.
-- **Failed**, "stopped responding" or "stopped unexpectedly": Nugget restarts it automatically. Ask
+- **Failed**, "stopped responding" or "stopped unexpectedly": Heed restarts it automatically. Ask
   again once **Ready**.
 - **Failed**, "couldn't start" or "keeps stopping": free memory or fix the cause, then press
   **Retry** (on Status, or under a failed Chat answer). **Details** shows the last log line.
@@ -102,7 +102,7 @@ check `port` and `http = true` under `[mcp]`.
 
 | Problem | What to do |
 |---|---|
-| The Double Tap trigger does nothing on macOS | Allow Nugget under System Settings → Privacy & Security → Accessibility, then restart the app |
+| The Double Tap trigger does nothing on macOS | Allow Heed under System Settings → Privacy & Security → Accessibility, then restart the app |
 | The trigger does nothing on Linux Wayland | Use a chord (default `Ctrl+Alt+Space`); see [Wayland](double-tap.md#wayland) |
 | A chord cannot be registered | Another app holds it. Choose another |
 | "drafting is refused…" or "drafting is disabled in …" | The field is secure or the app is excluded (edit the list on the **Double Tap** page) |

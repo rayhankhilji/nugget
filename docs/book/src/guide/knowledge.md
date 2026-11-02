@@ -24,7 +24,7 @@ on low battery). `enabled = false` under `[knowledge]` turns it off; see
 
 Cloud extraction is opt-in per source (`cloud_sources` under `[knowledge.llm]`), never for sensitive
 or unclassified items, and logged in the [egress ledger](privacy.md) as `knowledge`. Set your name
-and addresses under `[knowledge.me]`; otherwise Nugget infers you from your sent mail. Edited items
+and addresses under `[knowledge.me]`; otherwise Heed infers you from your sent mail. Edited items
 are re-extracted; facts that relied only on a deleted item are retracted.
 
 ## The vault
@@ -33,7 +33,7 @@ The graph is rendered as Markdown pages (`<Kind>/<Name> (<short id>).md`, plus a
 you can read in any editor, including Obsidian. The folder is `~/Nugget Vault` (or `vault` in the data
 directory with `--home` or `NUGGET_HOME`); `path` under `[vault]` moves it. Pages re-render after each
 extraction run, and the folder is watched for your edits. A page, without the invisible HTML comments
-that mark Nugget's regions (leave those in place):
+that mark Heed's regions (leave those in place):
 
 ```markdown
 # Samantha Lee
@@ -64,16 +64,16 @@ clients unless allowed.
 
 The encrypted store stays the source of truth; your edits are merged back with a three-way merge:
 
-| You do this | Nugget does this |
+| You do this | Heed does this |
 |---|---|
 | Write outside the generated regions (for example under `## Notes`) | Keeps it on every re-render |
 | **Edit** a fact line | The old fact becomes `superseded`; your text becomes a `user_asserted` fact, marked `(you)` |
 | **Delete** a fact line | The fact becomes `rejected` and is never re-extracted |
 | **Add** a bullet under a fact heading | A new `user_asserted` fact with that relation |
 | Add an alias in the frontmatter | The alias is added to the entity |
-| Change a region Nugget also changed | Your version is kept; Nugget's goes to `.nugget/conflicts/` |
+| Change a region Heed also changed | Your version is kept; Heed's goes to `.nugget/conflicts/` |
 
-If an editor strips the HTML comments, Nugget restores them from the last render. A render never
+If an editor strips the HTML comments, Heed restores them from the last render. A render never
 overwrites an edit you just made. For a single-valued fact (such as an employer), your value stays
 until a source dated after your edit says otherwise.
 

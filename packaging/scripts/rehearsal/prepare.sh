@@ -163,8 +163,8 @@ cmd_build() {
   bundle="target/$TARGET/release/bundle"
   mkdir -p "$out"
   case "$TARGET" in
-    *windows*) cp "$bundle/nsis/Nugget_${version}_x64-setup.exe" "$out/" ;;
-    *linux*) cp "$bundle/appimage/Nugget_${version}_amd64.AppImage" "$out/" ;;
+    *windows*) cp "$bundle/nsis/Heed_${version}_x64-setup.exe" "$out/" ;;
+    *linux*) cp "$bundle/appimage/Heed_${version}_amd64.AppImage" "$out/" ;;
   esac
   ls -l "$out"
   record "Build $which installer ($version)" PASS "$(cd "$out" && for f in *; do printf '%s %s; ' "$f" "$(sha256 "$f")"; done)"
@@ -192,7 +192,7 @@ cmd_sign() {
   rm -rf "$dist"
   mkdir -p "$dist"
   cp "$REHEARSAL_DIR/build/new/"* "$dist/"
-  printf 'Nugget %s: RELEASE REHEARSAL, throwaway keys, not a release.\n' "$NEW_VERSION" >"$notes"
+  printf 'Heed %s: RELEASE REHEARSAL, throwaway keys, not a release.\n' "$NEW_VERSION" >"$notes"
 
   # release.yml `sign`: sign every payload, write latest.json, checksums, sign the feed.
   # (tr: Python on Windows ends lines with CRLF.)

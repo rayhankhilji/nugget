@@ -1,5 +1,5 @@
 //! SaaS connectors: Slack, Notion, GitHub and Linear, read through their official APIs with the
-//! user's own tokens. No intermediary service and no model sits between Nugget and the API, so a
+//! user's own tokens. No intermediary service and no model sits between Heed and the API, so a
 //! sync is deterministic, free and works with any (or no) AI plan.
 //!
 //! | kind | API | incremental by | reconciled by |

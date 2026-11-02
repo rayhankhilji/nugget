@@ -45,7 +45,7 @@ async fn harness(embeddings: bool) -> Option<Harness> {
         gateway,
         configs,
         Some("whsec".into()),
-        "nugget://connections/callback".into(),
+        "heed://connections/callback".into(),
     );
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),

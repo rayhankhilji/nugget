@@ -1,6 +1,6 @@
 # Gmail, Google Calendar and Google Drive
 
-Nugget talks to Google directly with **your own OAuth client**: no Nugget server or Nugget-owned
+Heed talks to Google directly with **your own OAuth client**: no Heed server or Heed-owned
 Google app sees your data. The cost is a one-time setup in the Google Cloud console, and a weekly
 re-sign-in while your app is in Testing mode ([below](#the-7-day-sign-in-limit-in-testing-mode)).
 
@@ -13,7 +13,7 @@ re-sign-in while your app is in Testing mode ([below](#the-7-day-sign-in-limit-i
 Each source asks only for its own read-only scope. `drive.readonly` is the narrowest scope that can
 read file content. The one exception is Gmail's **Allow archiving** (`allow_modify`, off): it asks for
 `gmail.modify` so a suggested action can archive a thread after you confirm. Google grants that scope
-everything except permanent deletion (including sending); Nugget uses it only to remove the `INBOX`
+everything except permanent deletion (including sending); Heed uses it only to remove the `INBOX`
 label. It takes effect after you reconnect.
 
 ## Set up your OAuth client
@@ -30,7 +30,7 @@ In the [Google Cloud console](https://console.cloud.google.com/), signed in with
 4. Under **Credentials** (or **Google Auth Platform → Clients**), **Create credentials → OAuth client
    ID**, type **Desktop app**. Copy the client ID and secret.
 
-## Connect in Nugget
+## Connect in Heed
 
 On **Sources**, choose **Add source → Gmail** (or **Google Calendar**, **Google Drive**), paste the
 client ID and secret, and choose **Connect**. Google warns the app is unverified: it is yours, so
@@ -46,13 +46,13 @@ syncing resumes where it stopped.
 To avoid this, set the publishing status to **In production**. Google still shows the "unverified
 app" warning but stops expiring tokens. Unverified apps with restricted scopes such as
 `gmail.readonly` are capped at a small number of users, so check Google's policy before sharing your
-client. A shared, Google-verified Nugget client is planned.
+client. A shared, Google-verified Heed client is planned.
 
 ## What gets indexed
 
 - **Gmail**: each message, parsed for headers, body, quoted text and signatures. Spam and Trash are
   skipped (`include_spam_trash`). Attachments are listed by name, not indexed. Messages deleted in
-  Gmail are deleted from Nugget. If Gmail's history id expires after a long time offline, the window
+  Gmail are deleted from Heed. If Gmail's history id expires after a long time offline, the window
   is re-synced.
 - **Calendar**: each event (and each occurrence of a repeating one) as text: title, time with time
   zone, location, attendees (up to 200), description (up to 20,000 characters). Cancelled events are
@@ -66,7 +66,7 @@ All settings: [Connector settings → `gmail`, `gcal`, `gdrive`](../reference/co
 
 ## Google Drive
 
-| In Drive | In Nugget |
+| In Drive | In Heed |
 |---|---|
 | Google Docs | Exported as Markdown |
 | Google Sheets | Each sheet as CSV (Sheets API), up to `max_file_mb` total; otherwise only the first sheet |

@@ -1,4 +1,4 @@
-//! Registration of the statically linked `sqlite-vec` extension and of Nugget's own SQL
+//! Registration of the statically linked `sqlite-vec` extension and of Heed's own SQL
 //! functions (`fts_normalize` and others, see `fts`).
 
 use std::sync::OnceLock;
@@ -7,7 +7,7 @@ use nugget_core::{Error, Result};
 use rusqlite::auto_extension::{RawAutoExtension, init_auto_extension, register_auto_extension};
 use rusqlite::ffi;
 
-/// Register `sqlite-vec` and Nugget's SQL functions as auto-extensions so every connection
+/// Register `sqlite-vec` and Heed's SQL functions as auto-extensions so every connection
 /// opened afterwards (in this process) gets the `vec0` virtual table, the `vec_*` functions and
 /// the `fts_*` functions. Idempotent.
 pub(crate) fn ensure_registered() -> Result<()> {
@@ -38,7 +38,7 @@ fn register() -> rusqlite::Result<()> {
     }
 }
 
-/// Auto-extension entry point for Nugget's SQL functions.
+/// Auto-extension entry point for Heed's SQL functions.
 #[allow(unsafe_code)]
 unsafe extern "C" fn init_functions(
     db: *mut ffi::sqlite3,

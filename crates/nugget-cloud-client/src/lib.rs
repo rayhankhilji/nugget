@@ -1,9 +1,10 @@
-//! Desktop client for Nugget Cloud (docs/architecture-cloud.md, sections 1 and 4).
+//! Desktop client for Heed Cloud (docs/architecture-cloud.md, sections 1 and 4).
 //!
 //! - [`CloudConfig`]: where the cloud is (Supabase project and the `/v1` API base).
 //! - [`pkce`]: the PKCE verifier and S256 challenge.
 //! - [`auth`]: Supabase Auth endpoints (authorize URL for Google, magic link, token exchange, refresh,
-//!   logout) and the strict parser for the `nugget://auth/callback` deep link.
+//!   logout) and the strict parser for the `heed://auth/callback` deep link
+//!   (the legacy `nugget://` scheme is accepted too).
 //! - [`session`]: the signed-in session. The verifier of a sign-in in progress lives only in
 //!   memory for 10 minutes and is single use; the refresh token is kept in a [`SessionStore`]
 //!   (the OS keychain in the app); the access token lives only in memory and is refreshed
@@ -34,11 +35,11 @@ pub type Result<T, E = CloudError> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CloudError {
-    #[error("Nugget Cloud isn't configured in this build ({0} is not set)")]
+    #[error("Heed Cloud isn't configured in this build ({0} is not set)")]
     NotConfigured(String),
-    #[error("not signed in to Nugget Cloud")]
+    #[error("not signed in to Heed Cloud")]
     NotSignedIn,
-    #[error("no sign-in is in progress; start it again from Nugget")]
+    #[error("no sign-in is in progress; start it again from Heed")]
     NoPendingSignIn,
     #[error("the sign-in took too long; please start it again")]
     SignInExpired,
@@ -52,9 +53,9 @@ pub enum CloudError {
         code: String,
         message: String,
     },
-    #[error("couldn't reach Nugget Cloud: {0}")]
+    #[error("couldn't reach Heed Cloud: {0}")]
     Network(String),
-    #[error("unexpected response from Nugget Cloud: {0}")]
+    #[error("unexpected response from Heed Cloud: {0}")]
     Protocol(String),
     #[error("couldn't use the keychain: {0}")]
     Keychain(String),
@@ -86,7 +87,7 @@ impl CloudError {
     }
 }
 
-/// Where Nugget Cloud is. The anon key is public by design (protected by RLS).
+/// Where Heed Cloud is. The anon key is public by design (protected by RLS).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloudConfig {
     /// `https://<project>.supabase.co`, without a trailing slash.

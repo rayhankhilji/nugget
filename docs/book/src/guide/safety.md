@@ -53,7 +53,7 @@ and Edit are unlimited.
 
 ## The kill switch
 
-Press **Escape three times**, each within half a second, and everything Nugget does for you stops:
+Press **Escape three times**, each within half a second, and everything Heed does for you stops:
 running agents, pending confirmations (denied) and the browser extension. **Stop all agents** in the
 tray, or the switch on the **Safety** page, does the same.
 

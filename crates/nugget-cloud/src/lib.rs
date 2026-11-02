@@ -1,4 +1,4 @@
-//! Nugget Cloud service (see `docs/architecture-cloud.md`).
+//! Heed Cloud service (see `docs/architecture-cloud.md`).
 //!
 //! - [`auth`]: checks Supabase access tokens, deletes users (GDPR).
 //! - [`db`]: Postgres access; every user query runs in a transaction scoped by RLS.

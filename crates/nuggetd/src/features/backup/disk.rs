@@ -199,7 +199,7 @@ impl Manifest {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(Error::NotFound(format!(
-                    "{} is not a complete Nugget backup (no {MANIFEST_FILE})",
+                    "{} is not a complete Heed backup (no {MANIFEST_FILE})",
                     dir.display()
                 )));
             }
@@ -210,7 +210,7 @@ impl Manifest {
         let format = value.get("format").and_then(serde_json::Value::as_u64);
         if format != Some(u64::from(FORMAT)) {
             return Err(Error::Unsupported(format!(
-                "{}: backup format {} (this Nugget reads format {FORMAT})",
+                "{}: backup format {} (this Heed reads format {FORMAT})",
                 path.display(),
                 format.map_or_else(|| "unknown".into(), |f| f.to_string())
             )));
@@ -552,7 +552,7 @@ impl FoldedNames {
     }
 }
 
-/// Refuse a backup or export folder inside (or containing) Nugget's own data, config or
+/// Refuse a backup or export folder inside (or containing) Heed's own data, config or
 /// vault directory: a backup must survive the loss of what it backs up, and one inside the
 /// vault would be indexed as notes.
 pub(crate) fn check_folder_outside(folder: &Path, protected: &[(&str, &Path)]) -> Result<()> {
@@ -561,7 +561,7 @@ pub(crate) fn check_folder_outside(folder: &Path, protected: &[(&str, &Path)]) -
         let p = resolve(p);
         if f.starts_with(&p) || p.starts_with(&f) {
             return Err(Error::Invalid(format!(
-                "{} is inside (or contains) Nugget's {what} folder {}; pick a folder elsewhere, ideally on another drive",
+                "{} is inside (or contains) Heed's {what} folder {}; pick a folder elsewhere, ideally on another drive",
                 folder.display(),
                 p.display()
             )));

@@ -70,7 +70,7 @@ export const macos = {
   /** The app is frontmost (AXFrontmost) with the overlay as its focused window. */
   async overlayIsForeground() {
     const f = await helper.call(`focus ${this.appPid}`);
-    return f.frontmost && f.window === "Nugget Double Tap";
+    return f.frontmost && f.window === "Heed Double Tap";
   },
 
   async trigger() {
@@ -94,7 +94,7 @@ export const macos = {
     const r = await helper.call(`windows ${this.appPid}`);
     return r.windows
       .filter((w) => Math.abs(w.w - OVERLAY.w) <= 2 && Math.abs(w.h - OVERLAY.h) <= 2 && w.alpha > 0)
-      .map((w) => ({ ...w, title: w.title || "Nugget Double Tap", visible: true, ax_titles: r.ax_titles }));
+      .map((w) => ({ ...w, title: w.title || "Heed Double Tap", visible: true, ax_titles: r.ax_titles }));
   },
 
   async screenshot(file, rect) {

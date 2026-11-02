@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Nugget.app on this Mac from source, in one command. Works on Intel and Apple Silicon.
+# Build Heed.app on this Mac from source, in one command. Works on Intel and Apple Silicon.
 #
 #   scripts/build-macos-app.sh            build for this Mac (x86_64 or arm64)
 #   scripts/build-macos-app.sh --target aarch64-apple-darwin   build for another Mac
@@ -9,8 +9,8 @@
 #   2. builds the frontend and the app with the frontend embedded (`pnpm tauri build`, only the
 #      .app bundle), unsigned: no Developer ID, no notarization, no updater key;
 #   3. signs the bundle ad hoc (`codesign --force --deep -s -`), so macOS has a stable app to
-#      attach Accessibility, Input Monitoring and Full Disk Access to (Nugget.app, not Terminal);
-#   4. prints where Nugget.app is and how to move it to /Applications.
+#      attach Accessibility, Input Monitoring and Full Disk Access to (Heed.app, not Terminal);
+#   4. prints where Heed.app is and how to move it to /Applications.
 #
 # Local builds trust the repository's development model-manifest key, so managed model downloads
 # work (NUGGET_TRUST_DEV_MANIFEST_KEY=1; set it to 0 to build without). Release builds never do
@@ -88,7 +88,7 @@ trap 'rm -rf "$work"' EXIT
 # Ad-hoc signing while bundling, as release.yml's dry runs do without an Apple certificate.
 echo '{"bundle":{"macOS":{"signingIdentity":"-"}}}' >"$work/signing.json"
 
-echo "build-macos-app: building Nugget.app"
+echo "build-macos-app: building Heed.app"
 (
   cd apps/desktop
   pnpm install --frozen-lockfile
@@ -96,15 +96,15 @@ echo "build-macos-app: building Nugget.app"
     --config src-tauri/tauri.bundle.conf.json --config "$work/signing.json"
 )
 
-app="$root/target/$target/release/bundle/macos/Nugget.app"
-[ -d "$app" ] || die "no Nugget.app at $app"
-[ -x "$app/Contents/MacOS/nuggetd" ] || die "Nugget.app has no nuggetd sidecar"
+app="$root/target/$target/release/bundle/macos/Heed.app"
+[ -d "$app" ] || die "no Heed.app at $app"
+[ -x "$app/Contents/MacOS/nuggetd" ] || die "Heed.app has no nuggetd sidecar"
 
 # ---- sign -------------------------------------------------------------------------------------
 
 # Ad hoc: no Apple Developer ID needed. One signature over the app and the sidecar inside it, so
-# macOS attributes the permissions to Nugget.app.
-echo "build-macos-app: signing Nugget.app ad hoc"
+# macOS attributes the permissions to Heed.app.
+echo "build-macos-app: signing Heed.app ad hoc"
 codesign --force --deep -s - "$app"
 codesign --verify --deep --strict "$app" || die "codesign does not verify $app"
 
@@ -114,17 +114,17 @@ Built: $app
 
 Install it (replaces an older copy in Applications):
 
-  rm -rf /Applications/Nugget.app
-  ditto "$app" /Applications/Nugget.app
-  open /Applications/Nugget.app
+  rm -rf /Applications/Heed.app
+  ditto "$app" /Applications/Heed.app
+  open /Applications/Heed.app
 
-Open Nugget from Applications (or Launchpad, Spotlight), not from Terminal: an app started from
-Terminal gets its privacy permissions under Terminal's name. Nugget shows what it needs and opens
+Open Heed from Applications (or Launchpad, Spotlight), not from Terminal: an app started from
+Terminal gets its privacy permissions under Terminal's name. Heed shows what it needs and opens
 the right System Settings page (Accessibility, Input Monitoring, and Full Disk Access if you add
 a Messages source).
 
-Each build is signed afresh, so after a rebuild macOS may show Nugget as on but not let it in.
-Reset its permissions, open Nugget again and turn them back on:
+Each build is signed afresh, so after a rebuild macOS may show Heed as on but not let it in.
+Reset its permissions, open Heed again and turn them back on:
 
   tccutil reset Accessibility dev.nugget.desktop
   tccutil reset ListenEvent dev.nugget.desktop

@@ -456,7 +456,7 @@ pub(crate) fn apply_key(conn: &Connection, key: &StoreKey, path: &Path) -> Resul
         Ok(_) => Ok(()),
         Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
             Err(Error::Integrity(format!(
-                "cannot decrypt store at {}: wrong key or not a Nugget database",
+                "cannot decrypt store at {}: wrong key or not a Heed database",
                 path.display()
             )))
         }

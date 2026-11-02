@@ -9,10 +9,10 @@ step says what you should see; if something else happens, note the step number.
 1. `pnpm -C apps/desktop install && cargo tauri build --features tauri/custom-protocol` (or
    `cargo tauri dev`). Start `nuggetd` with a local model. Ghost text works with a cloud provider
    too, but the speed target assumes a local model.
-2. Launch Nugget. On the Double Tap page, **Accessibility** must be *granted*. The suggestion key
+2. Launch Heed. On the Double Tap page, **Accessibility** must be *granted*. The suggestion key
    tap is an active event tap, which uses Accessibility. If the page says inline suggestions
    aren't available, also grant **Input Monitoring** in System Settings → Privacy & Security, then
-   quit and reopen Nugget.
+   quit and reopen Heed.
 3. On the Double Tap page, check that **Suggest as you type** is on, with no "inline suggestions
    aren't available" note below it.
 
@@ -24,7 +24,7 @@ step says what you should see; if something else happens, note the step number.
    the same baseline, the same size as your text, at about 45% opacity, and words appear as they
    stream in.
 3. TextEdit must keep the keyboard focus: its window title stays active, the caret keeps
-   blinking, and Nugget does not come to the front or appear in ⌘-Tab.
+   blinking, and Heed does not come to the front or appear in ⌘-Tab.
 4. Move the mouse over the ghost text and click. The click must go to TextEdit (the caret moves),
    and the suggestion disappears.
 

@@ -115,7 +115,7 @@ tiers = ["synthesis", "agentic"]
 # model = "meta-llama/llama-3.3-70b-instruct"
 # api_key = "env:OPENROUTER_API_KEY"
 # tiers = ["light"]
-# headers = { "X-Title" = "Nugget" }
+# headers = { "X-Title" = "Heed" }
 #
 # OpenAI embeddings (the Responses API has none; use the compatible kind):
 # [[providers]]

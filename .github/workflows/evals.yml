@@ -57,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
+          # Grounded and ungrounded Heed arms on one runner, temperature 0, judged by the
           # agentic-tier model rather than the drafting model (AA3).
           - suite: draft
             args: >-

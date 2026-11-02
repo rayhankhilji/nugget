@@ -120,7 +120,7 @@ start_server() { # variant
 
 main_window() {
   DISPLAY="$display" wmctrl -l 2>/dev/null |
-    awk '{ id = $1; $1 = $2 = $3 = ""; if (substr($0, 4) == "Nugget") { print id; exit } }'
+    awk '{ id = $1; $1 = $2 = $3 = ""; if (substr($0, 4) == "Heed") { print id; exit } }'
 }
 have_window() { [ -n "$(main_window)" ]; }
 no_window() { [ -z "$(main_window)" ]; }
@@ -133,7 +133,7 @@ new_case() { # name
   mkdir -p "$case_dir"
   local w="$work/$1"
   mkdir -p "$w/install"
-  install="$w/install/Nugget.AppImage"
+  install="$w/install/Heed.AppImage"
   cp "$old" "$install"
   chmod +x "$install"
   export NUGGET_HOME="$w/nh" HOME="$w/home"
@@ -152,7 +152,7 @@ new_case() { # name
   export TMPDIR="$w/tmp"
   mkdir -p "$TMPDIR"
   # A window left over from an earlier case would be mistaken for this one.
-  wait_for 15 no_window || rdie "a 'Nugget' window from an earlier case is still open"
+  wait_for 15 no_window || rdie "a 'Heed' window from an earlier case is still open"
 }
 
 launch() { # log-name

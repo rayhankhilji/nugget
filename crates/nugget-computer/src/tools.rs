@@ -1115,7 +1115,7 @@ impl ComputerTool {
                 // rather than press something unchecked.
                 None if self.presses(args) => {
                     let mut r = fail(
-                        "The control is not on the screen Nugget last read, so what this would \
+                        "The control is not on the screen Heed last read, so what this would \
                          send cannot be checked; nothing was done. Observe first, then use an \
                          id from it.",
                     );

@@ -1,4 +1,4 @@
-// The in-page half of Nugget: owns the element registry for one document, hands out snapshots,
+// The in-page half of Heed: owns the element registry for one document, hands out snapshots,
 // and performs validated actions followed by a verification snapshot and diff.
 
 import { performAction, validateAction } from "./actions";
@@ -71,7 +71,7 @@ export class PageAgent {
     expectForm?: FormExpectation,
     expectScope?: FormExpectation,
   ): Promise<ActResult> {
-    if (this.halted) throw new ProtocolError("halted", "Nugget was stopped on this page");
+    if (this.halted) throw new ProtocolError("halted", "Heed was stopped on this page");
     validateAction(action, snapshotId, this.latest);
     const before = this.latest!;
     const check = (): void => {

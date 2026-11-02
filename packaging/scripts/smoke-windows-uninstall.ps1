@@ -1,4 +1,4 @@
-# Check what the NSIS uninstaller removes, without a UI: seed Nugget's default data folders,
+# Check what the NSIS uninstaller removes, without a UI: seed Heed's default data folders,
 # a vault and a saved key, then uninstall silently with each command-line choice and look at what
 # is left.
 #
@@ -6,7 +6,7 @@
 #   /S /REMOVEDATA              removes data, models, settings and saved keys; keeps the vault
 #   /S /REMOVEDATA /REMOVEVAULT also removes %USERPROFILE%\Nugget Vault
 #
-# Usage: pwsh packaging/scripts/smoke-windows-uninstall.ps1 path\to\Nugget_x.y.z_x64-setup.exe
+# Usage: pwsh packaging/scripts/smoke-windows-uninstall.ps1 path\to\Heed_x.y.z_x64-setup.exe
 #
 # It writes to the real per-user locations (%LOCALAPPDATA%\Nugget, %APPDATA%\Nugget,
 # %USERPROFILE%\Nugget Vault, Credential Manager), so it refuses to run outside CI.
@@ -16,13 +16,13 @@ param(
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
-if ($env:GITHUB_ACTIONS -ne 'true') { Write-Error 'smoke: this test writes to your real Nugget folders; CI only'; exit 2 }
+if ($env:GITHUB_ACTIONS -ne 'true') { Write-Error 'smoke: this test writes to your real Heed folders; CI only'; exit 2 }
 $Installer = (Resolve-Path -LiteralPath $Installer).Path
 
 $data = Join-Path $env:LOCALAPPDATA 'Nugget\Nugget'
 $config = Join-Path $env:APPDATA 'Nugget\Nugget'
 $vault = Join-Path $env:USERPROFILE 'Nugget Vault'
-$installDir = Join-Path $env:LOCALAPPDATA 'Nugget'
+$installDir = Join-Path $env:LOCALAPPDATA 'Heed'
 $key = 'smoke-provider.dev.nugget.Nugget'
 
 function Log([string]$m) { Write-Output "uninstall-smoke: $m" }

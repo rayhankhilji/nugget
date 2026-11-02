@@ -792,7 +792,7 @@ impl<'a> Ctx<'a> {
         let mut body = vec![
             "## Merged".to_owned(),
             String::new(),
-            format!("Nugget recognised these as the same {noun} and combined them into this page:"),
+            format!("Heed recognised these as the same {noun} and combined them into this page:"),
             String::new(),
         ];
         // The newest records (the log is oldest first), in log order.
@@ -838,7 +838,7 @@ impl<'a> Ctx<'a> {
         }
         body.push(String::new());
         body.push(format!(
-            "If any of these is a different {noun}, you can split it off again in Nugget; \
+            "If any of these is a different {noun}, you can split it off again in Heed; \
              the facts it brought will move to a page of its own. This section is generated: \
              edits to it are not applied, so keep your own notes below."
         ));
@@ -935,9 +935,9 @@ impl<'a> Ctx<'a> {
     /// The `README.md` index: live pages by kind.
     pub fn render_index(&self, pages: &[(EntityKind, String, EntityId)]) -> Doc {
         let mut body = vec![
-            "# Nugget vault".to_owned(),
+            "# Heed vault".to_owned(),
             String::new(),
-            "Generated from your Nugget knowledge graph. Every fact cites its sources; facts marked \
+            "Generated from your Heed knowledge graph. Every fact cites its sources; facts marked \
              (you) came from your own edits. Text outside the generated blocks, including each \
              page's Notes section, is yours and survives re-renders. Edit a fact line to correct \
              it, or delete it to retract it."

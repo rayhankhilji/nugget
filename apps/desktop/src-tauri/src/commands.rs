@@ -731,7 +731,7 @@ pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
     file_dialog(&app)
         .set_title("Choose a plugin")
-        .add_filter("Nugget plugin", &["nuggetplugin"])
+        .add_filter("Heed plugin", &["nuggetplugin"])
         .pick_file(move |path| {
             let _ = tx.send(path);
         });

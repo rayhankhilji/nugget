@@ -1,6 +1,6 @@
 # Microsoft 365
 
-Nugget talks to Microsoft Graph directly with **your own app registration** in Microsoft Entra ID.
+Heed talks to Microsoft Graph directly with **your own app registration** in Microsoft Entra ID.
 It works with work or school accounts (Microsoft 365, Exchange Online) and personal accounts
 (Outlook.com, OneDrive personal).
 
@@ -24,12 +24,12 @@ These are read-only and cover only your own mailbox, calendar and files, not one
 3. **Redirect URI**: platform **Public client/native (mobile & desktop)**, value `http://localhost`.
 4. **Register**, and copy the **Application (client) ID**.
 
-No client secret is needed (Nugget uses PKCE). If Microsoft reports a redirect URI mismatch
+No client secret is needed (Heed uses PKCE). If Microsoft reports a redirect URI mismatch
 (`AADSTS50011`), add `http://127.0.0.1` as a redirect URI of type `InstalledClient` in the app's
 **Manifest**. If your organisation blocks user consent, an administrator must **Grant admin
 consent** for the permissions above under **API permissions**.
 
-## Step 2: connect in Nugget
+## Step 2: connect in Heed
 
 1. On **Sources**, choose **Add source → Outlook mail** (or **Outlook calendar**, **OneDrive**).
 2. Paste the client ID; optionally set the tenant and the email to pre-select.

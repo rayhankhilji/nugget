@@ -27,7 +27,7 @@
 //! 5. When another app or window comes to the front (or the focus leaves the text field) while a
 //!    read-ahead may still be running, it sends `draft.read_ahead_cancel`.
 //!
-//! It pauses while a draft is running and while a Nugget window is in front, and in low power
+//! It pauses while a draft is running and while a Heed window is in front, and in low power
 //! mode or, when `read_ahead_on_battery` is off, on battery ([`super::power`]; a running
 //! read-ahead is cancelled, and the power state is looked at again every
 //! [`power::RECHECK`]). It does not run at all while Double Tap or read-ahead is off (the loop
@@ -38,7 +38,7 @@
 //! - **Read:** the focused field and its surroundings, only in allowed apps, only after the
 //!   field has kept focus for a moment. Never in excluded apps, terminals (unless allowed) or
 //!   secure fields.
-//! - **Sent:** to the local Nugget daemon only, over its local socket. The daemon itself refuses
+//! - **Sent:** to the local Heed daemon only, over its local socket. The daemon itself refuses
 //!   read-ahead for cloud providers (nothing goes to a cloud API for read-ahead), for excluded
 //!   apps and secure fields, and rate-limits; it feeds the prompt to the draft's provider (the
 //!   on-device model server, or a local-network server the user configured, recorded in the
@@ -106,7 +106,7 @@ pub const BACKOFF_UNAVAILABLE: Duration = Duration::from_secs(2 * 60);
 pub enum Front {
     /// A draft is running: stay quiet (the trigger's own read supersedes any read-ahead).
     Busy,
-    /// Nothing readable is in front, or a Nugget window is.
+    /// Nothing readable is in front, or a Heed window is.
     Nothing,
     /// An app: `key` identifies it, `surface` its window and page (a hash of the title and
     /// URL), `allowed` whether drafting is allowed in it.
@@ -698,7 +698,7 @@ async fn observe(app: &AppHandle, s: &DoubleTapSettings, hasher: &impl BuildHash
     }
 }
 
-/// Whether `front` is Nugget itself (its bundle id or product name).
+/// Whether `front` is Heed itself (its bundle id or product name).
 pub(super) fn is_own(app: &AppHandle, front: &AppInfo) -> bool {
     let config = app.config();
     let ours = AppInfo {

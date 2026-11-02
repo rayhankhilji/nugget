@@ -1,4 +1,4 @@
-//! Nugget Cloud from the shell (docs/architecture-cloud.md, section 4): sign-in, the session,
+//! Heed Cloud from the shell (docs/architecture-cloud.md, section 4): sign-in, the session,
 //! Composio connections, sync and ask, through `nugget-cloud-client`.
 //!
 //! Tokens never reach the webview: the PKCE verifier, the access token and the refresh token
@@ -49,7 +49,7 @@ impl Cloud {
         match built {
             Ok(api) => Self::Ready(api),
             Err(e) => {
-                tracing::info!(reason = %e, "Nugget Cloud is off");
+                tracing::info!(reason = %e, "Heed Cloud is off");
                 Self::Off(e.to_string())
             }
         }

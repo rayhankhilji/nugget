@@ -27,7 +27,7 @@ async function render(): Promise<void> {
   $("stop").hidden = status.halted;
   $("resume").hidden = !status.halted;
   $("status").textContent = [
-    status.connected ? "Connected to Nugget" : "Nugget app not running",
+    status.connected ? "Connected to Heed" : "Heed app not running",
     status.halted ? "stopped" : granted ? "allowed on this site" : "not allowed on this site",
   ].join(" · ");
 }

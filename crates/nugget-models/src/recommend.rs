@@ -25,7 +25,7 @@ pub enum FitReason {
     RamTooSmall,
     /// A reranker: opt-in, never recommended by default.
     RerankOptIn,
-    /// Needs a newer Nugget than this build.
+    /// Needs a newer Heed than this build.
     NeedsNewerApp,
     /// A GPU backend is expected to accelerate it.
     GpuAccelerated,

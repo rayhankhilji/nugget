@@ -1,4 +1,4 @@
-//! Computer use for Nugget's agent (M4): [`nugget_agent::Tool`]s that drive any app through its
+//! Computer use for Heed's agent (M4): [`nugget_agent::Tool`]s that drive any app through its
 //! accessibility tree ([`nugget_a11y::ComputerUse`]) by stable element id, never by guessing at
 //! pixels, and check every change by re-reading the window.
 //!

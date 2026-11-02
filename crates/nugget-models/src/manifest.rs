@@ -63,7 +63,7 @@ pub struct ModelEntry {
     pub tiers: Vec<Tier>,
     /// SPDX license id of the model weights, e.g. `Apache-2.0`.
     pub license: String,
-    /// Minimum Nugget version (semver) able to run this model.
+    /// Minimum Heed version (semver) able to run this model.
     pub min_app_version: String,
 }
 

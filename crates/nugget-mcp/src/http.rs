@@ -16,7 +16,7 @@
 //! status. Only an unknown path gets a plain 404.
 //!
 //! Resource limits: the listener binds exactly the configured port and fails if it is taken (no
-//! fallback, so a squatter is never mistaken for Nugget); at most
+//! fallback, so a squatter is never mistaken for Heed); at most
 //! [`HttpConfig::max_connections`] connections are served at once (others wait in the backlog);
 //! a connection that does not send a complete request head within
 //! [`HttpConfig::header_timeout_ms`] (also while idle between requests) is closed; a body not
@@ -395,7 +395,7 @@ impl Gate {
             _ => {
                 let mut r = refuse(
                     StatusCode::UNAUTHORIZED,
-                    "missing or invalid bearer token (or the MCP client was revoked in Nugget)",
+                    "missing or invalid bearer token (or the MCP client was revoked in Heed)",
                 );
                 r.headers_mut().insert(
                     header::WWW_AUTHENTICATE,

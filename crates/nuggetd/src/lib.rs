@@ -1,4 +1,4 @@
-//! `nuggetd`, the Nugget background daemon.
+//! `nuggetd`, the Heed background daemon.
 
 pub mod ask;
 pub mod backup_cli;

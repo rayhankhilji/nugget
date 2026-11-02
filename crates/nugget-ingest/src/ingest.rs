@@ -587,7 +587,7 @@ fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHea
     if scan.roots_denied > 0 && scan.found == 0 && items == 0 {
         return mk(
             code::UNREADABLE,
-            "Nugget isn't allowed to open this folder, so it can't index anything in it.".into(),
+            "Heed isn't allowed to open this folder, so it can't index anything in it.".into(),
             "Check the folder's permissions (or the app's file access in your system settings), \
              then sync again."
                 .into(),
@@ -599,7 +599,7 @@ fn scan_health(health: SourceHealth, scan: &ScanReport, items: u64) -> SourceHea
         return mk(
             code::OK,
             format!(
-                "Up to date, but Nugget isn't allowed to open {} of this source's folders.",
+                "Up to date, but Heed isn't allowed to open {} of this source's folders.",
                 if n == 1 {
                     "one".to_string()
                 } else {
@@ -630,7 +630,7 @@ fn nothing_indexable_fix(scan: &ScanReport) -> String {
     let mut parts = Vec::new();
     if scan.unsupported > 0 {
         parts.push(format!(
-            "{} of a type Nugget doesn't read",
+            "{} of a type Heed doesn't read",
             plural(scan.unsupported, "file is", "files are")
         ));
     }
@@ -648,7 +648,7 @@ fn nothing_indexable_fix(scan: &ScanReport) -> String {
         ));
     }
     if scan.roots_missing > 0 {
-        return "Nugget can't find this folder: it may have been moved, renamed or be on a drive \
+        return "Heed can't find this folder: it may have been moved, renamed or be on a drive \
                 that isn't connected. Reconnect it, or remove this source and add the folder again."
             .into();
     }

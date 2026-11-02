@@ -1,7 +1,7 @@
 //! Draft history: the last [`MAX_ENTRIES`] drafts inserted or dismissed, so a previous one can be
 //! inserted again from the overlay or copied from the Double Tap page.
 //!
-//! Privacy: kept **in memory only** (never written to disk, gone when Nugget quits), clearable,
+//! Privacy: kept **in memory only** (never written to disk, gone when Heed quits), clearable,
 //! and never holding a sensitive draft: the overlay state machine drops practice drafts and drafts
 //! that drew on items marked sensitive, [`History::push`] drops text that looks like a card
 //! number or a long digit run, and the flow keeps a draft only once the daemon's PII scan

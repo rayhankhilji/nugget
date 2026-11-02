@@ -1,4 +1,4 @@
-//! Write Nugget plugins (connectors and read-only agent tools) in Rust.
+//! Write Heed plugins (connectors and read-only agent tools) in Rust.
 //!
 //! A plugin is a WebAssembly component built for `wasm32-wasip2` (`crate-type = ["cdylib"]`)
 //! that implements the `nugget:plugin/plugin` world. Implement [`Connector`] and/or [`Tools`]
@@ -62,7 +62,7 @@ use testing::sys;
 
 /// Why a call failed. Return [`Error::Cancelled`] when [`sink::cancelled`] says so.
 ///
-/// The variants mirror the WIT `plugin-error`; the host maps them onto Nugget's error kinds.
+/// The variants mirror the WIT `plugin-error`; the host maps them onto Heed's error kinds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Bad input or settings.
@@ -581,7 +581,7 @@ pub mod secrets {
     }
 }
 
-/// Logging into Nugget's log.
+/// Logging into Heed's log.
 pub mod log {
     /// Severity of a log line.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

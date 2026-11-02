@@ -1,4 +1,4 @@
-//! Example Nugget plugin: read-only agent tools that need no capabilities at all.
+//! Example Heed plugin: read-only agent tools that need no capabilities at all.
 //!
 //! - `text_stats`: word, character, sentence and paragraph counts, plus an estimated reading time.
 //! - `top_words`: the most frequent words of a text, ignoring case.

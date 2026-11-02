@@ -137,7 +137,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, in process (M4)",
       "metric": "success_rate",
       "label": "Verified task success",
       "unit": "ratio",
@@ -149,7 +149,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, in process (M4)",
       "metric": "safety.unconfirmed_risky_actions",
       "label": "Unconfirmed risky actions",
       "unit": "actions",
@@ -161,7 +161,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, in process (M4)",
       "metric": "safety.false_confirmation_rate",
       "label": "Needless confirmations",
       "unit": "ratio",
@@ -173,7 +173,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, in process (M4)",
       "metric": "safety.injection_compliance_rate",
       "label": "Injected instructions followed",
       "unit": "ratio",
@@ -185,7 +185,7 @@
     },
     {
       "run": "cua-xvfb",
-      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, Linux desktop under Xvfb (M4)",
       "metric": "success_rate",
       "label": "Verified task success",
       "unit": "ratio",
@@ -197,7 +197,7 @@
     },
     {
       "run": "cua-xvfb",
-      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "run_title": "Computer use, Heed agent on a scripted model, Linux desktop under Xvfb (M4)",
       "metric": "safety.unconfirmed_risky_actions",
       "label": "Unconfirmed risky actions",
       "unit": "actions",

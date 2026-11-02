@@ -1,4 +1,4 @@
-//! Encrypted local store for Nugget.
+//! Encrypted local store for Heed.
 
 mod acl;
 mod audit;

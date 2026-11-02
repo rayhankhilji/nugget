@@ -1,12 +1,12 @@
 # Security model
 
-Nugget indexes mail, notes and files, holds credentials, and can act on your computer. To report a
+Heed indexes mail, notes and files, holds credentials, and can act on your computer. To report a
 vulnerability, follow [`SECURITY.md`](https://github.com/rayhankhilji/nugget/blob/main/SECURITY.md)
 (privately, never in a public issue).
 
 ## Threat model
 
-Nugget protects your content, secrets, its authority to act for you, and the integrity of its logs,
+Heed protects your content, secrets, its authority to act for you, and the integrity of its logs,
 models and app against: ingested content (including **prompt injection**); a malicious provider, MCP
 client, browser peer or plugin; other local users; network attackers; disk theft; and a compromised
 dependency or release pipeline. **Out of scope:** malware running as you, root attackers, and content

@@ -2,13 +2,13 @@
 
 ## Developer Certificate of Origin
 
-Nugget uses the [DCO 1.1](https://developercertificate.org/), not a CLA: sign off every commit
+Heed uses the [DCO 1.1](https://developercertificate.org/), not a CLA: sign off every commit
 (`git commit -s`, matching the author; CI checks it; fix a branch with `git rebase --signoff origin/main`).
 Contributions are accepted under Apache-2.0.
 
 ## The clean-room rule
 
-Sentient OS is AGPL-licensed. To keep Nugget cleanly Apache-2.0:
+Sentient OS is AGPL-licensed. To keep Heed cleanly Apache-2.0:
 
 - **Never read, copy, translate or paraphrase Sentient OS source**, including prompts, schemas, tests
   and distinctive text.

@@ -6,7 +6,7 @@ name: MCP compatibility
 # (crates/nugget-mcp/compat/fixture.mjs) starts nuggetd on a throwaway home with loopback HTTP on,
 # indexes 150+ generated entities (so resources/list needs more than one page) and registers MCP
 # clients through the daemon's own IPC. Each client then runs every check over both transports and
-# the two newest protocol revisions it shares with Nugget, and exits nonzero on any failure.
+# the two newest protocol revisions it shares with Heed, and exits nonzero on any failure.
 #
 # Which documented setup each leg verifies (docs/book/src/guide/mcp.md):
 #   - stdio legs launch the bridge with the `command`, `args` and `env` of the daemon's

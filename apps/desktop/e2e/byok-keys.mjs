@@ -62,7 +62,7 @@ export async function byokKeysScenario({ browser, bin }) {
         expect((await ids()).includes(NAME), `providers.list right after saving lacks ${NAME}: ${JSON.stringify(await ids())}`);
         const auth = await chatAuth("after saving");
         expect(auth === GOOD, `the chat after saving used the ${auth} key`);
-        expect(!(await page.locator("body").innerText()).match(/restart nugget/i), "the page still tells the user to restart Nugget");
+        expect(!(await page.locator("body").innerText()).match(/restart (heed|nugget)/i), "the page still tells the user to restart Heed");
       } catch (e) {
         await shot(page, "FAIL-byok-keys-save");
         throw e;

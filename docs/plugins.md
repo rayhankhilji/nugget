@@ -1,4 +1,4 @@
-# Writing a Nugget plugin
+# Writing a Heed plugin
 
 A plugin is a WebAssembly component that adds a **connector** (a new source kind), read-only
 agent **tools**, or both. It runs inside `nuggetd` under wasmtime, sees the host only through the

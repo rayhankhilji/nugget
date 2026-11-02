@@ -190,7 +190,7 @@ pub trait Listener: Send {
     }
 }
 
-/// The app id Nugget registers with the XDG desktop portal on Wayland. The portal (1.19+) accepts
+/// The app id Heed registers with the XDG desktop portal on Wayland. The portal (1.19+) accepts
 /// it only when a desktop file named `dev.nugget.Nugget.desktop`, whose `Exec` program exists, is
 /// installed in its `XDG_DATA_DIRS`; desktops key the shortcut's consent and settings by it.
 ///
@@ -218,7 +218,7 @@ pub enum ShortcutState {
     /// the desktop's keyboard shortcut settings. The session stays open, so an assignment made
     /// there later works.
     NotAssigned,
-    /// The desktop closed the session or dropped the shortcut; Nugget is binding it again.
+    /// The desktop closed the session or dropped the shortcut; Heed is binding it again.
     Rebinding,
     /// The portal stopped working after [`start`] succeeded; the message says why.
     Failed(String),
@@ -313,13 +313,13 @@ impl Role {
     /// The description the desktop shows next to the shortcut.
     fn description(self) -> &'static str {
         match self {
-            Self::DoubleTap => "Nugget: draft a reply",
-            Self::KillSwitch => "Nugget: stop all agents",
+            Self::DoubleTap => "Heed: draft a reply",
+            Self::KillSwitch => "Heed: stop all agents",
         }
     }
 }
 
-/// A second, independent trigger that stops whatever Nugget is doing (computer use).
+/// A second, independent trigger that stops whatever Heed is doing (computer use).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KillSwitch {
     /// Escape pressed `presses` times, each within `window_ms` of the previous one. Needs
@@ -481,7 +481,7 @@ fn capabilities_for(session: Session) -> Capabilities {
 /// permission (Linux, Windows). Reading it never prompts.
 ///
 /// The trigger itself does not need it (see the table above), but macOS lists an app under Input
-/// Monitoring as soon as it observes keys, and a user who turned Nugget off there sees key
+/// Monitoring as soon as it observes keys, and a user who turned Heed off there sees key
 /// events go missing, so the settings page reports it.
 pub fn input_monitoring() -> Option<bool> {
     #[cfg(target_os = "macos")]
@@ -494,7 +494,7 @@ pub fn input_monitoring() -> Option<bool> {
     }
 }
 
-/// macOS: ask for Input Monitoring. The first time this shows the system prompt and adds Nugget
+/// macOS: ask for Input Monitoring. The first time this shows the system prompt and adds Heed
 /// to the Input Monitoring list (off); afterwards it only answers. Returns what
 /// [`input_monitoring`] would; `None` off macOS.
 pub fn request_input_monitoring() -> Option<bool> {

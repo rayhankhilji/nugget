@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# List, and on request delete, what Nugget leaves behind after the app is removed on Linux or macOS.
+# List, and on request delete, what Heed leaves behind after the app is removed on Linux or macOS.
 # Package managers can't ask each user about their data, so this does it.
 #
 # Usage: remove-nugget-data.sh [--yes] [--include-vault]
@@ -101,7 +101,7 @@ if [ -z "$custom_vault" ] && [ -d "$HOME/Nugget Vault" ]; then
   vault="$HOME/Nugget Vault"
 fi
 
-# A folder that holds the vault you chose is kept whole, even when it is one of Nugget's own (a
+# A folder that holds the vault you chose is kept whole, even when it is one of Heed's own (a
 # vault put in the data folder, or reached through a link into it). Paths are compared after
 # links are resolved; a leading ~ is the home folder, as nuggetd reads it.
 canon() {
@@ -169,7 +169,7 @@ delete_key() {
   esac
 }
 
-echo "Nugget data on this computer ($os):"
+echo "Heed data on this computer ($os):"
 found=0
 for entry in "${dirs[@]}"; do
   label="${entry%%|*}"
@@ -224,7 +224,7 @@ fi
 # Never delete under a running daemon or app: they would recreate files or lose writes.
 for proc in nuggetd nugget-desktop; do
   if pgrep -x "$proc" >/dev/null 2>&1; then
-    echo "remove-nugget-data: $proc is running. Quit Nugget (and run 'nuggetd uninstall-service' if" >&2
+    echo "remove-nugget-data: $proc is running. Quit Heed (and run 'nuggetd uninstall-service' if" >&2
     echo "it starts at login), then try again. Nothing was deleted." >&2
     exit 1
   fi
@@ -241,7 +241,7 @@ if [ "$include_vault" = 1 ] && [ -n "$vault" ] && [ -t 0 ]; then
 fi
 
 echo
-# Login entries first, so nothing starts Nugget again halfway through.
+# Login entries first, so nothing starts Heed again halfway through.
 case "$os" in
   Linux)
     if [ -e "${login[0]}" ]; then

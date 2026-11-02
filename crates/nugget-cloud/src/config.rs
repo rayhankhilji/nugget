@@ -80,7 +80,7 @@ impl Config {
             model_fast: opt("NUGGET_MODEL_FAST"),
             model_smart: opt("NUGGET_MODEL_SMART"),
             connect_callback: opt("NUGGET_CONNECT_CALLBACK")
-                .unwrap_or_else(|| "nugget://connections/callback".into()),
+                .unwrap_or_else(|| "heed://connections/callback".into()),
         })
     }
 }

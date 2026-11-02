@@ -11,6 +11,11 @@
 | Windows | `%LOCALAPPDATA%\Nugget\Nugget\data` | `%APPDATA%\Nugget\Nugget\config` | `%LOCALAPPDATA%\Nugget\Nugget\cache` |
 | With `NUGGET_HOME=DIR` or `--home DIR` | `DIR/data` | `DIR/config` | `DIR/cache` |
 
+These names come from before the app was renamed from Nugget to Heed, and are kept so an update
+finds your existing data: the folders above, the vault folder `~/Nugget Vault`, the keychain
+service `dev.nugget.Nugget`, the Windows task "Nugget Daemon" and the `NUGGET_*` environment
+variables.
+
 On macOS, data and config share one directory.
 
 ## Layout
