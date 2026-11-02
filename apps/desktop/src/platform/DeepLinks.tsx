@@ -49,6 +49,10 @@ export function DeepLinks({ pages, go }: { pages: readonly PageId[]; go: (page: 
         case "ask":
           // The shell sends questions to the quick-ask box itself.
           return;
+        case "connections":
+          // The page reloads its list on `nugget:cloud-connections`.
+          if (pages.includes("connections")) go("connections");
+          return;
       }
     },
     [pages, go],

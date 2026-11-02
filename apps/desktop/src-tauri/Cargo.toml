@@ -19,6 +19,8 @@ nugget-ipc.workspace = true
 nugget-hotkey.workspace = true
 nugget-a11y.workspace = true
 nugget-policy.workspace = true
+# Nugget Cloud sign-in, session and /v1 API (`src/cloud.rs`).
+nugget-cloud-client.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

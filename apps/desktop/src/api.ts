@@ -1160,7 +1160,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
+export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "connections" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -2854,7 +2854,9 @@ export type DeepLink =
   | { kind: "search"; query: string }
   | { kind: "item"; source: string; key: string }
   | { kind: "ask"; question: string }
-  | { kind: "plugin"; path: string };
+  | { kind: "plugin"; path: string }
+  /** Composio sent the browser back after connecting an app (Nugget Cloud). */
+  | { kind: "connections" };
 
 /** No payload: a link is waiting; take it with {@link platformApi.takeDeepLink}. */
 export const DEEPLINK_EVENT = "nugget:deeplink";
