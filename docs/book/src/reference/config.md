@@ -330,10 +330,11 @@ Double Tap drafting. Keys below are relative to `[draft]` (`local.model` is `mod
 
 | Key | Type | Default | Description |
 |---|---|---|---|
+| `continue_tier` | tier | `"light"` | Routing tier for ghost text (`draft.begin` with `mode: continue`) when it has a provider, else `tier`. Signed in to Heed, that is the cloud's fast model; local models follow as the fallback |
 | `grounding` | bool | `true` | Retrieved context goes in as dated facts (superseded and sensitive items marked) and the stream is checked per `grounding_check`. With `false` the stream is still checked for credentials, links and contact details, but not values |
 | `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | Both drop sentences with a credential from a sensitive item, a link, email address, phone, account or card number that neither the thread nor your own text has, an amount, date or number the thread and the facts don't support, or a copy of the other person's message. Both hold each sentence (and the greeting) until it is checked, so a draft never ends in a cut sentence; the first characters wait for the first sentence. `secrets` leaves times, weekdays and small counts alone; `sentences` checks every value |
 | `local.include_sensitive` | bool | `false` | Let passages marked sensitive into local prompts (never cloud ones) |
 | `local.enabled` | bool | `true` | Smaller prompts for on-device models (fewer passages, shorter thread excerpts); does not change what is sensitive |
 | `local.model` | manifest model id | none | Run this model in its own server (provider `local-draft`) and use it first for non-cloud drafting, falling back to the chat model |
-| `read_ahead.enabled` | bool | `true` | Prefill the prompt into the local cache while a reply field has focus ([Read-ahead](../guide/double-tap.md#read-ahead)); `false` makes `draft.read_ahead` skip with `"disabled"`. Also needs the desktop switch **Read ahead while you reply**; low power mode pauses it |
+| `read_ahead.enabled` | bool | `true` | Prefill the prompt into the local cache while a reply field has focus ([Read-ahead](../guide/double-tap.md#read-ahead)); for a cloud provider (Heed cloud when signed in) only the connection is opened, without content. `false` makes `draft.read_ahead` skip with `"disabled"`. Also needs the desktop switch **Read ahead while you reply**; low power mode pauses it |
 | `read_ahead.min_interval_ms` | integer | `5000` | Minimum time between read-aheads that do work; others skip with `"rate_limited"` |
