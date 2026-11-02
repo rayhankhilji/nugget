@@ -1243,7 +1243,7 @@
   "today.new": "新",
   "today.sensitive": "敏感",
   "today.people": "相关人员：{people}",
-  "today.why": "原因：",
+  "today.why": "为何显示：",
   "today.whyLabel": "此卡片出现的原因",
   "today.evidence": "{n, plural, other {显示 # 个来源}}",
   "today.evidenceLabel": "{title} 的来源",
@@ -2366,7 +2366,6 @@
   "home.greeting.morning": "早上好",
   "home.greeting.afternoon": "下午好",
   "home.greeting.evening": "晚上好",
-  "home.description": "随便问，看看今天什么最重要。未经你批准，什么都不会执行。",
   "home.askLabel": "问 Heed",
   "home.askPlaceholder": "关于你的邮件、日历、文档和聊天，随便问",
   "home.askHint": "按 Enter 提问 · Shift+Enter 换行",
@@ -2390,5 +2389,13 @@
   "onboarding.answer.suggestionsLabel": "可以试试的问题",
   "onboarding.answer.suggestion1": "今天有哪些需要我回复？",
   "onboarding.answer.suggestion2": "这周我的日程有什么？",
-  "onboarding.answer.suggestion3": "我最近答应过别人什么？"
+  "onboarding.answer.suggestion3": "我最近答应过别人什么？",
+  "home.meetings": "{count, plural, other {# 个会议}}",
+  "home.suggestLabel": "可以先问这些",
+  "home.suggest.prep": "帮我准备 {title}",
+  "home.suggest.card": "“{title}” 我该怎么处理？",
+  "home.suggest.promised": "我这周答应了什么？",
+  "home.suggest.week": "我这周的日程有什么？",
+  "home.suggest.changed": "从昨天到现在有什么变化？",
+  "home.empty.body": "在上方随便问。新的会议、截止日期和回复一到就会显示在这里。"
 }

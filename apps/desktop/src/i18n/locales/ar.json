@@ -1243,7 +1243,7 @@
   "today.new": "جديد",
   "today.sensitive": "حساس",
   "today.people": "مع {people}",
-  "today.why": "السبب:",
+  "today.why": "سبب ظهوره هنا:",
   "today.whyLabel": "سبب وجود هذه البطاقة",
   "today.evidence": "{n, plural, one {عرض مصدر واحد} two {عرض مصدرين} few {عرض # مصادر} other {عرض # مصدر}}",
   "today.evidenceLabel": "مصادر {title}",
@@ -2366,7 +2366,6 @@
   "home.greeting.morning": "صباح الخير",
   "home.greeting.afternoon": "مساء الخير",
   "home.greeting.evening": "مساء الخير",
-  "home.description": "اسأل عن أي شيء، وشاهد ما يهم اليوم. لا يُنفَّذ شيء حتى توافق عليه.",
   "home.askLabel": "اسأل Heed",
   "home.askPlaceholder": "اسأل عن أي شيء في بريدك وتقويمك ومستنداتك ومحادثاتك",
   "home.askHint": "Enter للسؤال · Shift+Enter لسطر جديد",
@@ -2390,5 +2389,13 @@
   "onboarding.answer.suggestionsLabel": "أسئلة للتجربة",
   "onboarding.answer.suggestion1": "ما الذي يحتاج إلى ردي اليوم؟",
   "onboarding.answer.suggestion2": "ما الذي في تقويمي هذا الأسبوع؟",
-  "onboarding.answer.suggestion3": "ما الذي وعدت به أحدًا مؤخرًا؟"
+  "onboarding.answer.suggestion3": "ما الذي وعدت به أحدًا مؤخرًا؟",
+  "home.meetings": "{count, plural, zero {لا اجتماعات} one {اجتماع واحد} two {اجتماعان} few {# اجتماعات} many {# اجتماعًا} other {# اجتماع}}",
+  "home.suggestLabel": "أسئلة للبدء",
+  "home.suggest.prep": "جهّزني لـ {title}",
+  "home.suggest.card": "ماذا أفعل بشأن «{title}»؟",
+  "home.suggest.promised": "بماذا وعدت هذا الأسبوع؟",
+  "home.suggest.week": "ما الذي في تقويمي هذا الأسبوع؟",
+  "home.suggest.changed": "ما الذي تغيّر منذ أمس؟",
+  "home.empty.body": "اسأل عن أي شيء أعلاه. تظهر هنا الاجتماعات والمواعيد النهائية والردود الجديدة عند وصولها."
 }

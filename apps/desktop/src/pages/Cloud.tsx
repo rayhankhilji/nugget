@@ -3,6 +3,7 @@ import { splitCitations } from "../citations";
 import { cloudApi, type CloudAnswer, type CloudApp, type CloudConnection, type CloudSyncResult } from "../cloud";
 import { formatRelative, formatTime } from "../format";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
+import { AppLogo } from "../components/AppLogo";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { useT } from "../i18n";
 import { SignIn } from "./SignIn";
@@ -195,8 +196,9 @@ function Connections() {
           <h2 id="cloud-available">{t("cloud.available.title")}</h2>
           <ul className="cloud-apps">
             {data.available.map((a) => (
-              <li key={a.slug}>
-                <span>{a.name}</span>{" "}
+              <li key={a.slug} className="cloud-app">
+                <AppLogo app={a} />
+                <span className="cloud-app-name">{a.name}</span>
                 {connected.has(a.slug) ? (
                   <Badge tone="good">{t("cloud.connected")}</Badge>
                 ) : a.connectable ? (

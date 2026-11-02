@@ -195,7 +195,7 @@ describe("Today page", () => {
   it("previews, approves, confirms and shows the draft", async () => {
     const { executes, calls } = setup({ open_mailto: null });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft reply"));
+    await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Draft reply")));
     await flush();
     const dialog = document.querySelector("dialog")!;
     expect(dialog.textContent).toContain("This is a preview");
@@ -219,7 +219,7 @@ describe("Today page", () => {
   it("shows the reason when the policy denies", async () => {
     setup({ cards_execute: { outcome: "denied", detail: "sending is blocked" } });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft reply"));
+    await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Draft reply")));
     await flush();
     await click(byText(document.querySelector("dialog")!, "button", "Approve"));
     expect(document.querySelector("dialog")?.textContent).toContain("Not allowed: sending is blocked");

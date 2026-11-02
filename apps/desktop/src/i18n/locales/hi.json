@@ -1243,7 +1243,7 @@
   "today.new": "नया",
   "today.sensitive": "संवेदनशील",
   "today.people": "{people} के साथ",
-  "today.why": "क्यों:",
+  "today.why": "यह यहाँ क्यों है:",
   "today.whyLabel": "यह कार्ड यहाँ क्यों है",
   "today.evidence": "{n, plural, one {# स्रोत दिखाएँ} other {# स्रोत दिखाएँ}}",
   "today.evidenceLabel": "{title} के स्रोत",
@@ -2366,7 +2366,6 @@
   "home.greeting.morning": "सुप्रभात",
   "home.greeting.afternoon": "नमस्ते",
   "home.greeting.evening": "शुभ संध्या",
-  "home.description": "कुछ भी पूछें, और देखें कि आज क्या ज़रूरी है। आपकी मंज़ूरी के बिना कुछ नहीं चलता।",
   "home.askLabel": "Heed से पूछें",
   "home.askPlaceholder": "अपने मेल, कैलेंडर, दस्तावेज़ों और चैट के बारे में कुछ भी पूछें",
   "home.askHint": "पूछने के लिए Enter · नई पंक्ति के लिए Shift+Enter",
@@ -2390,5 +2389,13 @@
   "onboarding.answer.suggestionsLabel": "आज़माने के लिए सवाल",
   "onboarding.answer.suggestion1": "आज किन चीज़ों का जवाब देना है?",
   "onboarding.answer.suggestion2": "इस हफ़्ते मेरे कैलेंडर में क्या है?",
-  "onboarding.answer.suggestion3": "मैंने हाल में किसी से क्या वादा किया था?"
+  "onboarding.answer.suggestion3": "मैंने हाल में किसी से क्या वादा किया था?",
+  "home.meetings": "{count, plural, one {# मीटिंग} other {# मीटिंग}}",
+  "home.suggestLabel": "शुरू करने के लिए सवाल",
+  "home.suggest.prep": "{title} के लिए मुझे तैयार करें",
+  "home.suggest.card": "“{title}” के बारे में मुझे क्या करना चाहिए?",
+  "home.suggest.promised": "मैंने इस हफ़्ते क्या वादा किया?",
+  "home.suggest.week": "इस हफ़्ते मेरे कैलेंडर में क्या है?",
+  "home.suggest.changed": "कल से क्या बदला?",
+  "home.empty.body": "ऊपर कुछ भी पूछें। नई मीटिंग, समय-सीमाएँ और जवाब आते ही यहाँ दिखते हैं।"
 }
