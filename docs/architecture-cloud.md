@@ -45,7 +45,7 @@ The desktop app stays the only client. Everything that needs the local OS stays 
 - **Storage:** a private bucket, `exports`, holds data exports for GDPR. A user can read only objects under their own `<uid>/` prefix. Attachments are not stored in M1.
 
 ### Cloud service: a small Rust service, not Edge Functions
-**Decision: `crates/nugget-cloud`, an axum binary on Fly.io (shared-cpu-1x).** It talks to Postgres directly, through the Supabase pooler.
+**Decision: `crates/nugget-cloud`, an axum binary on Fly.io (shared-cpu-1x, region `lhr`).** It talks to Postgres directly, through the Supabase pooler, using `tokio-postgres` over rustls. TLS is verified against Supabase's root CA (`DATABASE_CA_CERT`) or the OS trust store. Deployment files: `crates/nugget-cloud/Dockerfile` and `fly.toml`.
 
 | | Supabase Edge Functions | Rust service on Fly.io |
 |---|---|---|
@@ -144,6 +144,7 @@ Asks are the variable that matters. Prompt caching and the 24k cap keep them bou
 
 ## Security
 - **Isolation:** RLS on every table, with the `nugget_service` role subject to RLS too (see above). `supabase/tests/rls.sql` checks that user A cannot read, write or delete user B's rows, both as `authenticated` and as `nugget_service`.
+- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`.
 - **Secrets** live only in the cloud environment's settings (Fly secrets for the service, and Composio's and Supabase's dashboards). They are never committed and never sent to clients. The desktop ships only `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public by design and protected by RLS) and the API base URL. `SUPABASE_SERVICE_ROLE_KEY` is used only by the service, for the admin user deletion call.
 - **Tokens at rest:**
   - Google OAuth tokens are held by Composio, encrypted by them. We never see them.
@@ -153,7 +154,7 @@ Asks are the variable that matters. Prompt caching and the 24k cap keep them bou
 - **Webhooks:** Composio webhooks are verified with HMAC-SHA256 over `id.timestamp.body` (the Standard Webhooks scheme), and a timestamp more than 5 minutes off is rejected.
 - **GDPR (UK GDPR / DPA 2018):**
   - **Export:** `GET /v1/export` returns all of the user's rows as JSON. The desktop's "Download my data" saves it.
-  - **Deletion:** `DELETE /v1/me` does three things. It deletes the Composio connected accounts. It deletes the auth user through the admin API, which cascades to every table and the storage prefix. Then it writes a usage-free tombstone for the audit trail.
+  - **Deletion:** `DELETE /v1/me` deletes the Composio connected accounts first; if that fails, nothing is deleted and the user can retry. It then deletes the auth user through the admin API, which cascades to every table. M1 stores nothing in Storage. From M4, exports in Storage must be deleted explicitly, because Storage objects do not cascade.
   - Retention: items are kept until the user disconnects or deletes their account. Disconnecting a toolkit deletes its items.
   - Data processors to list in the privacy policy and DPAs: Supabase, Fly.io, Composio, Anthropic and OpenAI.
   - The Supabase region should be eu-west-2 (London) and the Fly region `lhr`.
