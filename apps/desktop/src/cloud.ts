@@ -204,6 +204,24 @@ export function deviceTimeZone(): string | undefined {
   }
 }
 
+/** Display names for the app slugs the cloud uses as source names; anything else is title-cased. */
+const APP_NAMES: Record<string, string> = {
+  gmail: "Gmail",
+  googlecalendar: "Google Calendar",
+  googledrive: "Google Drive",
+  googledocs: "Google Docs",
+  slack: "Slack",
+  notion: "Notion",
+  outlook: "Outlook",
+  linear: "Linear",
+  dropbox: "Dropbox",
+  github: "GitHub",
+};
+
+export function appName(slug: string): string {
+  return APP_NAMES[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
 export type CloudAppCategory = "mail" | "calendar" | "chat" | "docs" | "files";
 
 /** An app in the catalogue (`cloud_apps`): what it syncs, which actions it can take. */

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { splitCitations } from "../citations";
-import { CloudError, cloudApi, type BillingInterval, type CloudAnswer, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
+import { CloudError, appName, cloudApi, type BillingInterval, type CloudAnswer, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
 import { formatRelative, formatTime } from "../format";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { AppLogo } from "../components/AppLogo";
@@ -70,7 +70,7 @@ function Connections() {
   const [synced, setSynced] = useState<CloudSyncResult[] | null>(null);
 
   const data = list.data;
-  const nameOf = (slug: string) => data?.available.find((a) => a.slug === slug)?.name ?? slug;
+  const nameOf = (slug: string) => data?.available.find((a) => a.slug === slug)?.name ?? appName(slug);
 
   const act = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -132,7 +132,7 @@ function Connections() {
           <ul className="cloud-conns">
             {data.connections.map((c) => {
               const active = isActive(c.status);
-              const app = data.available.find((a) => a.slug === c.toolkit) ?? { name: c.toolkit, logo: null };
+              const app = data.available.find((a) => a.slug === c.toolkit) ?? { name: appName(c.toolkit), logo: null };
               return (
                 <li key={c.id} className="card cloud-conn">
                   <div className="cloud-conn-head">
@@ -283,7 +283,7 @@ function CloudAsk() {
                   const title = c.title || t("cloud.ask.untitled");
                   return (
                     <li key={c.n} id={`cloud-cite-${c.n}`} tabIndex={-1} aria-current={focused === c.n ? "true" : undefined}>
-                      <span>[{c.n}]</span> <strong dir="auto">{title}</strong> <Badge>{c.source}</Badge>
+                      <span>[{c.n}]</span> <strong dir="auto">{title}</strong> <Badge>{appName(c.source)}</Badge>
                       {c.occurred_at && <span className="muted small"> {formatTime(c.occurred_at)}</span>}
                       {c.url && (
                         <button type="button" className="btn btn-small" onClick={() => void opener.open(c.url!, title)} aria-label={t("cloud.ask.openLabel", { title })}>

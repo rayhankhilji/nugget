@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { cloudApi, type CloudSearchResponse } from "../cloud";
+import { appName, cloudApi, type CloudSearchResponse } from "../cloud";
 import { formatTime } from "../format";
 import { useOpener } from "../hooks";
 import { useT } from "../i18n";
@@ -55,7 +55,7 @@ export function CloudSearch() {
         <div className="chips" role="group" aria-label={t("searchCloud.sources")}>
           {res.facets.sources.map((f) => (
             <button key={f.value} type="button" className="chip" aria-pressed={sources.includes(f.value)} onClick={() => toggle(f.value)}>
-              {f.value} <span className="muted">{f.count}</span>
+              {appName(f.value)} <span className="muted">{f.count}</span>
             </button>
           ))}
         </div>
@@ -85,7 +85,7 @@ export function CloudSearch() {
                       )}
                     </div>
                     <p className="small muted result-meta">
-                      {r.source}
+                      {appName(r.source)}
                       {r.author && <> · {r.author}</>}
                       {r.occurred_at && <> · {formatTime(r.occurred_at)}</>}
                     </p>

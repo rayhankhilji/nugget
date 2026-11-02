@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import type { CloudCitation } from "../cloud";
+import { appName, type CloudCitation } from "../cloud";
 import { splitCitations } from "../citations";
 import { formatTime } from "../format";
 import { useOpener } from "../hooks";
@@ -63,7 +63,7 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
                       {title}
                     </span>
                     <span className="small muted">
-                      {c.source}
+                      {appName(c.source)}
                       {c.occurred_at && <> · {formatTime(c.occurred_at)}</>}
                     </span>
                   </span>

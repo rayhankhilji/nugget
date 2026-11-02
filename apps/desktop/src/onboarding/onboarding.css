@@ -887,12 +887,12 @@ button.ob-app-tile:disabled {
   gap: var(--space-2);
   padding-block: var(--space-3) var(--space-4);
   border-block-start: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(8px);
 }
 
 /* Content continues under the footer: a shadow says there's more to scroll. */
 .ob-actions-stuck {
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
   box-shadow: 0 calc(var(--space-3) * -1) var(--space-3) calc(var(--space-3) * -1) var(--backdrop);
 }
 

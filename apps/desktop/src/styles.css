@@ -3842,11 +3842,16 @@ kbd,
 .mono,
 .num,
 .stat-value,
+.usage-numbers {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meta lines mix words and numbers: Geist, with tabular figures so the numbers still line up. */
 .result-meta,
 .needs-item-kind,
 .cloud-conn-sync,
 .action-meta {
-  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4175,4 +4180,105 @@ kbd {
     stroke-dashoffset: 0;
     animation: none;
   }
+}
+
+/* App logo tiles: the app's logo, or its initial, on a white tile in both themes. */
+.app-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line), var(--shadow);
+  color: var(--logo-ink);
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.app-logo img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* Available apps: a three-column gallery of tiles, connect on the right. */
+.cloud-apps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+}
+
+.cloud-app {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.cloud-app-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.cloud-conn {
+  padding: var(--space-4);
+}
+
+.cloud-conn .btn-ghost {
+  margin-inline-start: -8px;
+}
+
+/* Ask your cloud: one line, the field takes the room. */
+section[aria-labelledby="cloud-ask"] form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 720px;
+}
+
+section[aria-labelledby="cloud-ask"] form input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* What an approval will send reads like the message it is, not like a code diff. */
+.action-item .today-diff {
+  border: 0;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: var(--space-3) var(--space-4);
+}
+
+.action-item .today-diff-add {
+  background: none;
+  color: var(--text);
+  text-decoration: none;
+  white-space: pre-wrap;
+}
+
+.action-item .today-diff li {
+  display: block;
+  padding: 0;
+}
+
+.action-item .action-diff-field {
+  display: block;
+  margin-block-end: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }

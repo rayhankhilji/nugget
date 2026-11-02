@@ -185,7 +185,7 @@ describe("CloudPage", () => {
     const item = container.querySelector<HTMLElement>("#cloud-cite-1")!;
     expect(document.activeElement).toBe(item);
     expect(item.textContent).toContain("Booking confirmed");
-    expect(item.textContent).toContain("gmail");
+    expect(item.textContent).toContain("Gmail");
     await click(byText(item, "button", "Open"));
     expect(opened).toEqual([{ url: "https://mail.example/i1" }]);
 
