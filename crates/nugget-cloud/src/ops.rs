@@ -351,7 +351,9 @@ pub async fn observe(mut req: Request, next: Next) -> Response {
 
 /// Per-request deadline: Ask may take a minute (model latency), everything else 30 seconds.
 pub async fn deadline(req: Request, next: Next) -> Response {
-    let limit = if route_of(&req) == "/v1/ask" {
+    // Prefix match so a streaming Ask route (/v1/ask/...) gets the longer deadline too. The
+    // deadline covers producing the response head; a streamed body must bound itself.
+    let limit = if route_of(&req).starts_with("/v1/ask") {
         Duration::from_secs(60)
     } else {
         Duration::from_secs(30)

@@ -39,6 +39,8 @@ pub struct Limiters {
     pub user: RateLimiter<Uuid>,
     pub ask: RateLimiter<Uuid>,
     pub sync: RateLimiter<Uuid>,
+    /// `GET /v1/export` builds the whole corpus in memory: once a minute per user.
+    pub export: RateLimiter<Uuid>,
 }
 
 impl Limiters {
@@ -48,6 +50,7 @@ impl Limiters {
             user: RateLimiter::per_minute(l.user_per_min),
             ask: RateLimiter::per_minute(l.ask_per_min),
             sync: RateLimiter::every(l.sync_every_secs),
+            export: RateLimiter::every(if l.user_per_min == 0 { 0 } else { 60 }),
         }
     }
 }
@@ -565,6 +568,10 @@ async fn ask_route(
 
 async fn export(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Value>> {
     let u = user(&s, &h).await?;
+    s.limits
+        .export
+        .check(&u.id)
+        .map_err(|w| ApiError::rate_limited("export", w))?;
     Ok(Json(s.db.export(u.id).await?))
 }
 

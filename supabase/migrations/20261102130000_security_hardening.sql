@@ -58,6 +58,11 @@ $$;
 revoke all on function nugget_private.claim_due_connections(int, int) from public;
 grant execute on function nugget_private.claim_due_connections(int, int) to nugget_service;
 
+-- A user deleting a connection row directly through the Data API would drop its items but
+-- leave the Google grant alive at Composio (and the next listing re-adds it). Disconnecting goes
+-- through DELETE /v1/connections/{id}, which revokes at Composio first.
+revoke delete on public.connections from authenticated;
+
 -- ---------------------------------------------------------------------------------------------
 -- 3. search_path and default privileges
 -- ---------------------------------------------------------------------------------------------

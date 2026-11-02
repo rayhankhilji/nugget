@@ -236,3 +236,16 @@ async fn concurrent_scheduler_passes_never_sync_a_connection_twice() {
     let calls = h.composio.calls.lock().unwrap().len();
     assert_eq!(calls, 6, "one fetch per connection, no duplicates");
 }
+
+#[tokio::test]
+async fn export_is_limited_to_once_a_minute() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    let app = app_with(&h, Limits::default());
+    let u = add_user(&h.pool).await;
+    let (s, v) = call(&app, "GET", "/v1/export", Some(u), None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (s, _) = call(&app, "GET", "/v1/export", Some(u), None).await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+}

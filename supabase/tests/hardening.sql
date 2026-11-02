@@ -22,6 +22,11 @@ begin
   end loop;
 end $$;
 
+do $$ begin
+  assert not has_table_privilege('authenticated', 'public.connections', 'delete'),
+    'connections must be disconnected through the service (Composio revocation first)';
+end $$;
+
 -- No views in public that would bypass RLS (views run as their owner unless security_invoker).
 do $$
 declare
