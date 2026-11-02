@@ -111,7 +111,55 @@ begin;
 set local role nugget_service;
 do $$ begin
   assert (select user_id from nugget_private.connection_owner('ca_1')) = '00000000-0000-0000-0000-00000000000a', 'owner lookup';
-  assert (select count(*) from nugget_private.due_connections(10)) = 1, 'due connection listed';
+  assert (select count(*) from nugget_private.due_connections(10)) = 0, 'no subscription, no sync';
+end $$;
+rollback;
+
+-- Billing: the service writes A's subscription; due sync needs it; B cannot see it.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.billing_customers (user_id, stripe_customer_id) values ('00000000-0000-0000-0000-00000000000a', 'cus_A');
+insert into public.subscriptions (id, user_id, plan, interval, status, stripe_price_id)
+  values ('sub_A', '00000000-0000-0000-0000-00000000000a', 'heed', 'month', 'trialing', 'price_1');
+insert into public.devices (user_id, device_id) values ('00000000-0000-0000-0000-00000000000a', 'device-0001');
+commit;
+begin;
+set local role nugget_service;
+do $$ begin
+  assert (select count(*) from nugget_private.due_connections(10)) = 1, 'subscribed connection is due';
+  assert nugget_private.customer_owner('cus_A') = '00000000-0000-0000-0000-00000000000a', 'customer owner';
+  assert not nugget_private.stripe_event_seen('evt_1'), 'event unseen';
+  perform nugget_private.mark_stripe_event('evt_1', 'checkout.session.completed');
+  perform nugget_private.mark_stripe_event('evt_1', 'checkout.session.completed');
+  assert nugget_private.stripe_event_seen('evt_1'), 'event recorded once';
+end $$;
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.subscriptions) = 0, 'B sees no subscriptions of A';
+  assert (select count(*) from public.billing_customers) = 0, 'B sees no customers of A';
+  begin
+    perform count(*) from nugget_private.stripe_events;
+    raise exception 'authenticated could read stripe_events';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select status from public.subscriptions) = 'trialing', 'A sees own subscription';
+  begin
+    update public.subscriptions set status = 'active';
+    raise exception 'user could change own subscription';
+  exception when insufficient_privilege then null;
+  end;
+  delete from public.devices;
+  assert (select count(*) from public.devices) = 0, 'A can forget own devices';
 end $$;
 rollback;
 begin;
@@ -228,5 +276,27 @@ do $$ begin
   assert (select count(*) from public.connections) = 0, 'connections cascade';
   assert (select count(*) from public.pending_actions) = 0, 'actions cascade';
   assert (select count(*) from public.action_audit) = 0, 'audit cascades with the user';
+  assert (select count(*) from public.subscriptions) = 0, 'subscriptions cascade';
+  assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;
 select 'rls.sql: all assertions passed' as result;
+
+-- Nothing in nugget_private is executable by the API roles.
+do $$ begin
+  assert not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+                  unnest(array['anon', 'authenticated']) r
+    where n.nspname = 'nugget_private' and has_function_privilege(r, p.oid, 'execute')
+  ), 'nugget_private functions are private';
+  assert not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where p.prosecdef and n.nspname in ('public', 'nugget_private')
+      and not exists (select 1 from unnest(p.proconfig) c where c like 'search_path=%')
+  ), 'definer functions pin search_path';
+end $$;
+-- A new auth user still gets a profile after the revoke.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000c', 'c@example.com');
+do $$ begin
+  assert exists (select 1 from public.profiles where user_id = '00000000-0000-0000-0000-00000000000c'), 'trigger still works';
+end $$;
+select 'rls.sql: hardening assertions passed' as result;

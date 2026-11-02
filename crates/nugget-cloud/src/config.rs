@@ -24,6 +24,13 @@ pub struct Config {
     pub model_smart: Option<String>,
     /// Where Composio sends the browser after consent.
     pub connect_callback: String,
+    pub stripe_secret_key: Option<String>,
+    pub stripe_webhook_secret: Option<String>,
+    pub stripe_base: String,
+    /// The service's public https base URL (Stripe returns the browser to `/billing/done`).
+    pub public_url: Option<String>,
+    /// Scheme of the desktop app's deep links (`nugget`, or `heed` after the rename).
+    pub app_scheme: String,
 }
 
 impl std::fmt::Debug for Config {
@@ -36,6 +43,8 @@ impl std::fmt::Debug for Config {
             .field("composio", &self.composio_api_key.is_some())
             .field("anthropic", &self.anthropic_api_key.is_some())
             .field("openai", &self.openai_api_key.is_some())
+            .field("stripe", &self.stripe_secret_key.is_some())
+            .field("public_url", &self.public_url)
             .finish_non_exhaustive()
     }
 }
@@ -81,6 +90,14 @@ impl Config {
             model_smart: opt("NUGGET_MODEL_SMART"),
             connect_callback: opt("NUGGET_CONNECT_CALLBACK")
                 .unwrap_or_else(|| "nugget://connections/callback".into()),
+            stripe_secret_key: opt("STRIPE_SECRET_KEY"),
+            stripe_webhook_secret: opt("STRIPE_WEBHOOK_SECRET"),
+            stripe_base: opt("NUGGET_STRIPE_BASE_URL")
+                .unwrap_or_else(|| "https://api.stripe.com".into()),
+            public_url: opt("NUGGET_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
+            app_scheme: opt("NUGGET_APP_SCHEME")
+                .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
+                .unwrap_or_else(|| "nugget".into()),
         })
     }
 }

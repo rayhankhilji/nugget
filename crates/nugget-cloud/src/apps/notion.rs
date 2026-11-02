@@ -74,6 +74,7 @@ impl SyncAdapter for Notion {
         tools: &dyn Tools,
         cursor: &Value,
         _now: OffsetDateTime,
+        _backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
         let after = cursor["edited_after"]

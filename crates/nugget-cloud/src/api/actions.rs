@@ -21,7 +21,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use super::{ApiError, ApiResult, AppState, user};
+use super::{ApiError, ApiResult, AppState, caller, user};
 use crate::actions::ActionKind;
 use crate::actions::store::{ActionError, ActionView, Proposal};
 
@@ -91,12 +91,16 @@ async fn propose(
     h: HeaderMap,
     Json(b): Json<ProposeBody>,
 ) -> ApiResult<Json<ActionView>> {
-    let u = user(&s, &h).await?;
+    // Proposing and approving need a live subscription (402); reading and cancelling do not,
+    // so a lapsed user can still see and withdraw what is pending.
+    let c = caller(&s, &h).await?;
+    c.entitled()?;
+    let u = c.user;
     let kind = ActionKind::parse(&b.kind).ok_or_else(|| bad("unknown action kind"))?;
     check_key(&b.idempotency_key)?;
     let toolkit = b.toolkit.to_ascii_lowercase();
     Ok(Json(
-        s.actions
+        s.actions()
             .propose(
                 u.id,
                 Proposal {
@@ -126,7 +130,7 @@ async fn list(
     {
         return Err(bad("unknown status"));
     }
-    let actions = s.actions.list(u.id, q.status.as_deref()).await?;
+    let actions = s.actions().list(u.id, q.status.as_deref()).await?;
     Ok(Json(json!({ "actions": actions })))
 }
 
@@ -136,7 +140,7 @@ async fn status(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<ActionView>> {
     let u = user(&s, &h).await?;
-    Ok(Json(s.actions.get(u.id, id).await?))
+    Ok(Json(s.actions().get(u.id, id).await?))
 }
 
 /// The dry run. The plan was computed at proposal time and nothing upstream is called.
@@ -146,7 +150,7 @@ async fn preview(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<ActionView>> {
     let u = user(&s, &h).await?;
-    Ok(Json(s.actions.get(u.id, id).await?))
+    Ok(Json(s.actions().get(u.id, id).await?))
 }
 
 #[derive(Deserialize)]
@@ -160,8 +164,10 @@ async fn approve(
     Path(id): Path<Uuid>,
     Json(b): Json<ApproveBody>,
 ) -> ApiResult<Json<ActionView>> {
-    let u = user(&s, &h).await?;
-    Ok(Json(s.actions.approve(u.id, id, &b.digest).await?))
+    let c = caller(&s, &h).await?;
+    c.entitled()?;
+    let u = c.user;
+    Ok(Json(s.actions().approve(u.id, id, &b.digest).await?))
 }
 
 async fn cancel(
@@ -170,5 +176,5 @@ async fn cancel(
     Path(id): Path<Uuid>,
 ) -> ApiResult<Json<ActionView>> {
     let u = user(&s, &h).await?;
-    Ok(Json(s.actions.cancel(u.id, id).await?))
+    Ok(Json(s.actions().cancel(u.id, id).await?))
 }

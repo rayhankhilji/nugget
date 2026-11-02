@@ -157,9 +157,10 @@ impl SyncAdapter for Outlook {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
-        let backfill = now - Duration::days(BACKFILL_DAYS);
+        let backfill = now - Duration::days(BACKFILL_DAYS.min(i64::from(backfill_days)));
         let mail_after = cursor["mail_after"]
             .as_str()
             .and_then(|s| parse_time(Some(&json!(s))))
@@ -210,7 +211,7 @@ impl SyncAdapter for Outlook {
         let events_after = cursor["events_after"]
             .as_str()
             .and_then(|s| parse_time(Some(&json!(s))))
-            .unwrap_or(now - Duration::days(90));
+            .unwrap_or(now - Duration::days(90.min(i64::from(backfill_days))));
         let mut page: Option<String> = None;
         let mut events_complete = false;
         for _ in 0..MAX_PAGES {
@@ -305,6 +306,7 @@ impl SyncAdapter for Teams {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
         let data = tools
@@ -340,7 +342,8 @@ impl SyncAdapter for Teams {
         let mut next: Map<String, Value> = state.as_object().cloned().unwrap_or_default();
         for (id, topic, _) in chats.into_iter().take(CHATS_PER_SYNC) {
             let st = &state[&id];
-            let after = synced(&id).unwrap_or(now - Duration::days(BACKFILL_DAYS));
+            let after = synced(&id)
+                .unwrap_or(now - Duration::days(BACKFILL_DAYS.min(i64::from(backfill_days))));
             // Graph lists chat messages newest first only. An unfinished read resumes from its
             // page token with the same filter; `after` moves once everything newer was read.
             let mut args = json!({"user_id": "me", "chat_id": id, "top": 50,

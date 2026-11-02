@@ -206,6 +206,8 @@ pub struct Pull {
     pub windows: Vec<Window>,
     /// The cursor to store once everything above is applied.
     pub cursor: Value,
+    /// A backfill stopped at its page limit: continue in a minute rather than at the cadence.
+    pub more: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -229,12 +231,14 @@ pub trait SyncAdapter: Send + Sync {
     fn max_calls(&self) -> u32 {
         40
     }
-    /// Fetches what changed since `cursor`.
+    /// Fetches what changed since `cursor`. `backfill_days` is how far back a first sync may
+    /// reach under the user's plan.
     async fn pull(
         &self,
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError>;
 }
 

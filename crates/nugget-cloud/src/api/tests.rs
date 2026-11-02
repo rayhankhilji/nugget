@@ -11,7 +11,13 @@ use uuid::Uuid;
 
 use super::*;
 use crate::gateway::{Embedder, Llm};
-use crate::testkit::{FakeComposio, FakeEmbedder, FakeLlm, add_user, fakes, test_db};
+use crate::plans::Catalog;
+use crate::testkit::{
+    FakeComposio, FakeEmbedder, FakeLlm, FakeStripe, add_user, fakes, subscriber, test_db,
+    test_prices,
+};
+
+mod billing;
 
 struct Harness {
     app: Router,
@@ -20,6 +26,7 @@ struct Harness {
     composio: Arc<FakeComposio>,
     llm: Arc<FakeLlm>,
     auth: Arc<crate::testkit::FakeAuth>,
+    stripe: Arc<FakeStripe>,
 }
 
 mod actions;
@@ -46,15 +53,15 @@ async fn harness_with(embeddings: bool, auth_configs: &[(&str, &str)]) -> Option
         .iter()
         .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
         .collect();
-    let state = AppState::new(
-        db.clone(),
-        auth.clone(),
-        Some(composio.clone() as Arc<dyn Composio>),
-        gateway,
-        configs,
-        Some("whsec".into()),
-        "nugget://connections/callback".into(),
-    );
+    let plans = Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap();
+    let stripe = Arc::new(FakeStripe::default());
+    let mut state = AppState::new(db.clone(), auth.clone(), gateway, Arc::new(plans));
+    state.composio = Some(composio.clone() as Arc<dyn Composio>);
+    state.auth_configs = configs;
+    state.webhook_secret = Some("whsec".into());
+    state.stripe = Some(stripe.clone() as Arc<dyn crate::stripe::Stripe>);
+    state.stripe_webhook_secret = Some("whsec_stripe".into());
+    state.public_url = Some("https://api.test".into());
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),
         json!({"messages": [
@@ -77,6 +84,7 @@ async fn harness_with(embeddings: bool, auth_configs: &[(&str, &str)]) -> Option
         composio,
         llm,
         auth,
+        stripe,
     })
 }
 
@@ -87,7 +95,21 @@ async fn call(
     user: Option<Uuid>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
+    call_with(app, method, uri, user, body, &[]).await
+}
+
+async fn call_with(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    user: Option<Uuid>,
+    body: Option<Value>,
+    headers: &[(&str, &str)],
+) -> (StatusCode, Value) {
     let mut req = Request::builder().method(method).uri(uri);
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
     if let Some(u) = user {
         req = req.header("authorization", format!("Bearer tok-{u}"));
     }
@@ -146,11 +168,12 @@ async fn connect_and_sync(h: &Harness, u: Uuid) {
 #[tokio::test]
 async fn m1_flow_sign_in_connect_sync_ask_with_citation() {
     let Some(h) = harness(true).await else { return };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
 
     let (s, v) = call(&h.app, "GET", "/v1/me", Some(u), None).await;
     assert_eq!(s, StatusCode::OK);
-    assert_eq!(v["plan"], "free");
+    assert_eq!(v["plan"], "heed");
+    assert_eq!(v["entitlements"]["devices"], 1);
     assert_eq!(v["embeddings"], true);
 
     let (s, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
@@ -237,7 +260,7 @@ async fn full_text_only_without_embeddings() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect_and_sync(&h, u).await;
     let (s, v) = call(
         &h.app,
@@ -256,8 +279,8 @@ async fn full_text_only_without_embeddings() {
 #[tokio::test]
 async fn users_are_isolated() {
     let Some(h) = harness(true).await else { return };
-    let a = add_user(&h.pool).await;
-    let b = add_user(&h.pool).await;
+    let a = subscriber(&h.pool, "heed").await;
+    let b = subscriber(&h.pool, "heed").await;
     connect_and_sync(&h, a).await;
     let (s, v) = call(
         &h.app,
@@ -304,7 +327,7 @@ async fn auth_quota_validation_and_unsupported() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let (s, v) = call(&h.app, "GET", "/v1/me", None, None).await;
     assert_eq!(
         (s, v["error"].as_str()),
@@ -331,9 +354,9 @@ async fn auth_quota_validation_and_unsupported() {
         (s, v["error"].as_str()),
         (StatusCode::BAD_REQUEST, Some("unsupported_toolkit"))
     );
-    // Spend the free quota, then Ask is refused before any model call.
+    // Reach Heed's fair-use hard cap ($12), then Ask is refused before any model call.
     h.pool
-        .execute("insert into public.usage_events (user_id, kind, cost_micros) values ($1, 'llm', 750000)", &[&u])
+        .execute("insert into public.usage_events (user_id, kind, cost_micros) values ($1, 'llm', 12000000)", &[&u])
         .await
         .unwrap();
     let before = h.llm.prompts.lock().unwrap().len();
@@ -351,9 +374,9 @@ async fn auth_quota_validation_and_unsupported() {
     );
     assert_eq!(h.llm.prompts.lock().unwrap().len(), before);
     // Tool-call costs do not count against the AI quota.
-    let w = add_user(&h.pool).await;
+    let w = subscriber(&h.pool, "heed").await;
     h.pool
-        .execute("insert into public.usage_events (user_id, kind, cost_micros) values ($1, 'tool', 9000000)", &[&w])
+        .execute("insert into public.usage_events (user_id, kind, cost_micros) values ($1, 'tool', 99000000)", &[&w])
         .await
         .unwrap();
     let (s, _) = call(
@@ -372,7 +395,7 @@ async fn webhook_marks_due_and_rejects_bad_signatures() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect_and_sync(&h, u).await;
     let (_, ca) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
     let acc = ca["connections"][0]["composio_account_id"]
@@ -415,7 +438,7 @@ async fn disconnect_and_delete_account() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect_and_sync(&h, u).await;
     let (_, ca) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
     let gmail = ca["connections"]
@@ -466,7 +489,7 @@ async fn scheduler_syncs_due_connections() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     for t in ["gmail", "googlecalendar"] {
         call(
             &h.app,
@@ -479,7 +502,12 @@ async fn scheduler_syncs_due_connections() {
     }
     call(&h.app, "GET", "/v1/connections", Some(u), None).await; // records them active, due now
     let gateway = Gateway::new(None, None, String::new(), String::new());
-    let ingest = Ingest::new(h.db.clone(), h.composio.clone(), gateway);
+    let ingest = Ingest::new(
+        h.db.clone(),
+        h.composio.clone(),
+        gateway,
+        Arc::new(Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
+    );
     assert_eq!(ingest.run_due(10).await, 2);
     assert_eq!(ingest.run_due(10).await, 0, "next sync scheduled later");
     let n: i64 = h

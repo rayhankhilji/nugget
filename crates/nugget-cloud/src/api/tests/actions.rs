@@ -52,7 +52,7 @@ async fn nothing_is_sent_without_approval_and_approval_runs_once() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["gmail"]).await;
 
     let (s, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("k1"))).await;
@@ -195,7 +195,7 @@ async fn concurrent_approvals_send_once() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["slack"]).await;
     let (_, a) = call(
         &h.app,
@@ -240,7 +240,23 @@ async fn idempotency_validation_and_connections() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    // Without a live subscription, proposing is refused (402) before anything else.
+    let lapsed = add_user(&h.pool).await;
+    let (s, e) = call(
+        &h.app,
+        "POST",
+        "/v1/actions",
+        Some(lapsed),
+        Some(mail("k0")),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::PAYMENT_REQUIRED, Some("subscription_required"))
+    );
+    let (s, _) = call(&h.app, "GET", "/v1/actions", Some(lapsed), None).await;
+    assert_eq!(s, StatusCode::OK, "reading stays open");
+    let u = subscriber(&h.pool, "heed").await;
     // Not connected yet.
     let (s, e) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("k1"))).await;
     assert_eq!(
@@ -362,8 +378,8 @@ async fn actions_are_per_user() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let a = add_user(&h.pool).await;
-    let b = add_user(&h.pool).await;
+    let a = subscriber(&h.pool, "heed").await;
+    let b = subscriber(&h.pool, "heed").await;
     connect(&h, a, &["gmail"]).await;
     connect(&h, b, &["gmail"]).await;
     let (_, act) = call(&h.app, "POST", "/v1/actions", Some(a), Some(mail("k1"))).await;
@@ -399,7 +415,7 @@ async fn failures_are_recorded_and_not_retried() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["gmail"]).await;
     h.composio
         .fail
@@ -466,7 +482,7 @@ async fn update_event_previews_a_diff_against_the_synced_event() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["googlecalendar"]).await;
     call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await; // stores e1 "Dentist"
     let (s, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(json!({
@@ -501,7 +517,7 @@ async fn policy_denials_are_stored_and_never_run() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["slack"]).await;
     let mut cfg = nugget_policy::PolicyConfig::default();
     cfg.rules.push(
@@ -559,7 +575,7 @@ async fn apps_catalogue_lists_logos_capabilities_and_connections() {
     let Some(h) = harness_with(false, &[("gmail", "ac_gmail"), ("slack", "ac_slack")]).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["gmail"]).await;
     let (s, v) = call(&h.app, "GET", "/v1/apps", Some(u), None).await;
     assert_eq!(s, StatusCode::OK);
@@ -613,8 +629,8 @@ async fn trigger_apps_enable_triggers_and_webhooks_must_name_the_owner() {
     let Some(h) = harness_with(false, ALL).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
-    let other = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
+    let other = subscriber(&h.pool, "heed").await;
     connect(&h, u, &["notion", "slack"]).await;
     let (_, v) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
     assert!(

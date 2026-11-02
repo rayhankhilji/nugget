@@ -2890,7 +2890,9 @@ export type DeepLink =
   | { kind: "ask"; question: string }
   | { kind: "plugin"; path: string }
   /** Composio sent the browser back after connecting an app (Nugget Cloud). */
-  | { kind: "connections" };
+  | { kind: "connections" }
+  /** Stripe Checkout is done; the Cloud page reloads the plan. */
+  | { kind: "billing" };
 
 /** No payload: a link is waiting; take it with {@link platformApi.takeDeepLink}. */
 export const DEEPLINK_EVENT = "nugget:deeplink";

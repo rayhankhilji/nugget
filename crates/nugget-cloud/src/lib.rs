@@ -11,6 +11,8 @@
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
 //! - [`webhook`]: Composio webhook signature check.
+//! - [`plans`]: plans and entitlements (`plans.toml`).
+//! - [`stripe`]: Checkout, portal, subscriptions and Stripe webhook signatures.
 
 pub mod actions;
 pub mod api;
@@ -22,6 +24,8 @@ pub mod config;
 pub mod db;
 pub mod gateway;
 pub mod ingest;
+pub mod plans;
+pub mod stripe;
 pub mod webhook;
 
 #[cfg(test)]

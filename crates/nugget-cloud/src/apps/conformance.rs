@@ -469,7 +469,7 @@ async fn pulls_conform() {
     for f in fixtures(now) {
         let a = adapter(f.app).unwrap();
         let first = ScriptTools::new(f.first.clone());
-        let p1 = a.pull(&first, &json!({}), now).await.unwrap();
+        let p1 = a.pull(&first, &json!({}), now, 365).await.unwrap();
         check_pull(a, &first, &p1);
         let got: BTreeSet<_> = p1.items.iter().map(|i| i.external_id.clone()).collect();
         let want: BTreeSet<_> = f.first_ids.iter().cloned().collect();
@@ -477,7 +477,7 @@ async fn pulls_conform() {
 
         let second = ScriptTools::new(f.second.clone());
         let later = now + Duration::minutes(1);
-        let p2 = a.pull(&second, &p1.cursor, later).await.unwrap();
+        let p2 = a.pull(&second, &p1.cursor, later, 365).await.unwrap();
         check_pull(a, &second, &p2);
         let c1 = first.calls.lock().unwrap().clone();
         let c2 = second.calls.lock().unwrap().clone();
@@ -486,7 +486,7 @@ async fn pulls_conform() {
         // Determinism: the same answers give the same pull.
         let again = ScriptTools::new(f.second.clone());
         assert_eq!(
-            a.pull(&again, &p1.cursor, later).await.unwrap(),
+            a.pull(&again, &p1.cursor, later, 365).await.unwrap(),
             p2,
             "{}",
             f.app
@@ -514,7 +514,7 @@ async fn garbage_never_invents_items() {
                 garbage: Some(g.clone()),
                 calls: Mutex::new(Vec::new()),
             };
-            let p = a.pull(&tools, &json!({}), now).await.unwrap();
+            let p = a.pull(&tools, &json!({}), now, 365).await.unwrap();
             check_pull(a, &tools, &p);
             assert!(p.items.is_empty(), "{}: invented items from {g}", app.slug);
             assert!(
@@ -535,7 +535,7 @@ async fn syncs_propagate_edits_and_deletes() {
     use crate::composio::Composio;
     use crate::gateway::Gateway;
     use crate::ingest::Ingest;
-    use crate::testkit::{FakeComposio, add_user, test_db};
+    use crate::testkit::{FakeComposio, subscriber, test_db, test_prices};
 
     let Some((db, pool)) = test_db().await else {
         return;
@@ -546,9 +546,10 @@ async fn syncs_propagate_edits_and_deletes() {
         db.clone(),
         composio.clone() as Arc<dyn Composio>,
         Gateway::new(None, None, String::new(), String::new()),
+        Arc::new(crate::plans::Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
     );
     for f in fixtures(now) {
-        let u = add_user(&pool).await;
+        let u = subscriber(&pool, "heed").await;
         let uid = u.to_string();
         let account = format!("ca_{}_{}", &uid[..8], f.app);
         db.upsert_connection(u, f.app, &account, "active")
@@ -654,7 +655,7 @@ async fn rate_limited_sync_keeps_its_cursor() {
     use crate::composio::Composio;
     use crate::gateway::Gateway;
     use crate::ingest::Ingest;
-    use crate::testkit::{FakeComposio, add_user, test_db};
+    use crate::testkit::{FakeComposio, subscriber, test_db, test_prices};
 
     let Some((db, pool)) = test_db().await else {
         return;
@@ -669,8 +670,9 @@ async fn rate_limited_sync_keeps_its_cursor() {
         db.clone(),
         composio.clone() as Arc<dyn Composio>,
         Gateway::new(None, None, String::new(), String::new()),
+        Arc::new(crate::plans::Catalog::parse(crate::plans::DEFAULT_TOML, test_prices).unwrap()),
     );
-    let u = add_user(&pool).await;
+    let u = subscriber(&pool, "heed").await;
     let account = format!("ca_{}_slack", &u.to_string()[..8]);
     db.upsert_connection(u, "slack", &account, "active")
         .await

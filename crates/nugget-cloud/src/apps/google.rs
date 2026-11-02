@@ -51,16 +51,21 @@ impl SyncAdapter for Gmail {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
-        let mut page: Option<String> = None;
+        // A backfill that hit the page limit resumes from its page token (same query).
+        let resumed = cursor["page"].as_str().map(str::to_owned);
+        let mut page = resumed.clone();
         let mut newest = None;
+        let mut pending = None;
         let mut seen = Vec::new();
         let mut complete = false;
         let mut after = None;
-        for _ in 0..MAX_PAGES {
-            let (tool, args) = ingest::page_request(GMAIL, cursor, page.as_deref(), now)
-                .expect("gmail is supported");
+        for i in 0..MAX_PAGES {
+            let (tool, args) =
+                ingest::page_request(GMAIL, cursor, page.as_deref(), now, backfill_days)
+                    .expect("gmail is supported");
             after = args["query"]
                 .as_str()
                 .and_then(|q| q.strip_prefix("after:"))
@@ -78,6 +83,7 @@ impl SyncAdapter for Gmail {
                 out.items.push(item);
             }
             match next {
+                Some(n) if i + 1 == MAX_PAGES => pending = Some(n),
                 Some(n) => page = Some(n),
                 None => {
                     complete = true;
@@ -85,18 +91,22 @@ impl SyncAdapter for Gmail {
                 }
             }
         }
-        if complete && let Some(a) = after {
+        // Only a listing of the whole window in one run proves what is gone.
+        if complete
+            && resumed.is_none()
+            && let Some(a) = after
+            && let Ok(since) = OffsetDateTime::from_unix_timestamp(a + 60)
+        {
             // A minute inside the query's window, so an item on the boundary is never misjudged.
-            if let Ok(since) = OffsetDateTime::from_unix_timestamp(a + 60) {
-                out.windows.push(Window {
-                    kind: Some("email"),
-                    prefix: String::new(),
-                    since,
-                    seen,
-                });
-            }
+            out.windows.push(Window {
+                kind: Some("email"),
+                prefix: String::new(),
+                since,
+                seen,
+            });
         }
-        out.cursor = ingest::next_cursor(GMAIL, newest, cursor, now);
+        out.more = pending.is_some();
+        out.cursor = ingest::next_cursor(GMAIL, newest, cursor, now, backfill_days, pending);
         Ok(out)
     }
 }
@@ -122,12 +132,14 @@ impl SyncAdapter for Calendar {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
         let mut page: Option<String> = None;
         for _ in 0..MAX_PAGES {
-            let (tool, mut args) = ingest::page_request(CALENDAR, cursor, page.as_deref(), now)
-                .expect("calendar is supported");
+            let (tool, mut args) =
+                ingest::page_request(CALENDAR, cursor, page.as_deref(), now, backfill_days)
+                    .expect("calendar is supported");
             // With updatedMin, deleted events are returned anyway; ask for them explicitly too.
             args["showDeleted"] = json!(true);
             let data = tools.call(tool, args).await?;
@@ -145,7 +157,7 @@ impl SyncAdapter for Calendar {
                 None => break,
             }
         }
-        out.cursor = ingest::next_cursor(CALENDAR, None, cursor, now);
+        out.cursor = ingest::next_cursor(CALENDAR, None, cursor, now, backfill_days, None);
         Ok(out)
     }
 }
@@ -242,6 +254,7 @@ impl SyncAdapter for Drive {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
         let mut exports = 0;
@@ -251,7 +264,8 @@ impl SyncAdapter for Drive {
                 .call("GOOGLEDRIVE_GET_CHANGES_START_PAGE_TOKEN", json!({}))
                 .await?;
             let token = top_str(&start, &["/startPageToken", "/start_page_token", "/token"]);
-            let since = rfc3339(now - Duration::days(DRIVE_BACKFILL_DAYS));
+            let days = DRIVE_BACKFILL_DAYS.min(i64::from(backfill_days));
+            let since = rfc3339(now - Duration::days(days));
             let data = tools
                 .call(
                     "GOOGLEDRIVE_FIND_FILE",

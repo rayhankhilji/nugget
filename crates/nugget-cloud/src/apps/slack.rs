@@ -131,6 +131,7 @@ impl SyncAdapter for Slack {
         tools: &dyn Tools,
         cursor: &Value,
         now: OffsetDateTime,
+        backfill_days: u32,
     ) -> Result<Pull, PullError> {
         let mut out = Pull::default();
         // `limit` defaults to 1 in Composio's schema; always set it.
@@ -166,7 +167,7 @@ impl SyncAdapter for Slack {
             let oldest = match (resume.is_some(), st["oldest"].as_f64(), latest) {
                 (true, Some(o), _) => o,
                 (_, _, Some(l)) => l - LOOKBACK_SECS,
-                _ => now_s - BACKFILL_SECS,
+                _ => now_s - BACKFILL_SECS.min(f64::from(backfill_days) * 86_400.0),
             };
             let mut page = resume.clone();
             let mut seen = Vec::new();
