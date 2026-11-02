@@ -207,7 +207,14 @@ const limits = JSON.stringify(Object.fromEntries(plans.map((p) => [p.id, p.entit
         location.assign(url);
       } catch (err) {
         b.disabled = false;
-        say(err instanceof Error ? err.message : "We couldn't open billing.", true);
+        say(
+          err instanceof CloudError && err.code === "no_customer"
+            ? "There's no billing account yet. Choose a plan to start your free trial."
+            : err instanceof Error
+              ? err.message
+              : "We couldn't open billing.",
+          true,
+        );
       }
     });
 

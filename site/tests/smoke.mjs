@@ -127,6 +127,25 @@ for (const scheme of ["light", "dark"]) {
   await ctx.close();
 }
 
+// 6. An origin the cloud doesn't allow-list gets 400 bad_return_url; checkout retries without it.
+{
+  const ctx = await browser.newContext();
+  await signedIn(ctx);
+  const bodies = [];
+  await ctx.route(`${CLOUD}/v1/billing/checkout`, async (route) => {
+    const body = route.request().postDataJSON();
+    bodies.push(body);
+    if (body.return_url) return route.fulfill({ status: 400, json: { error: "bad_return_url", message: "return_url must be on the Heed website" } });
+    return route.fulfill({ json: { url: "https://checkout.stripe.test/c/pay_456" } });
+  });
+  await ctx.route("https://*.stripe.test/**", (route) => route.fulfill({ contentType: "text/html", body: "<title>Stripe</title>" }));
+  const page = await ctx.newPage();
+  await page.goto(base + "/checkout?plan=heed&interval=month");
+  await page.waitForURL("https://checkout.stripe.test/**");
+  check(bodies.length === 2 && bodies[0].return_url && !("return_url" in bodies[1]), "bad_return_url → retried without return_url");
+  await ctx.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures ? `\n${failures} failure(s)` : "\nall smoke checks passed");

@@ -51,8 +51,8 @@ These come from `crates/nugget-cloud` on `ar/cloud` (`src/api/billing.rs`, `plan
   the auth user, and the delete cascades.
 - Errors look like `{"error": code, "message"}`. Every call sends `Authorization: Bearer <Supabase access token>`.
 - The account page reads `public.subscriptions` and `public.devices` straight from Supabase. RLS
-  limits both tables to the signed-in user. Going through Supabase means it doesn't call `/v1/me`,
-  which would register the browser as a device.
+  limits both tables to the signed-in user. Going through Supabase means a single round trip, and
+  the devices list can be managed from the same place.
 
 ### Prices come from the API
 
@@ -65,15 +65,21 @@ prices.** A Cloudflare Pages deploy hook called from the cloud's release step ke
 
 ### What the cloud and Supabase need for the site to work
 
-1. **CORS.** The cloud service must allow the site's origin (`NUGGET_SITE_ORIGINS`, being added by
-   AR1) for `POST /v1/billing/*` and `DELETE /v1/me`, including preflight with `Authorization` and
-   `Content-Type`. Without that, the browser blocks these calls.
+1. **`NUGGET_SITE_ORIGINS` on the cloud service must include this site's origin**, comma-separated
+   and without a path, for example `https://heed.app,https://heed-site.pages.dev`. It does two jobs:
+   - **CORS:** the browser may only call `POST /v1/billing/*` and `DELETE /v1/me` from origins on
+     the list. Preflight allows `Authorization` and `Content-Type`.
+   - **The return-URL allow-list:** a checkout or portal `return_url` must be on one of these
+     origins, or the cloud answers `400 bad_return_url`.
 2. **Supabase Auth → URL configuration.** Set the Site URL to the site, and add
    `https://<site>/**` to the redirect allow-list. Enable the Google provider.
-3. **Return URL.** Checkout and portal requests send `return_url: {site}/account?billing=done`, and
-   the account page shows a "Thanks" message for that parameter. Until the cloud allow-lists and
-   uses the field, it ignores it, and Stripe returns to `{NUGGET_PUBLIC_URL}/billing/done`, which
-   hands over to the app.
+3. **Return URL.** Checkout and portal requests send `return_url: {origin}/account?billing=done`,
+   and the account page shows a "Thanks" message for that parameter. If the origin isn't in
+   `NUGGET_SITE_ORIGINS` (a Pages preview deploy, for example), the cloud answers
+   `400 bad_return_url`. The site then retries once without `return_url`, so Stripe falls back to
+   `{NUGGET_PUBLIC_URL}/billing/done`, which hands over to the app.
+4. **Web calls take no device seat.** Calls without an `X-Heed-Device` header are never counted as
+   a device (ar/cloud 2d31d240).
 
 ## Environment
 
@@ -143,7 +149,8 @@ caching for the hashed assets and fonts.
 2. Set the root directory to `site`, the build command to `npm ci && npm run build`, and the output
    to `dist`.
 3. Add the environment variables above, for Production and for Preview. Set `NODE_VERSION=22`.
-4. Add the custom domain, then set `SITE_URL` to it and redeploy.
+4. Add the custom domain, then set `SITE_URL` to it and redeploy. Add the same origin to the cloud
+   service's `NUGGET_SITE_ORIGINS` (for example `fly secrets set NUGGET_SITE_ORIGINS=https://heed.app`).
 
 **From the CLI:**
 

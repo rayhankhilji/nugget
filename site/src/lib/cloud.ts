@@ -34,13 +34,26 @@ export async function cloud<T>(path: string, token: string, init: { method: stri
   return data as T;
 }
 
-/** Where Stripe should send the browser back to. The cloud allow-lists it (NUGGET_SITE_ORIGINS). */
+/**
+ * Where Stripe sends the browser back to: this site's account page. The cloud only accepts origins
+ * listed in its NUGGET_SITE_ORIGINS. If this origin isn't listed (a preview deploy, say), it answers
+ * 400 bad_return_url, and we retry without return_url, so Stripe falls back to the app hand-off page.
+ */
 const returnUrl = () => `${location.origin}/account?billing=done`;
 
+async function withReturnUrl<T>(call: (body: Record<string, unknown>) => Promise<T>, body: Record<string, unknown>): Promise<T> {
+  try {
+    return await call({ ...body, return_url: returnUrl() });
+  } catch (e) {
+    if (e instanceof CloudError && e.code === "bad_return_url") return call(body);
+    throw e;
+  }
+}
+
 export const billingCheckout = (token: string, plan: string, interval: string) =>
-  cloud<{ url: string }>("/v1/billing/checkout", token, { method: "POST", body: { plan, interval, return_url: returnUrl() } });
+  withReturnUrl((body) => cloud<{ url: string }>("/v1/billing/checkout", token, { method: "POST", body }), { plan, interval });
 
 export const billingPortal = (token: string) =>
-  cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST", body: { return_url: returnUrl() } });
+  withReturnUrl((body) => cloud<{ url: string }>("/v1/billing/portal", token, { method: "POST", body }), {});
 
 export const deleteAccount = (token: string) => cloud<void>("/v1/me", token, { method: "DELETE" });
