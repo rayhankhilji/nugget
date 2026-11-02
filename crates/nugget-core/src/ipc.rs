@@ -67,6 +67,11 @@ pub mod method {
     /// Cancel a read-ahead in progress (the field lost focus). Result `{ "cancelled": bool }`.
     pub const DRAFT_READ_AHEAD_CANCEL: &str = "draft.read_ahead_cancel";
     pub const VOICE_STATUS: &str = "voice.status";
+    /// The desktop app hands over (or withdraws) the signed-in user's Heed cloud access token:
+    /// params [`super::CloudLlmSession`], result [`super::CloudLlmStatus`].
+    pub const CLOUD_LLM_SESSION: &str = "cloud.llm.session";
+    /// Whether the Heed cloud model is in use: result [`super::CloudLlmStatus`].
+    pub const CLOUD_LLM_STATUS: &str = "cloud.llm.status";
 }
 
 pub mod notification {
@@ -2292,4 +2297,43 @@ mod tests {
             serde_json::json!({"free_bytes": 5, "level": "full", "recent_full_error": true})
         );
     }
+}
+
+// ---- cloud.llm.* ----
+
+/// `cloud.llm.session`: the user's Heed cloud access token, valid until `expires_at` (unix
+/// seconds), for the service at `api_base`. `access_token: None` signs nuggetd out of the cloud
+/// model. The token is short-lived (Supabase access tokens last an hour) and only ever held in
+/// memory; the desktop app hands over a fresh one before it expires.
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CloudLlmSession {
+    pub api_base: Option<String>,
+    pub access_token: Option<String>,
+    pub expires_at: Option<i64>,
+}
+
+impl std::fmt::Debug for CloudLlmSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloudLlmSession")
+            .field("api_base", &self.api_base)
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("expires_at", &self.expires_at)
+            .finish()
+    }
+}
+
+/// Whether the Heed cloud model serves requests now. Never carries the token.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CloudLlmStatus {
+    pub active: bool,
+    /// Host of the service in use (what the egress ledger shows).
+    pub api_host: Option<String>,
+    pub expires_at: Option<i64>,
+    /// The providers routed first while active (`heed-cloud-fast`, `heed-cloud-smart`).
+    pub providers: Vec<crate::ids::ProviderId>,
 }

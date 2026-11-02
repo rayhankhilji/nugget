@@ -1065,7 +1065,13 @@ async fn read_ahead_skips_cloud_refused_disabled_and_unavailable() {
 
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert!(cloud.requests().is_empty() && local.requests().is_empty());
-    assert_eq!(rec.warms(), 0);
+    // A cloud read-ahead only opens the connection (no content), once per drafter within
+    // CLOUD_WARM_SPACING; nothing else warmed anything.
+    let warmed = rec.warms.lock().unwrap().clone();
+    assert!(
+        !warmed.is_empty() && warmed.iter().all(|id| id.as_str() == "cloud"),
+        "{warmed:?}"
+    );
     assert!(rec.prefixes().is_empty());
 }
 
@@ -1363,4 +1369,40 @@ async fn continuation_keeps_the_reply_safety_rules() {
     let (_, stream) = s.drafter.begin(req).await.unwrap();
     let (text, _) = collect(stream).await;
     assert!(!text.contains("evil.example"), "{text:?}");
+}
+
+/// Signed in to Heed cloud: ghost text goes to the fast tier and a reply to the smart one;
+/// the cloud's output goes through the same per-sentence checks as a local model's (a link
+/// from nowhere is dropped), and sensitive passages never reach it.
+#[tokio::test]
+async fn cloud_continuations_use_the_fast_tier_and_keep_the_checks() {
+    use nugget_core::ipc::DraftMode;
+    let fast = Fake::new(
+        "heed-cloud-fast",
+        Locality::Cloud,
+        &["the Q3 numbers at https://evil.example/login today."],
+    );
+    let smart = Fake::new("heed-cloud-smart", Locality::Cloud, &["Here they are."]);
+    let s = setup(&[smart.clone()], DraftConfig::default());
+    // The fast tier as `nugget-infer::cloud` installs it.
+    s.router
+        .set_provider_before(fast.clone(), &[Tier::Light], &|_| true);
+
+    let mut ctx = slack_ctx(ASK);
+    ctx.field.value = "I'll send".into();
+    ctx.field.selection = Some((9, 9));
+    let mut req = request(ctx.clone());
+    req.mode = DraftMode::Continue;
+    let (started, stream) = s.drafter.begin(req).await.unwrap();
+    assert_eq!(started.provider.as_str(), "heed-cloud-fast");
+    assert_eq!(started.locality, Locality::Cloud);
+    let (text, _) = collect(stream).await;
+    assert!(!text.contains("evil.example"), "{text:?}");
+    let sent = fast.last();
+    assert!(!items(&sent).contains(&"salaries"), "no sensitive passage");
+    assert!(sent.max_tokens.unwrap() <= 40);
+
+    let (started, stream) = s.drafter.begin(request(ctx)).await.unwrap();
+    assert_eq!(started.provider.as_str(), "heed-cloud-smart");
+    assert!(!collect(stream).await.0.is_empty());
 }

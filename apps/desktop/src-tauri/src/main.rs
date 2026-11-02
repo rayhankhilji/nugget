@@ -259,6 +259,7 @@ fn main() {
             cloud::cloud_disconnect,
             cloud::cloud_sync,
             cloud::cloud_ask,
+            cloud::cloud_model_status,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])
@@ -292,6 +293,7 @@ fn main() {
                 }
                 let _ = daemon.connection_info(&handle).await;
             });
+            cloud::start_model_handoff(app.handle().clone());
             updater::spawn_background_checks(app.handle());
             doubletap::setup(app);
             quickask::setup(app);

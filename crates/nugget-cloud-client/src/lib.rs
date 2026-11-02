@@ -21,8 +21,8 @@ pub use api::{
 };
 pub use auth::{Callback, Provider, REDIRECT_URL, parse_callback};
 pub use session::{
-    Clock, KeychainStore, MemoryStore, Session, SessionStatus, SessionStore, StoredSession,
-    SystemClock,
+    Clock, Handoff, KeychainStore, MemoryStore, Session, SessionStatus, SessionStore,
+    StoredSession, SystemClock, next_handoff_in,
 };
 
 /// Environment variables (read at run time, else baked in at build time).

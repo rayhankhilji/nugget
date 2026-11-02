@@ -62,6 +62,18 @@ export interface CloudAnswer {
 }
 
 /** Sign in with Apple is not in M1 (no Apple Developer account yet). */
+/** Whether nuggetd's AI features run on Heed cloud's model now (`cloud.llm.status`). */
+export interface CloudModelStatus {
+  /** Signed in with a valid token: cloud first, local models as the fallback. */
+  active: boolean;
+  /** The host the egress ledger shows for these requests. */
+  api_host: string | null;
+  /** Unix seconds when the token nuggetd holds expires (the shell hands over a fresh one). */
+  expires_at: number | null;
+  /** `heed-cloud-fast`, `heed-cloud-smart` while active. */
+  providers: string[];
+}
+
 export type SignInProvider = "google";
 
 /** `nugget:cloud-session`: the session changed. */
@@ -126,4 +138,6 @@ export const cloudApi = {
       if (isSessionEvent(p)) h({ signed_in: p.signed_in, error: typeof p.error === "string" ? p.error : null });
     }),
   onConnectionsChanged: (h: (payload: unknown) => void) => on<unknown>(CLOUD_CONNECTIONS_EVENT, h),
+  /** Whether the AI features use the cloud model now; carries no token. */
+  modelStatus: () => call<CloudModelStatus>("cloud_model_status"),
 };

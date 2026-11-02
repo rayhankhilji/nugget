@@ -281,6 +281,8 @@ impl Daemon {
             });
         }
         tracing::info!(socket = %self.socket(), "connected to nuggetd");
+        // A (re)started daemon holds no cloud token: hand it one now.
+        crate::cloud::nudge_model_handoff();
         crate::tray::set_connected(app, true);
         let _ = app.emit(event::CONNECTION, self.info(None));
         // A daemon left over from before an update is replaced or reported.

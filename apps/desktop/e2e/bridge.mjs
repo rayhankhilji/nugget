@@ -99,6 +99,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     cloud_disconnect: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_sync: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_ask: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    cloud_model_status: () => ({ active: false, api_host: null, expires_at: null, providers: [] }),
     pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
     pick_plugin_file: () => null,
     notify: () => null,

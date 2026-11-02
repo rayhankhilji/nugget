@@ -103,6 +103,7 @@ fn emit_session(app: &AppHandle, signed_in: bool, error: Option<String>) {
 fn checked<T>(app: &AppHandle, r: Result<T, CloudError>) -> Result<T> {
     if let Err(CloudError::NotSignedIn) = &r {
         emit_session(app, false, None);
+        nudge_model_handoff();
     }
     r.map_err(CloudCmdError)
 }
@@ -132,7 +133,10 @@ pub fn complete_sign_in(app: &AppHandle, callback: Callback) {
             Err(e) => Err(e.0),
         };
         match result {
-            Ok(status) => emit_session(&app, status.signed_in, None),
+            Ok(status) => {
+                emit_session(&app, status.signed_in, None);
+                nudge_model_handoff();
+            }
             Err(e) => {
                 tracing::warn!(code = e.code(), "cloud sign-in failed");
                 emit_session(&app, false, Some(e.to_string()));
@@ -198,6 +202,7 @@ pub struct SignedOut {
 pub async fn cloud_sign_out(app: AppHandle, cloud: State<'_, Cloud>) -> Result<SignedOut> {
     let revoked = cloud.api()?.session().sign_out().await?;
     emit_session(&app, false, None);
+    nudge_model_handoff();
     Ok(SignedOut { revoked })
 }
 
@@ -275,6 +280,100 @@ pub async fn cloud_ask(
         })
         .await,
     )
+}
+
+// ---- the cloud model for nuggetd ----------------------------------------------------------
+
+/// Wakes [`run_model_handoff`] early: signed in or out, or nuggetd (re)connected.
+static HANDOFF_WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Hand nuggetd a fresh token now (sign-in, sign-out, a new daemon connection).
+pub fn nudge_model_handoff() {
+    HANDOFF_WAKE.notify_one();
+}
+
+/// Retry soon after a failed handoff (daemon away, network down).
+const HANDOFF_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Keep nuggetd's Heed cloud model (`cloud.llm.session`) in step with the session, for the life
+/// of the app. Signed in: the short-lived access token goes over the owner-only IPC socket
+/// before each expiry (`next_handoff_in`) and on every nudge; signed out: it is withdrawn. The
+/// token is never written to disk or logged; the refresh token never leaves this process.
+pub fn start_model_handoff(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let wait = model_handoff_once(&app).await;
+            tokio::select! {
+                () = tokio::time::sleep(wait) => {}
+                () = HANDOFF_WAKE.notified() => {}
+            }
+        }
+    });
+}
+
+/// One handoff; returns when the next one is due.
+async fn model_handoff_once(app: &AppHandle) -> std::time::Duration {
+    use nugget_core::ipc::{CloudLlmSession, method};
+    let idle = std::time::Duration::from_secs(3600);
+    let Some(cloud) = app.try_state::<Cloud>() else {
+        return idle;
+    };
+    let Cloud::Ready(api) = cloud.inner() else {
+        return idle;
+    };
+    let daemon = app.state::<crate::daemon::Daemon>();
+    let (params, next) = match api.session().handoff().await {
+        Ok(h) => {
+            let next = nugget_cloud_client::next_handoff_in(h.expires_at, now_secs());
+            let params = CloudLlmSession {
+                api_base: Some(h.api_base),
+                access_token: Some(h.access_token),
+                expires_at: Some(h.expires_at),
+            };
+            (params, next)
+        }
+        // Signed out: withdraw whatever nuggetd holds.
+        Err(CloudError::NotSignedIn) => (CloudLlmSession::default(), idle),
+        // A refresh that failed for now (offline): nuggetd keeps the token it has until it
+        // expires, then uses local models.
+        Err(e) => {
+            tracing::debug!(code = e.code(), "cloud model: no fresh token yet");
+            return HANDOFF_RETRY;
+        }
+    };
+    let signed_in = params.access_token.is_some();
+    match daemon
+        .call::<_, serde_json::Value>(app, method::CLOUD_LLM_SESSION, &params)
+        .await
+    {
+        Ok(_) => next,
+        Err(e) if signed_in => {
+            tracing::debug!(error = %e, "cloud model: nuggetd did not take the token yet");
+            HANDOFF_RETRY
+        }
+        Err(_) => next,
+    }
+}
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or_default()
+}
+
+/// Whether nuggetd is using the Heed cloud model now (no token in the answer).
+#[tauri::command]
+pub async fn cloud_model_status(
+    app: AppHandle,
+) -> Result<nugget_core::ipc::CloudLlmStatus, crate::daemon::CmdError> {
+    app.state::<crate::daemon::Daemon>()
+        .call(
+            &app,
+            nugget_core::ipc::method::CLOUD_LLM_STATUS,
+            &serde_json::json!({}),
+        )
+        .await
 }
 
 #[cfg(test)]
