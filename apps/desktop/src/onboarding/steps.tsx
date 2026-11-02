@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
-import { api, events, needsFullDiskAccess, type ConnectorKind, type SourceInfo } from "../api";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
+import { api, doubletapApi, events, needsFullDiskAccess, type ConnectorKind, type DoubleTapStatus, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
@@ -14,6 +14,7 @@ import { TriggerKeys } from "./TriggerStep";
 import { loadTrigger, readTrigger } from "./trigger";
 import { detectAiSetup } from "./detect";
 import { DesktopOptIns } from "../platform/DesktopOptIns";
+import { MacPermissionRecovery, missingPanes, useNeedsFullDiskAccess, useRecheckOnReturn } from "../platform/MacPermissions";
 
 export interface StepProps {
   state: OnboardingState;
@@ -321,6 +322,50 @@ function PermissionList({ os }: { os: Exclude<Os, "other"> }) {
   }
 }
 
+/**
+ * On a Mac: what is on right now, and a button to the System Settings pane for each permission
+ * that is off (Full Disk Access only once a Messages source is set up). Looks again when the user
+ * comes back from System Settings. Nothing is shown when the shell can't say (a browser preview).
+ */
+export function MacPermissionStatus() {
+  const t = useT();
+  const [status, setStatus] = useState<DoubleTapStatus>();
+  const [tick, setTick] = useState(0);
+  const recheck = useCallback(() => setTick((n) => n + 1), []);
+  useEffect(() => {
+    let alive = true;
+    doubletapApi
+      .status()
+      .then((s) => alive && setStatus(s))
+      .catch(() => {
+        /* keep the last answer */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [tick]);
+  const needFda = useNeedsFullDiskAccess();
+  const panes = missingPanes(status, needFda);
+  useRecheckOnReturn(recheck, panes.length > 0);
+  if (status?.platform !== "macos") return null;
+  return (
+    <>
+      {needFda && (
+        <p>
+          <Trans k="onboarding.perm.mac.fda" tags={STRONG} />
+        </p>
+      )}
+      {panes.length > 0 ? (
+        <MacPermissionRecovery onCheck={recheck} panes={panes} firstRun />
+      ) : (
+        <p className="note" role="status">
+          {t("onboarding.perm.mac.allSet")}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
   const t = useT();
   const detected = detectOs();
@@ -334,6 +379,7 @@ export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
         <section className="ob-card" aria-labelledby="ob-perm-mine">
           <h2 id="ob-perm-mine">{t("onboarding.perm.yourSystem", { os: t(OS_LABEL[mine]) })}</h2>
           <PermissionList os={mine} />
+          {mine === "macos" && <MacPermissionStatus />}
         </section>
       )}
       <details className="ob-details" open={!mine}>

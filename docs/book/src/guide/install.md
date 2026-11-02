@@ -106,7 +106,8 @@ Windows `setup.exe` uninstaller offers to remove it; elsewhere, see [Uninstall](
 
 - **Rust** via [rustup](https://rustup.rs/) (`rust-toolchain.toml` picks the toolchain; MSRV 1.88).
 - A C toolchain, `make` and `perl` (SQLCipher and OpenSSL are built from source).
-- For the desktop app: **Node.js 22** and **pnpm** (`corepack enable`).
+- For the desktop app: **Node.js 22** or newer and **pnpm** 10.28.0 (`corepack enable`; Node 25
+  and newer no longer ship corepack, so there run `npm install -g pnpm@10.28.0`).
 - **macOS:** `xcode-select --install`.
 - **Windows:** MSVC Build Tools (Desktop development with C++) and
   [Strawberry Perl](https://strawberryperl.com/); Git's Perl doesn't work. If it comes first on
@@ -120,19 +121,82 @@ Windows `setup.exe` uninstaller offers to remove it; elsewhere, see [Uninstall](
     librsvg2-dev libxdo-dev libsoup-3.0-dev libssl-dev file
   ```
 
+### macOS: build Nugget.app
+
+On an Intel or Apple Silicon Mac, one script builds the app, signs it ad hoc (no Apple Developer ID
+needed) and tells you where it is. Paste each block into Terminal as it is.
+
+1. Install the tools: the Xcode command line tools, Rust, Node.js (22 or newer, for example from
+   [nodejs.org](https://nodejs.org/)) and pnpm.
+
+   ```sh
+   xcode-select --install
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   ```
+
+   Open a new Terminal window so `cargo` is on your `PATH`, then:
+
+   ```sh
+   npm install -g pnpm@10.28.0
+   ```
+
+2. Get the code and build the app. The first build takes a while.
+
+   ```sh
+   git clone https://github.com/rayhankhilji/nugget
+   cd nugget
+   scripts/build-macos-app.sh
+   ```
+
+   The script builds `nuggetd` and the app (with the frontend embedded), trusts the repository's
+   development model-manifest key so managed model downloads work, and signs `Nugget.app` ad hoc.
+   It ends by printing where `Nugget.app` is: `target/x86_64-apple-darwin/release/bundle/macos/`
+   on Intel, `target/aarch64-apple-darwin/release/bundle/macos/` on Apple Silicon.
+
+3. Move it to Applications and open it from there. Either drag `Nugget.app` into Applications in
+   Finder, or (on Intel; on Apple Silicon use `aarch64-apple-darwin`):
+
+   ```sh
+   rm -rf /Applications/Nugget.app
+   ditto target/x86_64-apple-darwin/release/bundle/macos/Nugget.app /Applications/Nugget.app
+   open /Applications/Nugget.app
+   ```
+
+   Don't start it with `./target/.../nugget-desktop` from Terminal: macOS then files the
+   permissions below under Terminal instead of Nugget.
+
+4. Turn on the permissions. Setup and the Double Tap page show what is missing, with a button that
+   opens the right page of System Settings → Privacy & Security, and check again when you come
+   back:
+   - **Accessibility**: read the text field you're in and insert the draft.
+   - **Input Monitoring**: notice your Double Tap key.
+   - **Full Disk Access**: only if you add a Messages source (it reads `~/Library/Messages`).
+
+   If Nugget isn't in a list, add it with **+** from Applications. Each build is signed afresh, so
+   after a rebuild macOS can show Nugget as on but still refuse it. Reset its entries, reopen
+   Nugget and turn them on again:
+
+   ```sh
+   tccutil reset Accessibility dev.nugget.desktop
+   tccutil reset ListenEvent dev.nugget.desktop
+   tccutil reset SystemPolicyAllFiles dev.nugget.desktop
+   ```
+
 ### Build and run
 
 ```sh
 git clone https://github.com/rayhankhilji/nugget && cd nugget
-export NUGGET_TRUST_DEV_MANIFEST_KEY=1   # optional, see below
+export NUGGET_TRUST_DEV_MANIFEST_KEY=1
 cargo build --release -p nuggetd
-# Desktop app (optional)
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
 cargo build --release -p nugget-desktop --features tauri/custom-protocol
 ```
 
-`--features tauri/custom-protocol` embeds the interface; without it the window stays blank. Both
-binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
+`NUGGET_TRUST_DEV_MANIFEST_KEY=1` is optional (see below); the last two lines build the desktop app
+and can be skipped. `--features tauri/custom-protocol` embeds the interface; without it the window
+would stay blank, so a release build without it stops with an error instead.
+
+Both binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
 `./target/release/nugget-desktop` (it starts the daemon), or `./target/release/nuggetd` in the
 foreground and check it with `./target/release/nuggetd status`.
 

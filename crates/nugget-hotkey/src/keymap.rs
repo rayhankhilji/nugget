@@ -1,9 +1,11 @@
 //! Pure key classification for every backend, so each OS mapping is unit-tested on any host.
 //!
-//! Each function answers only "which modifier is this, is it Escape, or is it some other key".
+//! Each function answers only "which modifier is this, is it Escape, or is it some other key"
+//! (the `*_tap_key` functions for the suggestion tap additionally recognise Tab and Right arrow).
 //! The key code of an "other" key is never returned, stored or logged.
 
 use crate::Modifier;
+use crate::suggest::{Mods, TapKey};
 use crate::tap::KeyClass;
 
 /// Windows virtual-key code (from `KBDLLHOOKSTRUCT::vkCode`) to a key class. `scan_code` is used
@@ -81,6 +83,69 @@ pub fn x11_keysym(keysym: u32) -> KeyClass {
     }
 }
 
+/// macOS virtual key code (`kVK_*`, from `kCGKeyboardEventKeycode`) to a suggestion-tap class.
+pub fn mac_tap_key(code: u16) -> TapKey {
+    match code {
+        48 => TapKey::Tab,           // kVK_Tab
+        53 => TapKey::Escape,        // kVK_Escape
+        124 => TapKey::Right,        // kVK_RightArrow
+        54..=63 => TapKey::Modifier, // Command, Shift, Caps Lock, Option, Control (both sides), Fn
+        _ => TapKey::Other,
+    }
+}
+
+/// The modifiers in a `CGEventFlags` word. Only Shift, Control, Option and Command count: Caps
+/// Lock, Help, and the NumericPad and SecondaryFn bits (which macOS sets on every arrow key, so
+/// also on ⌥→) are ignored, as are the device-dependent bits.
+pub fn mac_mods(flags: u64) -> Mods {
+    Mods {
+        shift: flags & 0x0002_0000 != 0,   // kCGEventFlagMaskShift
+        control: flags & 0x0004_0000 != 0, // kCGEventFlagMaskControl
+        option: flags & 0x0008_0000 != 0,  // kCGEventFlagMaskAlternate
+        command: flags & 0x0010_0000 != 0, // kCGEventFlagMaskCommand
+    }
+}
+
+/// Windows virtual-key code (`KBDLLHOOKSTRUCT::vkCode`) to a suggestion-tap class. The generic
+/// `VK_SHIFT`/`VK_CONTROL`/`VK_MENU` codes count as modifiers too.
+pub fn windows_tap_key(vk: u32) -> TapKey {
+    match vk {
+        0x09 => TapKey::Tab,    // VK_TAB
+        0x1B => TapKey::Escape, // VK_ESCAPE
+        0x27 => TapKey::Right,  // VK_RIGHT
+        0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5 => TapKey::Modifier,
+        _ => TapKey::Other,
+    }
+}
+
+/// X11 keysym (level 0 of a keycode) to a suggestion-tap class. `ISO_Left_Tab` (what some
+/// keymaps put on Shift+Tab) is Tab; the Shift that produced it is tracked as a modifier, so
+/// it still reads as Shift+Tab. `KP_Right` is not Right.
+pub fn x11_tap_key(keysym: u32) -> TapKey {
+    match keysym {
+        0xff09 | 0xfe20 => TapKey::Tab,      // Tab, ISO_Left_Tab
+        0xff1b => TapKey::Escape,            // Escape
+        0xff53 => TapKey::Right,             // Right
+        0xffe7 | 0xffe8 => TapKey::Modifier, // Meta_L, Meta_R
+        _ if matches!(x11_keysym(keysym), KeyClass::Modifier(_)) => TapKey::Modifier,
+        _ => TapKey::Other,
+    }
+}
+
+/// The [`Mods`] held, from a set of held [`Modifier`]s (left or right).
+pub fn mods_from_held(held: impl IntoIterator<Item = Modifier>) -> Mods {
+    let mut mods = Mods::default();
+    for m in held {
+        match m {
+            Modifier::LeftShift | Modifier::RightShift => mods.shift = true,
+            Modifier::LeftControl | Modifier::RightControl => mods.control = true,
+            Modifier::LeftOption | Modifier::RightOption => mods.option = true,
+            Modifier::LeftCommand | Modifier::RightCommand => mods.command = true,
+        }
+    }
+    mods
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -151,5 +216,84 @@ pub(crate) mod tests {
         assert_eq!(x11_keysym(0xff1b), KeyClass::Escape);
         assert_eq!(x11_keysym(u32::from(b'a')), KeyClass::Other);
         assert_eq!(x11_keysym(0xff0d), KeyClass::Other); // Return
+    }
+    #[test]
+    fn mac_tap_keys() {
+        assert_eq!(mac_tap_key(48), TapKey::Tab);
+        assert_eq!(mac_tap_key(53), TapKey::Escape);
+        assert_eq!(mac_tap_key(124), TapKey::Right);
+        for code in 54..=63 {
+            assert_eq!(mac_tap_key(code), TapKey::Modifier, "{code}");
+        }
+        let special = [48, 53, 124, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63];
+        for code in (0..=u16::from(u8::MAX)).filter(|c| !special.contains(c)) {
+            assert_eq!(mac_tap_key(code), TapKey::Other, "{code}");
+        }
+    }
+
+    #[test]
+    fn mac_mods_ignore_lock_numpad_and_fn_bits() {
+        assert_eq!(mac_mods(0), Mods::default());
+        // ⌥→ as macOS reports it: Alternate plus NumericPad and SecondaryFn, and the
+        // device-dependent left-Option bit.
+        let option_right = 0x0008_0000 | 0x0020_0000 | 0x0080_0000 | 0x20;
+        assert_eq!(
+            mac_mods(option_right),
+            Mods {
+                option: true,
+                ..Mods::default()
+            }
+        );
+        // Caps Lock (AlphaShift), Help and NonCoalesced change nothing.
+        assert_eq!(mac_mods(0x0001_0000 | 0x0040_0000 | 0x100), Mods::default());
+        let all = mac_mods(0x0002_0000 | 0x0004_0000 | 0x0008_0000 | 0x0010_0000);
+        assert!(all.shift && all.control && all.option && all.command);
+        assert!(mac_mods(0x0002_0000).shift);
+        assert!(mac_mods(0x0004_0000).control);
+        assert!(mac_mods(0x0010_0000).command);
+    }
+
+    #[test]
+    fn windows_tap_keys() {
+        assert_eq!(windows_tap_key(0x09), TapKey::Tab);
+        assert_eq!(windows_tap_key(0x1B), TapKey::Escape);
+        assert_eq!(windows_tap_key(0x27), TapKey::Right);
+        let modifiers = [
+            0x10, 0x11, 0x12, 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5,
+        ];
+        for vk in modifiers {
+            assert_eq!(windows_tap_key(vk), TapKey::Modifier, "{vk:#x}");
+        }
+        for vk in
+            (0..=0xFFu32).filter(|vk| ![0x09, 0x1B, 0x27].contains(vk) && !modifiers.contains(vk))
+        {
+            assert_eq!(windows_tap_key(vk), TapKey::Other, "{vk:#x}");
+        }
+    }
+
+    #[test]
+    fn x11_tap_keys() {
+        assert_eq!(x11_tap_key(0xff09), TapKey::Tab);
+        assert_eq!(x11_tap_key(0xfe20), TapKey::Tab); // ISO_Left_Tab
+        assert_eq!(x11_tap_key(0xff1b), TapKey::Escape);
+        assert_eq!(x11_tap_key(0xff53), TapKey::Right);
+        assert_eq!(x11_tap_key(0xff98), TapKey::Other); // KP_Right
+        assert_eq!(x11_tap_key(0xff51), TapKey::Other); // Left
+        assert_eq!(x11_tap_key(u32::from(b'a')), TapKey::Other);
+        for sym in [
+            0xffe1, 0xffe2, 0xffe3, 0xffe4, 0xffe7, 0xffe8, 0xffe9, 0xffea, 0xffeb, 0xffec, 0xfe03,
+        ] {
+            assert_eq!(x11_tap_key(sym), TapKey::Modifier, "{sym:#x}");
+        }
+    }
+
+    #[test]
+    fn mods_from_held_modifiers() {
+        use Modifier::*;
+        assert_eq!(mods_from_held([]), Mods::default());
+        let m = mods_from_held([RightControl]);
+        assert!(m.control && !m.shift && !m.option && !m.command);
+        let m = mods_from_held([LeftShift, RightOption, LeftCommand]);
+        assert!(m.shift && m.option && m.command && !m.control);
     }
 }

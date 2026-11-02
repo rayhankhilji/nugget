@@ -123,6 +123,7 @@ impl PracticeField {
             instruction: None,
             provider,
             max_tokens: None,
+            mode: Default::default(),
         }
     }
 }

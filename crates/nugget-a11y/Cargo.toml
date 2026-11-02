@@ -27,8 +27,8 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSEnumerator", "NSString"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication"] }
 objc2-application-services = { version = "0.3", default-features = false, features = ["std", "libc", "AXError", "AXUIElement", "AXValue", "AXValueConstants", "HIServices"] }
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFBase", "CFDictionary", "CFNumber", "CFString", "CFURL", "CFCGTypes"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGWindow"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFAttributedString", "CFBase", "CFDictionary", "CFNumber", "CFString", "CFURL", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor", "CGColorSpace", "CGEvent", "CGEventTypes", "CGRemoteOperation", "CGWindow"] }
 
 [target.'cfg(windows)'.dependencies]
 # UI Automation, the Win32 clipboard and SendInput.

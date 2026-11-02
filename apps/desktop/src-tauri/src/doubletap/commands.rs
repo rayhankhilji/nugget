@@ -54,6 +54,7 @@ pub async fn doubletap_settings_set(
     *lock(&state.settings) = settings.clone();
     flow::restart_listener_async(&app).await;
     readahead::restart(&app);
+    super::ghost_flow::restart(&app);
     if let Err(e) = app.emit(SETTINGS_EVENT, &settings) {
         tracing::debug!(error = %e, "cannot announce the Double Tap settings");
     }
@@ -68,8 +69,16 @@ async fn status(app: &AppHandle) -> DoubleTapStatus {
             .await
             .map(Into::into)
             .unwrap_or(PermissionState::Unknown);
-    let trigger = lock(&state.settings).trigger.clone();
     let platform = Platform::current();
+    let (input_monitoring, full_disk_access) = tauri::async_runtime::spawn_blocking(move || {
+        (
+            permissions::input_monitoring(platform),
+            permissions::full_disk_access(platform),
+        )
+    })
+    .await
+    .unwrap_or((PermissionState::Unknown, PermissionState::Unknown));
+    let trigger = lock(&state.settings).trigger.clone();
     let session = nugget_hotkey::session();
     let trigger_error = lock(&state.trigger_error).clone();
     DoubleTapStatus {
@@ -78,7 +87,8 @@ async fn status(app: &AppHandle) -> DoubleTapStatus {
         listening: lock(&state.listener).is_some(),
         trigger_error: trigger_error.clone(),
         accessibility,
-        input_monitoring: permissions::input_monitoring(platform),
+        input_monitoring,
+        full_disk_access,
         hint: permissions::hint_for(
             platform,
             session,
@@ -87,6 +97,7 @@ async fn status(app: &AppHandle) -> DoubleTapStatus {
             trigger_error.as_deref(),
         ),
         modifiers: permissions::modifiers(platform),
+        ghost: super::ghost_flow::status(app),
         recommended_trigger: TriggerSpec::recommended(),
         shortcut: lock(&state.listener)
             .as_ref()
@@ -99,8 +110,9 @@ pub async fn doubletap_status(app: AppHandle) -> Result<DoubleTapStatus, CmdErro
     Ok(status(&app).await)
 }
 
-/// macOS: show the Accessibility prompt. Linux and Windows have nothing to prompt; the status
-/// carries the hint.
+/// macOS: show the Accessibility prompt, and the Input Monitoring one (which also lists Nugget
+/// under Input Monitoring, so the user finds it there). Linux and Windows have nothing to prompt;
+/// the status carries the hint.
 #[tauri::command]
 pub async fn doubletap_request_permissions(
     app: AppHandle,
@@ -110,11 +122,15 @@ pub async fn doubletap_request_permissions(
     let a11y = app.state::<DoubleTap>().a11y.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let api = a11y.api();
-        if api.permission() == nugget_a11y::Permission::Denied {
+        let asked = if api.permission() == nugget_a11y::Permission::Denied {
             api.request_permission()
         } else {
             Ok(())
+        };
+        if nugget_hotkey::input_monitoring() == Some(false) {
+            let _ = nugget_hotkey::request_input_monitoring();
         }
+        asked
     })
     .await
     .map_err(|e| CmdError::Other(e.to_string()))?
@@ -133,11 +149,14 @@ pub(crate) fn privacy_pane_url(pane: &str) -> Option<&'static str> {
         "input_monitoring" => {
             Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
         }
+        "full_disk_access" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        }
         _ => None,
     }
 }
 
-/// macOS: open System Settings at the Accessibility or Input Monitoring list, so a user who
+/// macOS: open System Settings at the Accessibility, Input Monitoring or Full Disk Access list, so a user who
 /// denied the prompt (which macOS shows only once) can turn Nugget on. Returns `false` where
 /// there is no such pane (Linux, Windows).
 #[tauri::command]
@@ -339,6 +358,10 @@ mod tests {
         assert_eq!(
             privacy_pane_url("input_monitoring"),
             Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        );
+        assert_eq!(
+            privacy_pane_url("full_disk_access"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
         );
         for other in ["", "camera", "../x", "accessibility?x", "Accessibility"] {
             assert_eq!(privacy_pane_url(other), None, "{other}");

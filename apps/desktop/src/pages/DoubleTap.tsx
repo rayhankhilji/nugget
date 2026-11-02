@@ -34,6 +34,9 @@ import {
 } from "../doubletap";
 import { DoubleTapHistory } from "./DoubleTapHistory";
 import { DoubleTapPractice } from "./DoubleTapPractice";
+import { MacPermissionRecovery, missingPanes, useNeedsFullDiskAccess, useRecheckOnReturn } from "../platform/MacPermissions";
+
+export { MacPermissionRecovery };
 
 type Notice = { text: string; error: boolean } | null;
 
@@ -47,6 +50,7 @@ export function DoubleTapPage() {
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
   const readAheadHintId = useId();
+  const autoSuggestHintId = useId();
   const batteryHintId = useId();
   const tryHintId = useId();
   const tryOff = saved.data !== undefined && !saved.data.enabled;
@@ -163,6 +167,25 @@ export function DoubleTapPage() {
             </label>
             {/* Read-ahead only matters while Double Tap is on: nested under it. */}
             <div className="switch-child">
+            <label className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={form.auto_suggest ?? true}
+                aria-describedby={autoSuggestHintId}
+                onChange={(e) => setForm({ ...form, auto_suggest: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("doubletap.autoSuggest")}</span>
+            </label>
+            <p id={autoSuggestHintId} className="muted small">
+              {t("doubletap.autoSuggestHint", { acceptWord: status.data?.platform === "macos" ? "⌥→" : "Ctrl+→" })}
+            </p>
+            {status.data?.ghost && !status.data.ghost.available && (
+              <p className="muted small" role="note">
+                {t("doubletap.ghostUnavailable")}
+              </p>
+            )}
             <label className="switch">
               <input
                 type="checkbox"
@@ -690,6 +713,10 @@ function PermissionsCard({
   };
 
   const perm = (state: string) => t(ACCESS_LABEL[state] ?? "doubletap.perm.unknown");
+  const needFda = useNeedsFullDiskAccess();
+  const panes = missingPanes(s, needFda);
+  // Back from System Settings: look again, so the page flips once the user turned Nugget on.
+  useRecheckOnReturn(onUpdate, panes.length > 0);
   const needsPrompt = s && (s.platform === "macos" || s.accessibility === "denied" || s.input_monitoring === "denied");
 
   return (
@@ -724,6 +751,14 @@ function PermissionsCard({
                 </dd>
               </div>
             )}
+            {needFda && s.full_disk_access && s.full_disk_access !== "not_required" && (
+              <div>
+                <dt>{t("doubletap.perm.fullDiskAccess")}</dt>
+                <dd className="stat-text">
+                  <Badge tone={permissionTone(s.full_disk_access)}>{perm(s.full_disk_access)}</Badge>
+                </dd>
+              </div>
+            )}
             <div>
               <dt>{t("doubletap.perm.session")}</dt>
               <dd className="stat-text">{sessionLabel(s.session)}</dd>
@@ -740,7 +775,7 @@ function PermissionsCard({
               {keyOrText(s.hint)}
             </p>
           )}
-          {s.platform === "macos" && s.accessibility === "denied" && <MacPermissionRecovery onCheck={onUpdate} />}
+          {panes.length > 0 && <MacPermissionRecovery onCheck={onUpdate} panes={panes} />}
           <ErrorNote error={requestError} />
           {needsPrompt && (
             <button type="button" className="btn" onClick={() => void request()} disabled={busy}>
@@ -750,49 +785,6 @@ function PermissionsCard({
         </>
       )}
     </section>
-  );
-}
-
-/**
- * macOS shows the Accessibility prompt only once. After a "Don't Allow" the only way back
- * is System Settings, so say exactly where, and open that pane.
- */
-export function MacPermissionRecovery({ onCheck }: { onCheck: () => void }) {
-  const t = useT();
-  const [error, setError] = useState<string | null>(null);
-  const open = async (pane: "accessibility" | "input_monitoring") => {
-    setError(null);
-    try {
-      if (!(await doubletapApi.openPrivacySettings(pane))) setError(t("doubletap.perm.openFailed"));
-    } catch {
-      setError(t("doubletap.perm.openFailed"));
-    }
-  };
-  return (
-    <div className="note note-warn dt-recover" role="group" aria-labelledby="dt-recover-title">
-      <h3 id="dt-recover-title">{t("doubletap.perm.recoverHeading")}</h3>
-      <ol>
-        <li>{t("doubletap.perm.recover1")}</li>
-        <li>{t("doubletap.perm.recover2")}</li>
-        <li>{t("doubletap.perm.recover3")}</li>
-      </ol>
-      <div className="row">
-        <button type="button" className="btn btn-primary btn-small" onClick={() => void open("accessibility")}>
-          {t("doubletap.perm.openAccessibility")}
-        </button>
-        <button type="button" className="btn btn-small" onClick={() => void open("input_monitoring")}>
-          {t("doubletap.perm.openInputMonitoring")}
-        </button>
-        <button type="button" className="btn btn-ghost btn-small" onClick={onCheck}>
-          {t("doubletap.perm.checkAgain")}
-        </button>
-      </div>
-      {error && (
-        <p className="small" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
   );
 }
 

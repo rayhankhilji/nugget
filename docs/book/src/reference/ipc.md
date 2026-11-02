@@ -117,7 +117,7 @@ bridge methods on this socket.
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens` | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | yes |
+| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens`, `mode` (`reply`, the default and omitted; or `continue`: ghost text, a few words that continue the text at the caret, or the opening sentence of the reply in an empty field, with the same gating, grounding and post-checks) | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | yes |
 | `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
 | `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | yes |
 | `draft.prewarm` | A partial `DraftContext` (as much as is known when the trigger fires) | `{provider, locality, retrieval}`, or `null` when drafting is refused or disabled. Starts provider warm-up, retrieval and the voice lookup before `draft.begin` | yes |

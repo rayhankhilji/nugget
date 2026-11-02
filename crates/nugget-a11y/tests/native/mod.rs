@@ -17,9 +17,9 @@ use nugget_a11y::clipboard::{ClipboardFormat, ClipboardSnapshot};
 use nugget_a11y::computer::KeyChord;
 use nugget_a11y::role::Role;
 use nugget_a11y::{
-    A11yConfig, Accessibility, Backend, ComputerUse, DenyList, ElementId, Focused, InsertMethod,
-    InsertStrategy, KeyInput, Platform, TreeLimits, UiAction, UiActionKind, UiNode, UiTree,
-    WindowInfo, WindowSel,
+    A11yConfig, Accessibility, Backend, CaretTracker, ComputerUse, DenyList, ElementId, Focused,
+    InsertMethod, InsertStrategy, KeyInput, Platform, TreeLimits, UiAction, UiActionKind, UiNode,
+    UiTree, WindowInfo, WindowSel,
 };
 use serde_json::Value;
 
@@ -307,6 +307,32 @@ pub fn run<P: Platform>(os: Os<P>) {
         "Apply button in {}",
         around.to_json()
     );
+    // --- CaretTracker: the caret (here the end of the "world" selection) inside the field,
+    // and the field's font size ---
+    let t = Instant::now();
+    let c = b.caret().unwrap().expect("caret read of the composer");
+    eprintln!("CaretTracker::caret took {:?}: {c:?}", t.elapsed());
+    assert!(!c.denied);
+    assert_eq!(c.field.value, "Hello world");
+    assert_eq!(c.field.selection, Some((6, 11)));
+    let g = c.geometry.expect("caret geometry");
+    assert!(g.precise(), "text bounds, not the frame: {g:?}");
+    let frame = g.field.expect("the composer's frame");
+    let (cx, cy) = (g.caret.x, g.caret.y + g.caret.height / 2.0);
+    assert!(
+        cx >= frame.x
+            && cx <= frame.x + frame.width
+            && cy >= frame.y
+            && cy <= frame.y + frame.height,
+        "caret {:?} outside the field {frame:?}",
+        g.caret
+    );
+    assert!(
+        g.style.font_size.is_some(),
+        "font size at the caret: {:?}",
+        g.style
+    );
+
     if let Ok(dir) = std::env::var("NUGGET_A11Y_RECORD") {
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(

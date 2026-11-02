@@ -9,56 +9,73 @@ use nugget_core::{Error, Result};
 
 use crate::tap::{Detector, InputEvent, KeyClass};
 
-/// Wakes the dispatcher. Cheap to clone, safe to call from a hook or the main thread: it never
-/// runs the user's callback itself.
-#[derive(Clone)]
-pub(crate) struct Fire(mpsc::Sender<()>);
+/// Wakes the dispatcher with a message (`()` for a plain trigger). Cheap to clone, safe to call
+/// from a hook or the main thread: it never runs the user's callback itself.
+pub(crate) struct Fire<T = ()>(mpsc::Sender<Option<T>>);
 
-impl Fire {
-    pub(crate) fn fire(&self) {
-        let _ = self.0.send(());
+impl<T> Clone for Fire<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
-/// Runs `on_fire` on its own thread, so a slow callback never stalls an OS hook (Windows drops
-/// low-level hooks that take too long) or the macOS main thread.
-pub(crate) struct Dispatcher {
-    tx: mpsc::Sender<()>,
+impl<T> Fire<T> {
+    pub(crate) fn send(&self, message: T) {
+        let _ = self.0.send(Some(message));
+    }
+}
+
+impl Fire {
+    pub(crate) fn fire(&self) {
+        self.send(());
+    }
+}
+
+/// Runs the user's callback on its own thread, so a slow callback never stalls an OS hook
+/// (Windows drops low-level hooks that take too long, macOS disables slow event taps) or the
+/// macOS main thread. `None` on the channel is the stop wake-up.
+pub(crate) struct Dispatcher<T: Send + 'static = ()> {
+    tx: mpsc::Sender<Option<T>>,
     stopped: Arc<AtomicBool>,
 }
 
 impl Dispatcher {
     pub(crate) fn spawn(on_fire: Box<dyn Fn() + Send + Sync>) -> Result<Self> {
-        let (tx, rx) = mpsc::channel::<()>();
+        Self::spawn_with(Box::new(move |()| on_fire()))
+    }
+}
+
+impl<T: Send + 'static> Dispatcher<T> {
+    pub(crate) fn spawn_with(on_message: Box<dyn Fn(T) + Send + Sync>) -> Result<Self> {
+        let (tx, rx) = mpsc::channel::<Option<T>>();
         let stopped = Arc::new(AtomicBool::new(false));
         let flag = stopped.clone();
         std::thread::Builder::new()
             .name("nugget-hotkey-fire".into())
             .spawn(move || {
-                while rx.recv().is_ok() {
+                while let Ok(Some(message)) = rx.recv() {
                     if flag.load(Ordering::Acquire) {
                         break;
                     }
-                    on_fire();
+                    on_message(message);
                 }
             })
             .map_err(|e| Error::Other(format!("cannot start the hotkey dispatcher: {e}")))?;
         Ok(Self { tx, stopped })
     }
 
-    pub(crate) fn fire_handle(&self) -> Fire {
+    pub(crate) fn fire_handle(&self) -> Fire<T> {
         Fire(self.tx.clone())
     }
 }
 
-impl Drop for Dispatcher {
+impl<T: Send + 'static> Drop for Dispatcher<T> {
     fn drop(&mut self) {
         // No join: the callback may be the one dropping the listener, and on macOS the last
         // `Fire` lives in a monitor block that the main thread releases later. The flag makes
-        // sure nothing fires after the listener is gone; the thread exits once every `Fire`
-        // clone is dropped or the next wake-up sees the flag.
+        // sure nothing fires after the listener is gone; the thread exits on the stop wake-up.
         self.stopped.store(true, Ordering::Release);
-        let _ = self.tx.send(());
+        let _ = self.tx.send(None);
     }
 }
 

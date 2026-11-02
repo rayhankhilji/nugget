@@ -79,11 +79,18 @@ pub struct FieldSig {
 
 impl FieldSig {
     pub fn of(f: &nugget_a11y::Focused) -> Self {
+        Self::from_parts(&f.field, f.caret)
+    }
+
+    pub fn from_parts(
+        field: &nugget_core::ipc::FieldInfo,
+        caret: Option<nugget_a11y::Rect>,
+    ) -> Self {
         Self {
-            role: f.field.role.clone(),
-            label: f.field.label.clone(),
-            placeholder: f.field.placeholder.clone(),
-            caret: f.caret,
+            role: field.role.clone(),
+            label: field.label.clone(),
+            placeholder: field.placeholder.clone(),
+            caret,
         }
     }
 
@@ -180,6 +187,11 @@ impl A11y {
         &self.inner
     }
 
+    /// The cheap field read for ghost text: text, selection and caret geometry, no thread.
+    pub fn caret(&self) -> nugget_core::Result<Option<nugget_a11y::CaretRead>> {
+        nugget_a11y::CaretTracker::caret(&self.inner)
+    }
+
     /// The frontmost app (with its page URL), without reading any field.
     pub fn frontmost(&self) -> Option<AppInfo> {
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
@@ -254,11 +266,17 @@ pub async fn restart_listener_async(app: &AppHandle) {
     let _ = rx.await;
 }
 
-/// Runs on the hotkey dispatcher thread.
+/// Runs on the hotkey dispatcher thread. Double Tap shows its draft as ghost text at the caret
+/// when the caret can be placed; otherwise (no caret geometry, the practice field, a refused
+/// field, no key tap) the panel opens, which also explains refusals.
 fn on_trigger(app: &AppHandle) {
     probe::record("trigger", || serde_json::Value::Null);
     let app = app.clone();
-    tauri::async_runtime::spawn(fire(app));
+    tauri::async_runtime::spawn(async move {
+        if !super::ghost_flow::on_demand(&app).await {
+            fire(app).await;
+        }
+    });
 }
 
 // --- the draft flow ------------------------------------------------------------------------------
@@ -366,7 +384,7 @@ pub async fn fire(app: AppHandle) {
 }
 
 /// The practice field, when it has focus in Nugget's main window (frontmost).
-fn practice_target(app: &AppHandle) -> Option<PracticeField> {
+pub(super) fn practice_target(app: &AppHandle) -> Option<PracticeField> {
     let field = lock(&app.state::<DoubleTap>().practice).clone()?;
     let main = app.get_webview_window(MAIN_LABEL)?;
     main.is_focused().unwrap_or(false).then_some(field)
@@ -541,6 +559,7 @@ pub(super) fn draft_request(
         instruction: None,
         provider: provider.map(ProviderId::new),
         max_tokens: None,
+        mode: Default::default(),
     }
 }
 
@@ -688,7 +707,7 @@ fn run(app: &AppHandle, effects: Vec<Effect>) {
 }
 
 /// Call a daemon method in the background, logging a failure.
-fn call_later<P: serde::Serialize + Send + Sync + 'static>(
+pub(super) fn call_later<P: serde::Serialize + Send + Sync + 'static>(
     app: &AppHandle,
     method: &'static str,
     params: P,
@@ -1080,6 +1099,7 @@ mod tests {
             instruction: None,
             provider: Some(ProviderId::new("local")),
             max_tokens: None,
+            mode: Default::default(),
         }
     }
 

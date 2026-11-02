@@ -88,6 +88,7 @@ export function normalizeSettings(s: DoubleTapSettings): DoubleTapSettings {
     // Left out when the shell didn't send it (an older shell): its own default applies.
     ...(s.read_ahead === undefined ? {} : { read_ahead: s.read_ahead }),
     ...(s.read_ahead_on_battery === undefined ? {} : { read_ahead_on_battery: s.read_ahead_on_battery }),
+    ...(s.auto_suggest === undefined ? {} : { auto_suggest: s.auto_suggest }),
   };
 }
 
@@ -99,6 +100,7 @@ export function sameSettings(a: DoubleTapSettings, b: DoubleTapSettings): boolea
     x.allow_terminals === y.allow_terminals &&
     (x.read_ahead ?? true) === (y.read_ahead ?? true) &&
     (x.read_ahead_on_battery ?? true) === (y.read_ahead_on_battery ?? true) &&
+    (x.auto_suggest ?? true) === (y.auto_suggest ?? true) &&
     sameTrigger(x.trigger, y.trigger) &&
     JSON.stringify(providerRows(x.app_providers)) === JSON.stringify(providerRows(y.app_providers)) &&
     JSON.stringify(x.excluded_apps) === JSON.stringify(y.excluded_apps)

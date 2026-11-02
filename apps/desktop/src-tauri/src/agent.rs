@@ -369,6 +369,7 @@ mod tests {
             double_tap: escape_repeat,
             chord,
             escape_repeat,
+            suggest_tap: escape_repeat,
         }
     }
 

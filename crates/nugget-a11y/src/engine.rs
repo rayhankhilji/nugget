@@ -181,6 +181,11 @@ pub trait Platform: Send + Sync {
     fn read_field(&self, el: &Self::Element, max_value_bytes: usize) -> Result<FieldRead>;
     /// Caret (or selection) bounds in screen points, top-left origin.
     fn caret_bounds(&self, el: &Self::Element, state: &FieldState) -> Option<Rect>;
+    /// The text style (font size, colour) at the caret, where the toolkit reports it. Must not
+    /// be called for a secure field.
+    fn text_style(&self, _el: &Self::Element, _state: &FieldState) -> crate::geometry::TextStyle {
+        crate::geometry::TextStyle::default()
+    }
     /// Insert `text` replacing the selection through the accessibility API.
     fn insert_text(&self, el: &Self::Element, text: &str, before: &FieldState) -> Result<()>;
     /// The system clipboard.
@@ -639,6 +644,57 @@ fn find_url<E: Element>(el: &E) -> Option<String> {
     None
 }
 
+impl<P: Platform> crate::geometry::CaretTracker for Backend<P> {
+    fn caret(&self) -> Result<Option<crate::geometry::CaretRead>> {
+        use crate::geometry::{CaretGeometry, CaretRead};
+        let Some(target) = self.platform.focus()? else {
+            return Ok(None);
+        };
+        let app = self.with_url(target.app, &target.element);
+        let field = self.resolve_field(target.element)?;
+        let read = &field.read;
+        let Some(role) = Self::field_role_of(read) else {
+            return Ok(None);
+        };
+        let secure = read.node.states.secure;
+        let denied = self.config.deny.is_denied(&app);
+        let hidden = secure || denied;
+        let geometry = if hidden {
+            None
+        } else {
+            let el = field.write_el();
+            let state = &field.write_state;
+            let text = self.platform.caret_bounds(el, state);
+            let selection = state.selection.is_some_and(|(a, b)| a != b);
+            let frame = read.node.bounds.or_else(|| el.node().bounds);
+            let style = self.platform.text_style(el, state);
+            CaretGeometry::resolve(text, selection, frame, style)
+        };
+        let info = FieldInfo {
+            role: role.as_str().to_string(),
+            label: read
+                .label
+                .clone()
+                .or_else(|| read.node.name.clone())
+                .and_then(|l| sanitize::clean_opt(Some(&l), sanitize::MAX_SHORT)),
+            placeholder: sanitize::clean_opt(read.node.placeholder.as_deref(), sanitize::MAX_SHORT),
+            value: if hidden {
+                String::new()
+            } else {
+                read.state.value.clone()
+            },
+            selection: if hidden { None } else { read.state.selection },
+            secure,
+        };
+        Ok(Some(CaretRead {
+            app,
+            field: info,
+            geometry,
+            denied,
+        }))
+    }
+}
+
 impl<P: Platform> Accessibility for Backend<P> {
     fn permission(&self) -> Permission {
         self.platform.permission()
@@ -728,6 +784,13 @@ mod tests {
         a11y: &'static str,
         clipboard: std::sync::Arc<Mutex<MemoryClipboard>>,
         pasted: Mutex<u32>,
+        /// What `caret_bounds` reports (inside the generic_chat field's frame by default).
+        caret: Option<Rect>,
+        /// What `text_style` reports.
+        style: crate::geometry::TextStyle,
+        /// Calls to `caret_bounds` + `text_style`, which must not happen for secure fields
+        /// and denied apps.
+        geometry_calls: Mutex<u32>,
     }
 
     struct SharedCb(std::sync::Arc<Mutex<MemoryClipboard>>);
@@ -776,12 +839,12 @@ mod tests {
             })
         }
         fn caret_bounds(&self, _el: &MemEl, _s: &FieldState) -> Option<Rect> {
-            Some(Rect {
-                x: 10.0,
-                y: 20.0,
-                width: 1.0,
-                height: 14.0,
-            })
+            *self.geometry_calls.lock().unwrap() += 1;
+            self.caret
+        }
+        fn text_style(&self, _el: &MemEl, _s: &FieldState) -> crate::geometry::TextStyle {
+            *self.geometry_calls.lock().unwrap() += 1;
+            self.style
         }
         fn insert_text(&self, _el: &MemEl, text: &str, before: &FieldState) -> Result<()> {
             match self.a11y {
@@ -840,7 +903,128 @@ mod tests {
                 ..Default::default()
             })),
             pasted: Mutex::new(0),
+            caret: Some(Rect {
+                x: 10.0,
+                y: 320.0,
+                width: 1.0,
+                height: 14.0,
+            }),
+            style: crate::geometry::TextStyle {
+                font_size: Some(13.0),
+                color: Some(crate::geometry::Rgba {
+                    r: 0x33,
+                    g: 0x33,
+                    b: 0x33,
+                    a: 255,
+                }),
+            },
+            geometry_calls: Mutex::new(0),
         }
+    }
+
+    fn make_secure(p: &mut Fake) {
+        let mut tree = p.tree.clone();
+        let mut n = &mut tree;
+        for &i in &p.path {
+            n = &mut n.children[i];
+        }
+        n.states.secure = true;
+        n.role = Role::TextField;
+        n.value = Some("hunter2".into());
+        p.tree = tree;
+    }
+
+    #[test]
+    fn caret_tracker_reads_the_field_and_its_range() {
+        use crate::geometry::{CaretSource, CaretTracker};
+        let b = Backend::new(fake("ok"), fast_config());
+        let c = b.caret().unwrap().unwrap();
+        assert!(!c.denied);
+        assert_eq!(c.app.name, "Example Chat");
+        assert_eq!(c.field.role, "text_area");
+        assert_eq!(c.field.value, "Hello ");
+        assert_eq!(c.field.selection, Some((6, 6)));
+        assert!(!c.field.secure);
+        let g = c.geometry.unwrap();
+        assert_eq!(g.source, CaretSource::Range);
+        assert!(g.precise());
+        assert_eq!(
+            g.caret,
+            Rect {
+                x: 10.0,
+                y: 320.0,
+                width: 1.0,
+                height: 14.0
+            }
+        );
+        // The field's frame is the focused node's bounds in the fixture.
+        assert_eq!(
+            g.field,
+            Some(Rect {
+                x: 0.0,
+                y: 300.0,
+                width: 600.0,
+                height: 120.0
+            })
+        );
+        assert_eq!(g.style, b.platform().style);
+        assert_eq!(g.font_size(), 13.0);
+    }
+
+    #[test]
+    fn caret_tracker_hides_secure_fields() {
+        use crate::geometry::CaretTracker;
+        let mut p = fake("ok");
+        make_secure(&mut p);
+        let b = Backend::new(p, fast_config());
+        let c = b.caret().unwrap().unwrap();
+        assert!(c.field.secure);
+        assert!(!c.denied);
+        assert_eq!(c.field.role, "text_field");
+        assert!(c.field.value.is_empty());
+        assert_eq!(c.field.selection, None);
+        assert_eq!(c.geometry, None);
+        assert_eq!(*b.platform().geometry_calls.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn caret_tracker_hides_denied_apps() {
+        use crate::geometry::CaretTracker;
+        let mut cfg = fast_config();
+        cfg.deny = DenyList::with_user_rules(["id:org.example.chat"]);
+        let b = Backend::new(fake("ok"), cfg);
+        let c = b.caret().unwrap().unwrap();
+        assert!(c.denied);
+        assert!(!c.field.secure);
+        assert!(c.field.value.is_empty());
+        assert_eq!(c.field.selection, None);
+        assert_eq!(c.geometry, None);
+        assert_eq!(*b.platform().geometry_calls.lock().unwrap(), 0);
+        // The default list denies password managers too.
+        let mut p = fake("ok");
+        p.app.name = "1Password".into();
+        let b = Backend::new(p, fast_config());
+        let c = b.caret().unwrap().unwrap();
+        assert!(c.denied && c.geometry.is_none() && c.field.value.is_empty());
+    }
+
+    #[test]
+    fn caret_tracker_falls_back_to_the_frame() {
+        use crate::geometry::{CaretSource, CaretTracker};
+        let mut p = fake("ok");
+        p.caret = None;
+        let b = Backend::new(p, fast_config());
+        let c = b.caret().unwrap().unwrap();
+        let g = c.geometry.unwrap();
+        assert_eq!(g.source, CaretSource::Frame);
+        assert!(!g.precise());
+        let f = g.field.unwrap();
+        assert_eq!(f.y, 300.0);
+        assert!(g.caret.x >= f.x && g.caret.x <= f.x + f.width);
+        assert!(g.caret.y >= f.y && g.caret.y + g.caret.height <= f.y + f.height);
+        // The line is sized from the reported font (13pt * 1.25).
+        assert!((g.caret.height - 16.25).abs() < 1e-9, "{}", g.caret.height);
+        assert_eq!(c.field.value, "Hello ");
     }
 
     fn fast_config() -> A11yConfig {
@@ -884,15 +1068,7 @@ mod tests {
     #[test]
     fn secure_field_is_flagged_and_never_read() {
         let mut p = fake("ok");
-        let mut tree = p.tree.clone();
-        let mut n = &mut tree;
-        for &i in &p.path {
-            n = &mut n.children[i];
-        }
-        n.states.secure = true;
-        n.role = Role::TextField;
-        n.value = Some("hunter2".into());
-        p.tree = tree;
+        make_secure(&mut p);
         let b = Backend::new(p, fast_config());
         let f = b.focused().unwrap().unwrap();
         assert!(f.field.secure);

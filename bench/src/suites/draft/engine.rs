@@ -190,6 +190,7 @@ impl Engine {
             instruction: None,
             provider: None,
             max_tokens: self.max_tokens,
+            mode: Default::default(),
         };
         let work = async {
             let (_, mut stream) = drafter.begin(req).await?;

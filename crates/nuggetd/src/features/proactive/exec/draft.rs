@@ -134,6 +134,7 @@ pub(crate) fn field_request(req: &DraftRequest) -> FieldDraft {
         instruction: (!intent.is_empty()).then(|| intent.to_owned()),
         provider: None,
         max_tokens: None,
+        mode: Default::default(),
     }
 }
 

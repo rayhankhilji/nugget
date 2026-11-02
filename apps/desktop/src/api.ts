@@ -1637,6 +1637,11 @@ export interface DoubleTapSettings {
   read_ahead?: boolean;
   /** Keep reading ahead on battery (low power mode always pauses it). Absent: treated as on. */
   read_ahead_on_battery?: boolean;
+  /**
+   * Ghost text: suggest a continuation at the caret after a typing pause (Tab accepts it).
+   * Double Tap always works on demand. Absent from an older shell: treated as on.
+   */
+  auto_suggest?: boolean;
 }
 
 export interface ModifierOption {
@@ -1658,13 +1663,42 @@ export interface DoubleTapStatus {
   accessibility: "granted" | "denied" | "not_required";
   /** macOS only; `not_required` elsewhere. */
   input_monitoring: PermissionState;
+  /** macOS only (`not_required` elsewhere): Full Disk Access, which the Messages source needs. Older shells omit it. */
+  full_disk_access?: PermissionState;
   /** i18n key of an onboarding hint, e.g. `doubletap.hint.atspi`. */
   hint: string | null;
   modifiers: ModifierOption[];
   recommended_trigger: TriggerSpec;
   /** Where the running listener's shortcut stands; `null` when nothing is listening (older shells omit it). */
   shortcut?: ShortcutStatus | null;
+  /** Ghost text: whether its keys (Tab, Esc) work here; else Double Tap opens the panel. Older shells omit it. */
+  ghost?: { available: boolean; error: string | null };
 }
+
+/** The ghost window's event: the suggestion and how to draw it (logical px). */
+export const GHOST_EVENT = "doubletap:ghost";
+
+/** What the ghost text window renders (sent by `doubletap/ghost_flow.rs`). */
+export interface GhostPaint {
+  visible: boolean;
+  /** The rest of the suggestion: what Tab inserts. */
+  text: string;
+  /** More may still arrive. */
+  streaming: boolean;
+  rtl: boolean;
+  /** Accept-word is available (more than one word left). */
+  words: boolean;
+  font_px: number;
+  line_px: number;
+  /** Room before the first line's text, up to the caret. */
+  indent_px: number;
+  /** The field's text colour (`#rrggbb`), when the app reports it. */
+  color: string | null;
+}
+
+export const ghostApi = {
+  onPaint: (h: (paint: GhostPaint) => void) => on<GhostPaint>(GHOST_EVENT, h),
+};
 
 /**
  * A desktop-owned shortcut (the Wayland GlobalShortcuts portal); every other backend is `active`
@@ -1725,7 +1759,7 @@ export const doubletapApi = {
   /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
   requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
   /** macOS: open System Settings at a Privacy pane; `false` where there is none. */
-  openPrivacySettings: (pane: "accessibility" | "input_monitoring") => call<boolean>("doubletap_open_privacy_settings", { pane }),
+  openPrivacySettings: (pane: "accessibility" | "input_monitoring" | "full_disk_access") => call<boolean>("doubletap_open_privacy_settings", { pane }),
   defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
   /** Start a draft as if the trigger fired. */
   fire: () => call<void>("doubletap_fire"),
