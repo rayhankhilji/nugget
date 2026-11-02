@@ -35,6 +35,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
 | `/checkout?plan=heed\|heed_max&interval=month\|year` | Sends you to sign up if you're signed out, then starts Stripe Checkout. |
 | `/docs/self-host` | The book's self-hosting guide (`docs/book/src/guide/self-host.md`), copied into `src/content/docs/` by `npm run docs` and rendered with a sticky contents list. The smoke test fails if the copy is stale. |
+| `/about` | "Why Heed": the open-core story, why it's open source, and who makes it. The founder's name is a placeholder (`[Founder name]`) until they choose how to be named. |
 | `/legal/privacy`, `/legal/terms` | **Drafts that need legal review**. Each one is marked at the top, and its placeholders are in `[brackets]`. |
 
 The `account` and `checkout` pages are `noindex` and left out of the sitemap. They're also disallowed

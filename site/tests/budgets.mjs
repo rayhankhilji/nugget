@@ -13,7 +13,7 @@ const cloud = process.argv.includes("--cloud");
 const ROOT = fileURLToPath(new URL(cloud ? "../dist-test/" : "../dist-bare/", import.meta.url));
 const BUDGETS = fileURLToPath(new URL(cloud ? "./budgets-cloud.json" : "./budgets.json", import.meta.url));
 const IMAGE_MAX = 300 * 1024;
-const PAGES = ["index", "pricing", "download", "privacy", "docs/self-host", "signin", "account", "checkout", "legal/privacy"];
+const PAGES = ["index", "pricing", "download", "privacy", "docs/self-host", "about", "signin", "account", "checkout", "legal/privacy"];
 
 if (!existsSync(ROOT)) {
   console.error(`${ROOT} is missing: run node tests/bare.mjs and tests/smoke.mjs first (npm test does)`);
