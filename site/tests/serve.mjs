@@ -52,4 +52,4 @@ export function serve(port = 4173, dir = DIST) {
   return new Promise((r) => server.listen(port, "127.0.0.1", () => r({ server, base: `http://127.0.0.1:${port}` })));
 }
 
-export const ROUTES = ["/", "/pricing", "/download", "/signin", "/signup", "/account", "/checkout", "/legal/privacy", "/legal/terms", "/docs/self-host", "/no-such-page"];
+export const ROUTES = ["/", "/pricing", "/download", "/signin", "/signup", "/account", "/checkout", "/legal/privacy", "/legal/terms", "/privacy", "/docs/self-host", "/no-such-page"];

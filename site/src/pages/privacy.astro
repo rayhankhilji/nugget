@@ -1,0 +1,257 @@
+---
+/**
+ * Privacy in plain English: the free app and Heed Cloud side by side, the cloud's processors, and
+ * what we never do. Facts come from docs/book/src/guide/privacy.md (the free app) and
+ * docs/architecture-cloud.md (Heed Cloud). A draft until legal review; the formal policy is
+ * /legal/privacy.
+ */
+import Base from "../layouts/Base.astro";
+import { privacyEmail } from "../lib/config";
+import { GITHUB_URL } from "../lib/plans";
+
+const rows: [string, string, string][] = [
+  [
+    "Where your data lives",
+    "On your Mac, in one encrypted database (SQLCipher, AES-256), keyed from your Mac’s keychain. There are no Heed servers.",
+    "In your Heed Cloud account, in a Postgres database in London (Supabase, eu-west-2), on encrypted disks. Each account is isolated at the database level.",
+  ],
+  [
+    "Which AI sees it",
+    "The one you choose. With a local model (Ollama, LM Studio), nothing leaves your Mac. With ChatGPT or an API key, only the question and the relevant, non-sensitive passages go to that provider.",
+    "Our AI provider: Anthropic, or OpenAI as a fallback. For each answer or draft, it gets the question and the relevant passages. Both providers’ API terms say they don’t train on API data by default.",
+  ],
+  [
+    "How apps connect",
+    "With your own sign-in to Google, Microsoft, IMAP or CalDAV. Your credentials stay on your Mac and only ever go to their own service.",
+    "Through Composio, using each app’s own sign-in. Composio holds the access tokens, encrypted. We never see your passwords.",
+  ],
+  [
+    "Sensitive items",
+    "Each item is scanned on your Mac for things like card numbers and API keys. Flagged items never go to a cloud model.",
+    "Synced items are processed in the cloud, so they can reach our AI provider when they’re relevant to what you ask.",
+  ],
+  [
+    "Seeing what left",
+    "The Privacy page in the app lists every request Heed sent off your Mac: when, where, how much, and which items were included.",
+    "Every action, like sending an email, waits for your approval and is written to a log you can check.",
+  ],
+  [
+    "Telemetry",
+    "None. Nothing is ever sent to the Heed project.",
+    "We keep usage counts (like how many deep answers you’ve used) to run your plan. No advertising trackers.",
+  ],
+  [
+    "Keeping and deleting",
+    "Your data stays until you remove a source or delete it from your Mac.",
+    "Items are kept until you disconnect the app they came from (its items are deleted) or delete your account (everything is deleted).",
+  ],
+];
+
+const processors: [string, string, string][] = [
+  ["Supabase", "Accounts, sign-in and the database", "London (eu-west-2)"],
+  ["Fly.io", "Runs the Heed Cloud service", "London (lhr)"],
+  ["Composio", "Connects your apps and holds their access tokens", "To be confirmed"],
+  ["Anthropic", "AI answers, drafts and extraction", "To be confirmed"],
+  ["OpenAI", "AI fallback and, if enabled, search embeddings", "To be confirmed"],
+  ["Stripe", "Payments and invoices (we never see your full card number)", "To be confirmed"],
+];
+---
+<Base title="Privacy, in plain English" description="Where Heed keeps your data, which AI sees it and how to delete it, for the free app and for Heed Cloud.">
+  <section class="wrap top">
+    <p class="eyebrow">Privacy</p>
+    <h1>Your data, in plain English.</h1>
+    <p class="draft" role="note">
+      <strong>Draft, pending legal review.</strong> This page explains our privacy in plain words. The formal
+      <a href="/legal/privacy">privacy policy</a> is also a draft and isn’t in force yet.
+    </p>
+    <p class="lede">
+      Heed runs two ways. The free app runs entirely on your Mac. Heed Cloud runs on our servers, so it can sync while your
+      Mac sleeps and include the AI. Here’s what each one means for your data.
+    </p>
+  </section>
+
+  <section class="wrap" aria-labelledby="cmp-h">
+    <h2 id="cmp-h" class="sr-only">The free app and Heed Cloud compared</h2>
+    <div class="table-wrap">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Topic</span></th>
+            <th scope="col">The free app</th>
+            <th scope="col">Heed Cloud</th>
+          </tr>
+        </thead>
+        <tbody>
+          {
+            rows.map(([k, free, cloud]) => (
+              <tr>
+                <th scope="row">{k}</th>
+                <td>{free}</td>
+                <td>{cloud}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="wrap block" aria-labelledby="proc-h">
+    <h2 id="proc-h">Who handles data for Heed Cloud</h2>
+    <p class="muted">These companies process data on our behalf, only to run the service. The free app doesn’t send anything to us or to them on our behalf. If you choose a cloud AI provider in the free app, your data goes to that provider under your own account.</p>
+    <dl class="procs">
+      {
+        processors.map(([name, what, where]) => (
+          <div>
+            <dt>{name}</dt>
+            <dd>{what}</dd>
+            <dd class="where">{where}</dd>
+          </div>
+        ))
+      }
+    </dl>
+  </section>
+
+  <section class="wrap block never" aria-labelledby="never-h">
+    <h2 id="never-h">What we never do</h2>
+    <ul>
+      <li>Sell your data, or share it for advertising.</li>
+      <li>Train AI models on your content.</li>
+      <li>Send an email, create an event or take any other action without your approval.</li>
+      <li>See your passwords.</li>
+    </ul>
+  </section>
+
+  <section class="wrap block" aria-labelledby="you-h">
+    <h2 id="you-h">You’re in control</h2>
+    <ul class="ctl">
+      <li><b>Export:</b> download everything Heed Cloud stores about you from your account page.</li>
+      <li><b>Delete:</b> deleting your account disconnects every app and deletes your synced data.</li>
+      <li><b>Check the code:</b> the app and the cloud service are open source, <a href={GITHUB_URL} rel="noopener">on GitHub</a>.</li>
+      <li><b>Ask us:</b> email <a href={`mailto:${privacyEmail}`}>{privacyEmail}</a>. You also have the right to complain to the UK Information Commissioner’s Office.</li>
+    </ul>
+  </section>
+</Base>
+
+<style>
+  .top {
+    display: grid;
+    gap: 20px;
+    padding-block: clamp(56px, 8vw, 104px) clamp(32px, 4vw, 48px);
+  }
+  h1 {
+    font-size: clamp(44px, 7vw, 96px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
+    max-width: 12ch;
+  }
+  .draft {
+    max-width: 44em;
+    padding: 12px 16px;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    font-size: 15px;
+  }
+  .draft a,
+  .ctl a {
+    color: var(--text);
+    text-underline-offset: 3px;
+  }
+  .lede {
+    max-width: 38em;
+    font-size: clamp(17px, 1.5vw, 19px);
+    color: var(--text-2);
+  }
+  .table-wrap {
+    overflow-x: auto;
+  }
+  .cmp {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 15.5px;
+    line-height: 1.55;
+  }
+  .cmp th,
+  .cmp td {
+    text-align: left;
+    vertical-align: top;
+    padding: 18px 24px 18px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .cmp thead th {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--text);
+  }
+  .cmp tbody th {
+    width: 20%;
+    font-weight: 600;
+  }
+  .cmp td {
+    width: 40%;
+    color: var(--text-2);
+  }
+  .block {
+    padding-top: clamp(56px, 7vw, 96px);
+  }
+  .block h2 {
+    font-size: clamp(32px, 4.4vw, 52px);
+    margin-bottom: 14px;
+  }
+  .procs {
+    margin: 20px 0 0;
+    border-top: 1px solid var(--text);
+  }
+  .procs div {
+    display: grid;
+    grid-template-columns: 180px 1fr 200px;
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .procs dt {
+    font-weight: 600;
+  }
+  .procs dd {
+    margin: 0;
+    color: var(--text-2);
+  }
+  .procs .where {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .never ul,
+  .ctl {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--text);
+    max-width: 52em;
+  }
+  .never li,
+  .ctl li {
+    padding: 14px 0;
+    border-bottom: 1px dashed var(--line-2);
+    font-size: 17px;
+  }
+  .never li {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(22px, 2.4vw, 28px);
+    letter-spacing: var(--heed-display-tracking);
+  }
+  section:last-of-type {
+    padding-bottom: 120px;
+  }
+  @media (max-width: 700px) {
+    .procs div {
+      grid-template-columns: 1fr;
+      gap: 2px;
+    }
+  }
+</style>
