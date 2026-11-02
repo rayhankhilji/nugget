@@ -29,6 +29,7 @@ const faqLd = {
   <!-- Hero: one signal-blue field, one huge line, one monumental print. -->
   <section class="hero" aria-labelledby="hero-h">
     <div class="sky" aria-hidden="true" data-sky><div class="drift"></div></div>
+    <button type="button" class="motion" data-motion aria-pressed="false" hidden>Pause motion</button>
     <div class="wrap hero-in">
       <div class="hero-copy">
         <p class="kicker">Heed for Mac</p>
@@ -255,6 +256,31 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 </Base>
 
 <script>
+  // "Pause motion" (WCAG 2.2.2): stops the sky drift, the parallax and the ghost-text loop; remembered.
+  const toggle = document.querySelector<HTMLButtonElement>("[data-motion]");
+  if (toggle && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const set = (off: boolean) => {
+      document.documentElement.classList.toggle("motion-off", off);
+      toggle.setAttribute("aria-pressed", String(off));
+      toggle.textContent = off ? "Play motion" : "Pause motion";
+      try {
+        if (off) localStorage.setItem("heed-motion", "off");
+        else localStorage.removeItem("heed-motion");
+      } catch {
+        /* storage blocked */
+      }
+    };
+    let saved = false;
+    try {
+      saved = localStorage.getItem("heed-motion") === "off";
+    } catch {
+      /* storage blocked */
+    }
+    set(saved);
+    toggle.hidden = false;
+    toggle.addEventListener("click", () => set(!document.documentElement.classList.contains("motion-off")));
+  }
+
   // Parallax on scroll, at most 12px each and none under reduced motion: the sky sinks, the print
   // rises a little, so the two separate. (The sky's drift itself is pure CSS.)
   const layer = document.querySelector<HTMLElement>("[data-sky]");
@@ -267,7 +293,7 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
-          if (scrollY < 1400) {
+          if (scrollY < 1400 && !document.documentElement.classList.contains("motion-off")) {
             layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
             print?.style.setProperty("--pp", `${(-Math.min(12, scrollY * 0.04)).toFixed(1)}px`);
           }
@@ -282,6 +308,7 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 <style>
   /* ---------- Hero ---------- */
   .hero {
+    --focus: #f6f3ec;
     position: relative;
     overflow: hidden;
     isolation: isolate;
@@ -310,6 +337,29 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     image-rendering: pixelated;
     animation: drift 36s linear infinite;
     will-change: transform;
+  }
+  :global(html.motion-off) .drift {
+    animation-play-state: paused;
+  }
+  /* WCAG 2.2.2: a control to stop the moving sky and the looping demo. Hidden under reduced motion,
+     where nothing moves anyway. */
+  .motion {
+    position: absolute;
+    right: var(--gutter);
+    bottom: 16px;
+    z-index: 2;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: #f6f3ec;
+    background: rgb(7 7 50 / 0.45);
+    box-shadow: inset 0 0 0 1px rgb(246 243 236 / 0.35);
+    cursor: pointer;
+  }
+  .motion:hover {
+    background: rgb(7 7 50 / 0.65);
   }
   @keyframes drift {
     to {

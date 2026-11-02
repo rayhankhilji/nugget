@@ -165,6 +165,82 @@ for (const scheme of ["light", "dark"]) {
   await ctx.close();
 }
 
+// 1i. axe-core: no accessibility violations on any route, light and dark, desktop and phone.
+{
+  const { axe } = await import("./axe.mjs");
+  for (const scheme of ["light", "dark"]) {
+    for (const width of [1280, 390]) {
+      const ctx = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme, reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      for (const r of ROUTES) {
+        await page.goto(base + r, { waitUntil: "networkidle" });
+        // Scroll through so reveal-on-scroll content is visible, as a reader would see it.
+        await page.evaluate(async () => {
+          for (let y = 0; y < document.body.scrollHeight; y += 600) {
+            window.scrollTo(0, y);
+            await new Promise((res) => setTimeout(res, 30));
+          }
+        });
+        await page.waitForTimeout(500);
+        const v = await axe(page);
+        check(v.length === 0, `axe ${r} @${width} ${scheme}${v.length ? `: ${v.join(" | ")}` : ""}`);
+      }
+      await ctx.close();
+    }
+  }
+}
+
+// 1j. Keyboard: the skip link comes first and moves focus to main; every tab stop shows a focus ring;
+//     the hero's "Pause motion" stops the drift.
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await page.goto(base + "/", { waitUntil: "networkidle" });
+  await page.keyboard.press("Tab");
+  check((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "Skip to content", "first Tab reaches the skip link");
+  await page.keyboard.press("Enter");
+  check((await page.evaluate(() => document.activeElement?.id)) === "main", "skip link moves focus to main");
+  const unringed = [];
+  for (let i = 0; i < 45; i++) {
+    await page.keyboard.press("Tab");
+    const r = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return null;
+      const cs = getComputedStyle(el);
+      const ring = cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) >= 2;
+      return ring ? null : `${el.tagName.toLowerCase()}.${String(el.className).split(" ")[0]} "${(el.textContent ?? "").trim().slice(0, 24)}"`;
+    });
+    if (r) unringed.push(r);
+  }
+  check(unringed.length === 0, `every tab stop on / shows a focus ring${unringed.length ? `: ${unringed.slice(0, 4).join(" | ")}` : ""}`);
+  // The same on every other route, in both themes.
+  for (const scheme of ["light", "dark"]) {
+    const kp = await browser.newPage({ viewport: { width: 1280, height: 900 }, colorScheme: scheme });
+    for (const r of ROUTES.filter((x) => x !== "/")) {
+      await kp.goto(base + r, { waitUntil: "networkidle" });
+      const miss = [];
+      for (let i = 0; i < 30; i++) {
+        await kp.keyboard.press("Tab");
+        const m = await kp.evaluate(() => {
+          const el = document.activeElement;
+          if (!el || el === document.body) return null;
+          const cs = getComputedStyle(el);
+          return cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) >= 2 ? null : `${el.tagName.toLowerCase()} "${(el.textContent ?? "").trim().slice(0, 20)}"`;
+        });
+        if (m) miss.push(m);
+      }
+      check(miss.length === 0, `focus rings on ${r} (${scheme})${miss.length ? `: ${miss.slice(0, 3).join(" | ")}` : ""}`);
+    }
+    await kp.close();
+  }
+  const btn = page.locator("[data-motion]");
+  check(await btn.isVisible(), "hero has a Pause motion control");
+  await btn.click();
+  const paused = await page.evaluate(() => getComputedStyle(document.querySelector(".drift")).animationPlayState);
+  check(paused === "paused" && (await btn.getAttribute("aria-pressed")) === "true", `Pause motion stops the drift (${paused})`);
+  await btn.click();
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

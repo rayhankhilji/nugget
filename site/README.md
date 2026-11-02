@@ -266,6 +266,18 @@ dithered sky, with the wordmark. They are rendered once at build time by
 `src/pages/og/[slug].png.ts`, using satori and resvg-js with the static TTF instances in `src/og/`.
 The lines live in `src/lib/og.ts`. `site.webmanifest` lists the app icons.
 
+**Accessibility:**
+- The smoke test runs axe-core on every route, in light and dark, at 1280 and 390 px, and fails on
+  any violation.
+- It also tabs through every route in both themes and checks that each tab stop shows a 2px focus
+  ring (`--focus`: ink on cream, cream on dark and on the blue hero).
+- The skip link comes first and moves focus to `<main>`.
+- The hero has a "Pause motion" button (WCAG 2.2.2). It stops the sky drift, the parallax and the
+  ghost-text loop, and the choice is remembered. Under reduced motion nothing moves, so the button
+  is hidden.
+- The FAQ uses native `<details>`/`<summary>`, which exposes the expanded state.
+- Scrolling tables are focusable, labelled regions.
+
 **Typography:** copy uses typographic quotes (’ ‘ ’ “ ”). `integrations/smartquotes.mjs` rewrites the
 text of every built page after the build, leaving code, scripts and attributes alone.
 `src/lib/smartquotes.mjs` handles the head, the social cards and the FAQ structured data, and the
