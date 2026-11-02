@@ -6,6 +6,7 @@ export const OG_PAGES: Record<string, { label: string; line: string }> = {
   privacy: { label: "Privacy policy", line: "Your data, in plain English." },
   terms: { label: "Terms of service", line: "The terms, in plain English." },
   account: { label: "Account", line: "Everything that needs you. Nothing that doesn't." },
+  "self-host": { label: "Docs · Self-hosting", line: "Run Heed Cloud on your own machine." },
 };
 
 /** Which card a page uses, from its path. */

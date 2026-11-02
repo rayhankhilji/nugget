@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "test": "node tests/smoke.mjs && node tests/bare.mjs",
     "apps": "node scripts/sync-apps.mjs",
+    "docs": "node scripts/sync-docs.mjs",
     "lighthouse": "node tests/lighthouse.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },

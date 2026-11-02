@@ -229,7 +229,15 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
                 {f.q}
                 <span class="plus" aria-hidden="true" />
               </summary>
-              <p>{f.a}</p>
+              <p>
+                {f.a}
+                {f.link && (
+                  <>
+                    {" "}
+                    <a href={f.link.href}>{f.link.text}</a>.
+                  </>
+                )}
+              </p>
             </details>
           ))
         }
@@ -873,6 +881,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
   details p {
     padding: 0 32px 22px 0;
     color: var(--text-2);
+  }
+  details p a {
+    color: var(--text);
+    text-underline-offset: 3px;
   }
 
   /* ---------- Responsive ---------- */

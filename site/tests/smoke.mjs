@@ -93,6 +93,25 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1f. The self-hosting guide renders from the book, and the copy is in sync with docs/book.
+{
+  const { existsSync } = await import("node:fs");
+  if (existsSync(new URL("../../docs/book/src/guide/self-host.md", import.meta.url))) {
+    const { DOCS, render } = await import("../scripts/sync-docs.mjs");
+    const { readFileSync } = await import("node:fs");
+    const fresh = DOCS.every((d) => readFileSync(new URL(`../${d.to}`, import.meta.url), "utf8") === render(d.from));
+    check(fresh, "src/content/docs matches docs/book (run npm run docs)");
+  }
+  const page = await browser.newPage();
+  await page.goto(base + "/docs/self-host");
+  check((await page.textContent("h1")) === "Self-hosting Heed Cloud", "/docs/self-host renders the guide");
+  const anchor = await page.getAttribute('.side a[href^="#"]', "href");
+  check(!!anchor && (await page.locator(anchor).count()) === 1, `self-host contents link resolves (${anchor})`);
+  await page.goto(base + "/");
+  check((await page.locator('#faq a[href="/docs/self-host"]').count()) === 1, "FAQ links to /docs/self-host");
+  await page.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();
