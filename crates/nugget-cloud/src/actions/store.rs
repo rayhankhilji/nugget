@@ -47,6 +47,18 @@ pub struct ActionView {
     pub executed_at: Option<OffsetDateTime>,
     pub result: Option<Value>,
     pub error: Option<String>,
+    /// The input the action was planned from (what an edit is merged into); null on actions
+    /// from before editing existed, which cannot be edited.
+    pub input: Option<Value>,
+    /// 1 when proposed, +1 per edit (each edit changes `digest`).
+    pub revision: i32,
+    /// Hidden from lists until then (never later than `expires_at`).
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub snoozed_until: Option<OffsetDateTime>,
+    /// The input fields an edit may change (empty when the action cannot be edited).
+    pub editable: &'static [&'static str],
+    #[serde(skip)]
+    proposed_digest: Option<String>,
     #[serde(skip)]
     tool: String,
     #[serde(skip)]
@@ -56,13 +68,20 @@ pub struct ActionView {
 }
 
 const COLUMNS: &str = "id, kind, toolkit, status, risk, decision, reason, summary, preview, digest, \
-    idempotency_key, created_at, expires_at, decided_at, executed_at, result, error, tool, arguments, connection_id";
+    idempotency_key, created_at, expires_at, decided_at, executed_at, result, error, tool, arguments, connection_id, \
+    input, revision, proposed_digest, snoozed_until";
 
 impl ActionView {
     fn from_row(r: &Row) -> Self {
+        let kind: String = r.get("kind");
+        let input: Option<Value> = r.get("input");
+        let editable = match (ActionKind::parse(&kind), &input) {
+            (Some(k), Some(_)) => super::editable(k),
+            _ => &[],
+        };
         Self {
             id: r.get("id"),
-            kind: r.get("kind"),
+            kind,
             toolkit: r.get("toolkit"),
             status: r.get("status"),
             risk: r.get("risk"),
@@ -81,6 +100,11 @@ impl ActionView {
             tool: r.get("tool"),
             arguments: r.get("arguments"),
             connection_id: r.get("connection_id"),
+            input,
+            revision: r.get("revision"),
+            proposed_digest: r.get("proposed_digest"),
+            snoozed_until: r.get("snoozed_until"),
+            editable,
         }
     }
 }
@@ -265,15 +289,15 @@ impl Actions {
                         &format!(
                             "insert into public.pending_actions
                                (id, user_id, connection_id, kind, toolkit, tool, arguments, summary, preview, digest,
-                                risk, decision, reason, idempotency_key, status, decided_at)
+                                risk, decision, reason, idempotency_key, status, decided_at, input, proposed_digest)
                              values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                                     case when $15 = 'denied' then now() end)
+                                     case when $15 = 'denied' then now() end, $16, $10)
                              on conflict (user_id, idempotency_key) do nothing
                              returning {COLUMNS}"
                         ),
                         &[
                             &id, &user, &conn.id, &kind, &p.toolkit, &plan.tool, &plan.arguments, &plan.summary,
-                            &preview, &dig, &risk_s, &decision_s, &reason, &key, &status,
+                            &preview, &dig, &risk_s, &decision_s, &reason, &key, &status, &p.input,
                         ],
                     )
                     .await?;
@@ -294,7 +318,13 @@ impl Actions {
                             )
                             .await?;
                         let a = ActionView::from_row(&r);
-                        Ok(if a.digest == dig { Ok(a) } else { Err(ActionError::IdempotencyConflict) })
+                        // The same proposal again (also after the user edited it): the action.
+                        let original = a.proposed_digest.as_deref().unwrap_or(&a.digest);
+                        Ok(if original == dig || a.digest == dig {
+                            Ok(a)
+                        } else {
+                            Err(ActionError::IdempotencyConflict)
+                        })
                     }
                 }
             })
@@ -319,10 +349,13 @@ impl Actions {
             .ok_or(ActionError::NotFound)
     }
 
+    /// The user's recent actions, newest first. Snoozed ones are left out unless
+    /// `include_snoozed`.
     pub async fn list(
         &self,
         user: Uuid,
         status: Option<&str>,
+        include_snoozed: bool,
     ) -> Result<Vec<ActionView>, ActionError> {
         Ok(self
             .db
@@ -333,9 +366,10 @@ impl Actions {
                             "select {COLUMNS} from public.pending_actions
                              where user_id = $1 and ($2::text is null or status = $2
                                    or ($2 = 'expired' and status = 'pending' and expires_at <= now()))
+                               and ($3 or snoozed_until is null or snoozed_until <= now())
                              order by created_at desc limit 100"
                         ),
-                        &[&user, &status],
+                        &[&user, &status, &include_snoozed],
                     )
                     .await?;
                 let mut out = Vec::new();
@@ -348,6 +382,189 @@ impl Actions {
             .into_iter()
             .filter(|a| status.is_none_or(|s| a.status == s))
             .collect())
+    }
+
+    /// Applies the user's edit to a pending action: merges the editable fields into its input,
+    /// re-validates and re-plans the call, re-runs the policy, and stores the new preview with a
+    /// NEW digest, so an approval of the old preview is refused (`digest_mismatch`). An edit
+    /// the policy denies leaves the action `denied`. Audited as `edited` (and `denied`).
+    pub async fn edit(
+        &self,
+        user: Uuid,
+        id: Uuid,
+        edit: &Value,
+    ) -> Result<ActionView, ActionError> {
+        // Read outside the transaction what planning needs (the event as last synced), then
+        // re-check everything under the row lock.
+        let current = self.get(user, id).await?;
+        if current.status != "pending" {
+            return Err(match current.status.as_str() {
+                "expired" => ActionError::Expired,
+                s => ActionError::NotPending(s.into()),
+            });
+        }
+        let kind = ActionKind::parse(&current.kind).ok_or(ActionError::NotFound)?;
+        let Some(input) = current.input.as_ref() else {
+            return Err(Invalid::Bad(
+                "this action was proposed before editing existed; propose it again".into(),
+            )
+            .into());
+        };
+        let merged = super::merge_edit(kind, input, edit)?;
+        let before = match (kind, merged.get("event_id").and_then(Value::as_str)) {
+            (ActionKind::UpdateEvent, Some(ev)) => {
+                self.db.event_before(user, &current.toolkit, ev).await?
+            }
+            _ => None,
+        };
+        let plan = plan(kind, &current.toolkit, &merged, before.as_ref())?;
+        let (risk, decision, rule) = assess(&self.policy, &plan, &id.to_string());
+        let (decision_s, reason, status) = match &decision {
+            Decision::Deny(r) => ("deny", r.clone(), "denied"),
+            Decision::Confirm(r) => ("confirm", r.clone(), "pending"),
+            Decision::Allow => unreachable!("assess never allows"),
+        };
+        let reason = match &rule {
+            Some(rule) => format!("{reason} ({rule})"),
+            None => reason,
+        };
+        let preview = serde_json::to_value(&plan.preview).unwrap_or_default();
+        let risk_s = risk.as_str();
+        let changed: Vec<String> = edit
+            .as_object()
+            .map(|m| m.keys().cloned().collect())
+            .unwrap_or_default();
+        let out = self
+            .db
+            .scoped(Some(user), async |tx| {
+                let Some(a) = load(tx, user, id, true).await? else {
+                    return Ok(Err(ActionError::NotFound));
+                };
+                let a = expire_if_due(tx, user, a).await?;
+                match a.status.as_str() {
+                    "pending" => {}
+                    "expired" => return Ok(Err(ActionError::Expired)),
+                    s => return Ok(Err(ActionError::NotPending(s.into()))),
+                }
+                // Planned from what we read; a concurrent edit in between means re-plan.
+                if a.revision != current.revision {
+                    return Ok(Err(ActionError::NotPending("changed meanwhile".into())));
+                }
+                let account = match a.connection_id {
+                    Some(c) => tx
+                        .query_opt(
+                            "select composio_account_id from public.connections
+                             where user_id = $1 and id = $2 and status = 'active'",
+                            &[&user, &c],
+                        )
+                        .await?
+                        .map(|r| r.get::<_, String>(0)),
+                    None => None,
+                };
+                let Some(account) = account else {
+                    return Ok(Err(ActionError::NotConnected(a.toolkit.clone())));
+                };
+                let dig = digest(&account, plan.tool, &plan.arguments);
+                let r = tx
+                    .query_one(
+                        &format!(
+                            "update public.pending_actions set
+                               tool = $3, arguments = $4, summary = $5, preview = $6, digest = $7,
+                               risk = $8, decision = $9, reason = $10, input = $11, status = $12,
+                               revision = revision + 1,
+                               decided_at = case when $12 = 'denied' then now() else decided_at end
+                             where user_id = $1 and id = $2 returning {COLUMNS}"
+                        ),
+                        &[
+                            &user,
+                            &id,
+                            &plan.tool,
+                            &plan.arguments,
+                            &plan.summary,
+                            &preview,
+                            &dig,
+                            &risk_s,
+                            &decision_s,
+                            &reason,
+                            &merged,
+                            &status,
+                        ],
+                    )
+                    .await?;
+                let updated = ActionView::from_row(&r);
+                audit(
+                    tx,
+                    user,
+                    Some(id),
+                    "edited",
+                    json!({"fields": changed, "revision": updated.revision,
+                           "old_digest": a.digest, "digest": updated.digest,
+                           "summary": updated.summary}),
+                )
+                .await?;
+                if updated.status == "denied" {
+                    audit(
+                        tx,
+                        user,
+                        Some(id),
+                        "denied",
+                        json!({"reason": updated.reason}),
+                    )
+                    .await?;
+                }
+                Ok(Ok(updated))
+            })
+            .await??;
+        if out.status == "denied" {
+            return Err(ActionError::Denied(out.reason.clone().unwrap_or_default()));
+        }
+        Ok(out)
+    }
+
+    /// Hides a pending action from lists until `until` (None: shows it again). `until` is capped
+    /// at the action's expiry: snoozing never extends how long an approval stays possible.
+    pub async fn snooze(
+        &self,
+        user: Uuid,
+        id: Uuid,
+        until: Option<OffsetDateTime>,
+    ) -> Result<ActionView, ActionError> {
+        if until.is_some_and(|t| t <= now()) {
+            return Err(Invalid::Bad("snooze until a time in the future".into()).into());
+        }
+        self.db
+            .scoped(Some(user), async |tx| {
+                let Some(a) = load(tx, user, id, true).await? else {
+                    return Ok(Err(ActionError::NotFound));
+                };
+                let a = expire_if_due(tx, user, a).await?;
+                match a.status.as_str() {
+                    "pending" => {}
+                    "expired" => return Ok(Err(ActionError::Expired)),
+                    s => return Ok(Err(ActionError::NotPending(s.into()))),
+                }
+                let capped = until.map(|t| t.min(a.expires_at));
+                let r = tx
+                    .query_one(
+                        &format!(
+                            "update public.pending_actions set snoozed_until = $3
+                             where user_id = $1 and id = $2 returning {COLUMNS}"
+                        ),
+                        &[&user, &id, &capped],
+                    )
+                    .await?;
+                let event = if capped.is_some() { "snoozed" } else { "unsnoozed" };
+                audit(
+                    tx,
+                    user,
+                    Some(id),
+                    event,
+                    json!({"until": capped.and_then(|t| t.format(&time::format_description::well_known::Rfc3339).ok())}),
+                )
+                .await?;
+                Ok(Ok(ActionView::from_row(&r)))
+            })
+            .await?
     }
 
     pub async fn cancel(&self, user: Uuid, id: Uuid) -> Result<ActionView, ActionError> {

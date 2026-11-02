@@ -383,6 +383,8 @@ pub struct FakeStripe {
     pub fetches: Mutex<u32>,
     pub deleted_customers: Mutex<Vec<String>>,
     pub fail_delete: std::sync::atomic::AtomicBool,
+    /// (subscription, price, proration_date) of every preview.
+    pub previews: Mutex<Vec<(String, String, i64)>>,
 }
 
 #[async_trait]
@@ -433,6 +435,32 @@ impl crate::stripe::Stripe for FakeStripe {
         }
         self.deleted_customers.lock().unwrap().push(id.into());
         Ok(())
+    }
+    async fn preview_change(
+        &self,
+        subscription: &str,
+        price: &str,
+        proration_date: i64,
+    ) -> Result<crate::stripe::InvoicePreview, crate::stripe::StripeError> {
+        self.previews
+            .lock()
+            .unwrap()
+            .push((subscription.into(), price.into(), proration_date));
+        // A fixed proration: £12.34 to move to a different price, nothing for the same one.
+        let current = self
+            .subs
+            .lock()
+            .unwrap()
+            .get(subscription)
+            .map(|s| s.price_id.clone());
+        Ok(crate::stripe::InvoicePreview {
+            amount_due: if current.as_deref() == Some(price) {
+                0
+            } else {
+                1234
+            },
+            currency: "gbp".into(),
+        })
     }
 }
 

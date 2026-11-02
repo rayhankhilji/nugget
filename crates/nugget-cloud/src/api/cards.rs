@@ -135,11 +135,48 @@ pub(super) async fn timezone(
     Ok(intel::profile(&s.db, user).await?.timezone)
 }
 
+/// Adds `author` (a display name, never an address; see [`crate::authors`]) to each evidence
+/// entry of wire cards. Sensitive cards are left alone: they quote nothing about their sources.
+async fn with_authors(s: &AppState, user: Uuid, mut cards: Vec<Value>) -> ApiResult<Vec<Value>> {
+    let ids: Vec<Uuid> = cards
+        .iter()
+        .filter(|c| c["sensitive"] != json!(true))
+        .flat_map(|c| c["evidence"].as_array().cloned().unwrap_or_default())
+        .filter_map(|e| e["item"]["key"].as_str().and_then(|k| k.parse().ok()))
+        .collect();
+    if ids.is_empty() {
+        return Ok(cards);
+    }
+    let metas = s.db.items_meta(user, &ids).await?;
+    for c in &mut cards {
+        let sensitive = c["sensitive"] == json!(true);
+        if let Some(ev) = c["evidence"].as_array_mut() {
+            for e in ev {
+                let author = (!sensitive)
+                    .then(|| {
+                        e["item"]["key"]
+                            .as_str()
+                            .and_then(|k| k.parse::<Uuid>().ok())
+                    })
+                    .flatten()
+                    .and_then(|id| metas.get(&id))
+                    .and_then(|m| crate::authors::display_name(m.author.as_deref()));
+                e["author"] = json!(author);
+            }
+        }
+    }
+    Ok(cards)
+}
+
 async fn inbox(s: &AppState, user: Uuid, tz: Option<String>) -> ApiResult<Value> {
     let (list, last) = cards::inbox(&s.db, user, &cards::config(tz)).await?;
     let apps = card_actions::connected(&s.db, user).await?;
+    let wired = list
+        .iter()
+        .map(|c| cards::wire(c, &apps))
+        .collect::<Vec<_>>();
     Ok(json!({
-        "cards": list.iter().map(|c| cards::wire(c, &apps)).collect::<Vec<_>>(),
+        "cards": with_authors(s, user, wired).await?,
         "last_refresh": last.and_then(|t| t.format(&time::format_description::well_known::Rfc3339).ok()),
     }))
 }
@@ -272,7 +309,13 @@ pub(super) async fn act(
         }
     };
     let card = cards::act(&s.db, u, &cfg, op, now).await?;
-    let mut out = json!({ "card": card.as_ref().map(|c| cards::wire(c, &apps)) });
+    let wired = match card.as_ref() {
+        Some(c) => with_authors(&s, u, vec![cards::wire(c, &apps)])
+            .await?
+            .pop(),
+        None => None,
+    };
+    let mut out = json!({ "card": wired });
     if let Some(a) = proposed {
         out["action"] = json!(a);
     }
