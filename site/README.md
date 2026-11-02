@@ -284,6 +284,15 @@ text of every built page after the build, leaving code, scripts and attributes a
 client-side messages are written with ’ in source. The smoke test fails on straight apostrophes in
 visible text.
 
+**Performance budgets:** `tests/budgets.mjs`, run by `npm test`, fails if a page's JavaScript
+grows more than 10% past its baseline. The count covers inline scripts, module scripts and
+everything they import. It also fails if any image in the build is over 300 KB. There are two
+baselines: `budgets.json` for the build without Heed Cloud settings (production today) and
+`budgets-cloud.json` for the configured build. To accept a deliberate change, run
+`node tests/budgets.mjs --update` (add `--cloud` for the configured build). The account and checkout
+UIs are components that render only when the cloud is configured, so a closed build doesn't ship
+the Supabase client (5 KB instead of about 230 KB on those pages).
+
 **Performance:**
 - CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within
   200px of the viewport.
