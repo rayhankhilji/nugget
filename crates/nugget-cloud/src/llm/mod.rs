@@ -54,7 +54,7 @@ use crate::api::AppState;
 use crate::auth::{AuthError, AuthUser};
 use crate::config::Config;
 use crate::db::DbError;
-use crate::gateway::{GatewayError, price_per_mtok};
+use crate::gateway::price_per_mtok;
 use crate::plans::ModelTier;
 pub use entitlements::{Entitlements, entitlements};
 
@@ -69,6 +69,8 @@ const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
 const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Largest non-streaming upstream body accepted.
 const MAX_JSON_BODY: usize = 8 * 1024 * 1024;
+/// Tokens counted per image block when estimating a request's input (well above typical).
+const IMAGE_TOKENS_ESTIMATE: u64 = 2_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmTier {
@@ -134,8 +136,11 @@ pub struct Limits {
     pub idle_timeout: Duration,
     /// Longest a whole request may take.
     pub total_timeout: Duration,
-    /// How long entitlements and month-to-date usage are reused before re-reading them.
+    /// How long entitlements and the smart-call count are reused before re-reading them.
     pub usage_ttl: Duration,
+    /// Deadline for a non-streaming request: Ask's (model latency). Streams are bounded by the
+    /// three limits above instead, since an agent's stream may rightly run for many minutes.
+    pub non_stream_timeout: Duration,
 }
 
 impl Default for Limits {
@@ -147,6 +152,7 @@ impl Default for Limits {
             idle_timeout: Duration::from_secs(90),
             total_timeout: Duration::from_secs(15 * 60),
             usage_ttl: Duration::from_secs(15),
+            non_stream_timeout: Duration::from_secs(60),
         }
     }
 }
@@ -222,16 +228,15 @@ pub fn upstream_client() -> reqwest::Result<reqwest::Client> {
 struct CachedUsage {
     at: Instant,
     ent: Option<Entitlements>,
-    month_cost: i64,
     smart_used: i64,
 }
 
-/// What [`LlmState::usage`] reads: the entitlements (`None`: no live subscription), this
-/// month's AI cost and smart-model calls so far.
+/// What [`LlmState::usage`] reads: the entitlements (`None`: no live subscription) and this
+/// month's smart-model calls so far. Spend is not cached: it is checked, atomically, when the
+/// request's cost is reserved ([`LlmState::reserve`]).
 #[derive(Debug, Clone)]
 struct UsageView {
     ent: Option<Entitlements>,
-    month_cost: i64,
     smart_used: i64,
 }
 
@@ -260,24 +265,22 @@ impl LlmState {
         self.cfg.anthropic.is_some() || self.cfg.openai.is_some()
     }
 
-    /// Entitlements, month-to-date cost and smart calls, reused for [`Limits::usage_ttl`] so a
-    /// keystroke's request does not wait for the database. Requests metered meanwhile are added
-    /// locally, so a limit can only be overshot by requests already in flight.
+    /// Entitlements and smart calls, reused for [`Limits::usage_ttl`] so a keystroke's request
+    /// does not wait for them. Smart calls metered meanwhile are counted locally. (Spend is not
+    /// cached: each request reserves its worst case in Postgres first.)
     async fn usage(&self, user: Uuid) -> Result<UsageView, DbError> {
         if let Some(c) = lock(&self.usage).get(&user)
             && c.at.elapsed() < self.cfg.limits.usage_ttl
         {
             return Ok(UsageView {
                 ent: c.ent.clone(),
-                month_cost: c.month_cost,
                 smart_used: c.smart_used,
             });
         }
         let db = &self.app.db;
         let smart_model = self.app.gateway.model_for(ModelTier::Smart);
-        let (ent, month_cost, smart_used) = tokio::try_join!(
+        let (ent, smart_used) = tokio::try_join!(
             entitlements(db, &self.app.plans, user),
-            db.month_cost_micros(user),
             db.month_model_calls(user, smart_model),
         )?;
         let mut cache = lock(&self.usage);
@@ -289,20 +292,14 @@ impl LlmState {
             CachedUsage {
                 at: Instant::now(),
                 ent: ent.clone(),
-                month_cost,
                 smart_used,
             },
         );
-        Ok(UsageView {
-            ent,
-            month_cost,
-            smart_used,
-        })
+        Ok(UsageView { ent, smart_used })
     }
 
-    fn add_usage(&self, user: Uuid, cost: i64, smart: bool) {
+    fn add_smart_call(&self, user: Uuid, smart: bool) {
         if let Some(c) = lock(&self.usage).get_mut(&user) {
-            c.month_cost += cost;
             c.smart_used += i64::from(smart);
         }
     }
@@ -333,6 +330,117 @@ impl LlmState {
     }
 }
 
+/// Spend reserved for one request ([`LlmState::reserve`]). Its meter settles it with the real
+/// usage; one never settled (the request failed before any usage) is released when the last
+/// handle drops, and a crashed server's reservations expire on their own.
+pub(crate) struct Reservation {
+    pub id: Uuid,
+    user: Uuid,
+    micros: i64,
+    db: crate::db::Db,
+    settled: std::sync::atomic::AtomicBool,
+}
+
+impl std::fmt::Debug for Reservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reservation")
+            .field("id", &self.id)
+            .field("micros", &self.micros)
+            .finish()
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if self.settled.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let (db, id, user) = (self.db.clone(), self.id, self.user);
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                if let Err(e) = db.ai_release(id, user).await {
+                    tracing::warn!(%e, "llm: could not release a reservation (it will expire)");
+                }
+            });
+        }
+    }
+}
+
+/// The input tokens a request may bill, erring high: about 3 characters per token over the
+/// text of the system prompt, messages and tools, plus a flat [`IMAGE_TOKENS_ESTIMATE`] per
+/// image (their base64 is not counted).
+pub(crate) fn estimate_input_tokens(body: &Map<String, Value>) -> u64 {
+    fn walk(v: &Value, chars: &mut u64, images: &mut u64) {
+        match v {
+            Value::String(s) => *chars += s.len() as u64,
+            Value::Array(a) => a.iter().for_each(|x| walk(x, chars, images)),
+            Value::Object(m) => {
+                if m.get("type").and_then(Value::as_str) == Some("image") {
+                    *images += 1;
+                    return;
+                }
+                for (k, x) in m {
+                    *chars += k.len() as u64;
+                    walk(x, chars, images);
+                }
+            }
+            _ => *chars += 4,
+        }
+    }
+    let (mut chars, mut images) = (0, 0);
+    for k in ["system", "messages", "tools", "tool_choice"] {
+        if let Some(v) = body.get(k) {
+            walk(v, &mut chars, &mut images);
+        }
+    }
+    chars.div_ceil(3) + images * IMAGE_TOKENS_ESTIMATE
+}
+
+/// Worst-case cost of a request on `model`: every input token at the input price plus
+/// `max_tokens` at the output price.
+pub(crate) fn estimate_micros(body: &Map<String, Value>, model: &str) -> i64 {
+    let (i, o) = price_per_mtok(model);
+    let max_tokens = body.get("max_tokens").and_then(Value::as_u64).unwrap_or(0);
+    (estimate_input_tokens(body) as f64 * i + max_tokens as f64 * o).ceil() as i64
+}
+
+impl LlmState {
+    /// The model that would serve `tier` (primary provider first), for pricing.
+    fn priced_model(&self, tier: ModelTier) -> String {
+        self.cfg
+            .anthropic
+            .as_ref()
+            .or(self.cfg.openai.as_ref())
+            .map(|u| u.model(tier).to_owned())
+            .unwrap_or_default()
+    }
+
+    /// Reserve this request's worst case on `tier` against `cap`, in one database round trip.
+    /// `None`: it does not fit.
+    async fn reserve(
+        &self,
+        user: Uuid,
+        checked: &Checked,
+        tier: ModelTier,
+        cap: i64,
+    ) -> Result<Option<Reservation>, DbError> {
+        let micros = estimate_micros(&checked.body, &self.priced_model(tier));
+        // Held a little past the longest request, so a crash cannot pin it for long.
+        let hold = (self.cfg.limits.total_timeout.as_secs() + 300).min(i32::MAX as u64) as i32;
+        let db = self.app.db.clone();
+        Ok(db
+            .ai_reserve(user, micros, cap, hold)
+            .await?
+            .map(|id| Reservation {
+                id,
+                user,
+                micros,
+                db,
+                settled: std::sync::atomic::AtomicBool::new(false),
+            }))
+    }
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -358,7 +466,11 @@ impl Drop for Slot {
 pub fn router(state: Arc<LlmState>) -> Router {
     Router::new()
         .route("/llm/v1/messages", post(messages))
-        .route("/llm/v1/models", get(models))
+        // The generic 30 s deadline; messages bound themselves (stream limits, or 60 s).
+        .route(
+            "/llm/v1/models",
+            get(models).layer(axum::middleware::from_fn(crate::ops::deadline)),
+        )
         .layer(axum::extract::DefaultBodyLimit::max(
             state.cfg.limits.max_body_bytes,
         ))
@@ -419,8 +531,31 @@ async fn authed(s: &LlmState, h: &HeaderMap) -> Result<AuthUser, Response> {
     }
 }
 
+/// The per-user model-endpoint bucket ([`crate::ratelimit::Limits::llm_per_min`]): 429 with
+/// `code: rate_limited` (the API's code) and `Retry-After`, in this endpoint's Anthropic shape
+/// so the desktop's Anthropic client reads it.
+fn rate_limit(s: &LlmState, user: Uuid) -> Result<(), Response> {
+    s.app.limits.llm.check(&user).map_err(|wait| {
+        crate::ops::METRICS.rate_limited("llm");
+        let mut r = error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_error",
+            "too many requests; slow down and try again shortly",
+            Some("rate_limited"),
+        );
+        let secs = (wait.as_secs() + u64::from(wait.subsec_nanos() > 0)).max(1);
+        r.headers_mut()
+            .insert("retry-after", HeaderValue::from(secs));
+        r
+    })
+}
+
 async fn models(State(s): State<Arc<LlmState>>, h: HeaderMap) -> Response {
-    if let Err(r) = authed(&s, &h).await {
+    let user = match authed(&s, &h).await {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    if let Err(r) = rate_limit(&s, user.id) {
         return r;
     }
     // The desktop prewarms with this call; if our own provider connection has gone idle, open
@@ -459,6 +594,8 @@ pub(crate) struct Checked {
     pub model_tier: ModelTier,
     pub stream: bool,
     pub body: Map<String, Value>,
+    /// The spend reserved for this request (set by the handler), settled by its meter.
+    pub reservation: Option<Arc<Reservation>>,
 }
 
 /// Fields forwarded upstream. Anything else (server tools, containers, MCP servers, service
@@ -546,6 +683,7 @@ pub(crate) fn check(body: Value, ent: &Entitlements, limits: &Limits) -> Result<
         model_tier,
         stream,
         body: obj,
+        reservation: None,
     })
 }
 
@@ -599,6 +737,8 @@ struct Meter {
     output_chars: usize,
     status: &'static str,
     done: bool,
+    /// Settled with the real usage when the request ends.
+    reservation: Option<Arc<Reservation>>,
 }
 
 impl Meter {
@@ -625,6 +765,7 @@ impl Meter {
             output_chars: 0,
             status: "ok",
             done: false,
+            reservation: None,
         }
     }
 
@@ -700,9 +841,10 @@ impl Meter {
             "llm request"
         );
         if self.input == 0 && output == 0 && self.cache_read == 0 && self.cache_write == 0 {
+            // Nothing billed: the reservation (if any) is released when its last handle drops.
             return;
         }
-        self.state.add_usage(self.user, cost, self.smart);
+        self.state.add_smart_call(self.user, self.smart);
         let row = UsageRow {
             user: self.user,
             model: self.model.clone(),
@@ -714,11 +856,31 @@ impl Meter {
             cost,
         };
         let db = self.state.app.db.clone();
+        let reservation = self.reservation.take();
+        if let Some(r) = &reservation {
+            r.settled.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
         let Ok(rt) = tokio::runtime::Handle::try_current() else {
             return;
         };
         rt.spawn(async move {
-            if let Err(e) = record(&db, &row).await {
+            let result = match &reservation {
+                // Usage recorded and reservation released in one transaction.
+                Some(r) => {
+                    let u = crate::db::LlmUsage {
+                        model: &row.model,
+                        route: &row.route,
+                        input: row.input,
+                        output: row.output,
+                        cache_read: row.cache_read,
+                        cache_write: row.cache_write,
+                        cost: row.cost,
+                    };
+                    db.ai_settle(r.id, row.user, &u).await
+                }
+                None => record(&db, &row).await,
+            };
+            if let Err(e) = result {
                 tracing::error!(%e, "llm: could not meter a request");
             }
         });
@@ -784,6 +946,9 @@ async fn messages(
         Ok(u) => u,
         Err(r) => return r,
     };
+    if let Err(r) = rate_limit(&s, user.id) {
+        return r;
+    }
     let body = match body {
         Ok(b) => b,
         Err(e) if e.status() == StatusCode::PAYLOAD_TOO_LARGE => {
@@ -835,31 +1000,62 @@ async fn messages(
         Ok(c) => c,
         Err(m) => return bad_request(&m),
     };
-    // The gateway's rule: refused past the hard cap; smart falls back to fast once the
-    // fair-use budget or the smart allowance is used up.
-    match ent
-        .allowance
-        .choose(usage.month_cost, usage.smart_used, Some(checked.model_tier))
+    // Reserve the worst-case cost before forwarding (the gateway's rule, made atomic): smart
+    // must fit the fair-use budget (and the smart allowance), else the request falls back to
+    // fast, which must fit the hard cap, else 429.
+    let wanted = checked.model_tier;
+    let mut reservation = None;
+    if wanted == ModelTier::Smart
+        && usage.smart_used < i64::from(ent.allowance.smart_asks_per_month)
     {
-        Ok(choice) => {
-            if choice.downgraded {
-                tracing::info!(user = %user.id, "llm: smart allowance used up; serving fast");
+        match s
+            .reserve(
+                user.id,
+                &checked,
+                ModelTier::Smart,
+                ent.allowance.budget_micros,
+            )
+            .await
+        {
+            Ok(r) => reservation = r,
+            Err(e) => {
+                tracing::error!(%e, "llm: reserving spend");
+                return upstream_error();
             }
-            checked.model_tier = choice.tier;
-        }
-        Err(GatewayError::QuotaExceeded) => {
-            return error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "rate_limit_error",
-                "monthly AI quota used up",
-                Some("quota_exceeded"),
-            );
-        }
-        Err(e) => {
-            tracing::error!(%e, "llm: choosing a model");
-            return upstream_error();
         }
     }
+    if reservation.is_some() {
+        checked.model_tier = ModelTier::Smart;
+    } else {
+        match s
+            .reserve(
+                user.id,
+                &checked,
+                ModelTier::Fast,
+                ent.allowance.hard_cap_micros,
+            )
+            .await
+        {
+            Ok(Some(r)) => reservation = Some(r),
+            Ok(None) => {
+                return error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_error",
+                    "monthly AI quota used up",
+                    Some("quota_exceeded"),
+                );
+            }
+            Err(e) => {
+                tracing::error!(%e, "llm: reserving spend");
+                return upstream_error();
+            }
+        }
+        if wanted == ModelTier::Smart {
+            tracing::info!(user = %user.id, "llm: smart allowance or budget used up; serving fast");
+        }
+        checked.model_tier = ModelTier::Fast;
+    }
+    checked.reservation = reservation.map(Arc::new);
     let Some(slot) = s.acquire(user.id, ent.max_concurrent) else {
         return error(
             StatusCode::TOO_MANY_REQUESTS,
@@ -874,26 +1070,53 @@ async fn messages(
         .filter(|v| v.len() == 10 && v.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
         .unwrap_or(DEFAULT_ANTHROPIC_VERSION)
         .to_owned();
+    if !checked.stream {
+        // Non-streaming answers get the normal (Ask) deadline; dropping the work on timeout
+        // cancels the upstream request, and its reservation is released.
+        let limit = s.cfg.limits.non_stream_timeout;
+        let deadline = Instant::now() + limit;
+        return match tokio::time::timeout(
+            limit,
+            dispatch(&s, user.id, &ent, &checked, &version, slot, deadline),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(_) => timeout_error(),
+        };
+    }
     let deadline = Instant::now() + s.cfg.limits.total_timeout;
+    dispatch(&s, user.id, &ent, &checked, &version, slot, deadline).await
+}
 
+/// Primary provider, then the fallback when the primary fails before answering.
+async fn dispatch(
+    s: &Arc<LlmState>,
+    user: Uuid,
+    ent: &Entitlements,
+    checked: &Checked,
+    version: &str,
+    slot: Slot,
+    deadline: Instant,
+) -> Response {
     if let Some(a) = s.cfg.anthropic.clone() {
         s.touch_upstream();
-        let failure = match anthropic(&s, &a, user.id, &checked, &version, slot, deadline).await {
+        let failure = match anthropic(s, &a, user, checked, version, slot, deadline).await {
             Ok(r) | Err(Failed::Final(r)) => return r,
             Err(Failed::Retryable(r)) => r,
         };
         // The slot went with the failed attempt; the fallback takes a new one.
-        let (Some(o), Some(slot)) = (s.cfg.openai.clone(), s.acquire(user.id, ent.max_concurrent))
+        let (Some(o), Some(slot)) = (s.cfg.openai.clone(), s.acquire(user, ent.max_concurrent))
         else {
             return failure;
         };
-        tracing::warn!(user = %user.id, tier = checked.tier.as_str(), "llm: falling back to OpenAI");
-        return openai_route(&s, &o, user.id, &checked, slot, deadline)
+        tracing::warn!(user = %user, tier = checked.tier.as_str(), "llm: falling back to OpenAI");
+        return openai_route(s, &o, user, checked, slot, deadline)
             .await
             .unwrap_or_else(|r| r);
     }
     let o = s.cfg.openai.clone().expect("configured() checked");
-    openai_route(&s, &o, user.id, &checked, slot, deadline)
+    openai_route(s, &o, user, checked, slot, deadline)
         .await
         .unwrap_or_else(|r| r)
 }
@@ -1071,6 +1294,7 @@ async fn anthropic(
     body.insert("metadata".into(), json!({"user_id": user.to_string()}));
     let mut meter = Meter::new(s, user, checked.tier, &model, "anthropic");
     meter.smart = checked.model_tier == ModelTier::Smart;
+    meter.reservation = checked.reservation.clone();
     let req = s
         .http
         .post(format!("{}/v1/messages", a.base))
@@ -1161,6 +1385,7 @@ async fn openai_route(
     .map_err(|m| bad_request(&m))?;
     let mut meter = Meter::new(s, user, checked.tier, &model, "openai");
     meter.smart = checked.model_tier == ModelTier::Smart;
+    meter.reservation = checked.reservation.clone();
     let req = s
         .http
         .post(format!("{}/v1/chat/completions", o.base))

@@ -28,6 +28,10 @@ pub struct Limits {
     pub action_per_min: u32,
     /// `POST /v1/waitlist` per hour per client IP (unauthenticated).
     pub waitlist_per_hour: u32,
+    /// Model-endpoint calls (`/llm/v1/*`) per minute per user, with a burst of the same size.
+    /// Ghost text is chatty (a debounced request per pause in typing, cancelled as the user
+    /// types on), so this is its own bucket, apart from `user_per_min`.
+    pub llm_per_min: u32,
 }
 
 impl Default for Limits {
@@ -39,6 +43,9 @@ impl Default for Limits {
             sync_every_secs: 60,
             action_per_min: 10,
             waitlist_per_hour: 5,
+            // 2 a second sustained with a full minute of burst: well above a fast typist's
+            // debounced ghost text (about 1 a second at most), far below abuse rates.
+            llm_per_min: 120,
         }
     }
 }
@@ -53,6 +60,7 @@ impl Limits {
             sync_every_secs: 0,
             action_per_min: 0,
             waitlist_per_hour: 0,
+            llm_per_min: 0,
         }
     }
 }

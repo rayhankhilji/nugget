@@ -130,6 +130,7 @@ impl Config {
                     sync_every_secs: n("NUGGET_SYNC_EVERY_SECS", d.sync_every_secs),
                     action_per_min: n("NUGGET_RATE_ACTION_PER_MIN", d.action_per_min),
                     waitlist_per_hour: n("NUGGET_RATE_WAITLIST_PER_HOUR", d.waitlist_per_hour),
+                    llm_per_min: n("NUGGET_RATE_LLM_PER_MIN", d.llm_per_min),
                 }
             },
             client_ip_header: match get("NUGGET_CLIENT_IP_HEADER") {
