@@ -52,7 +52,7 @@ describe("Models page: download controls", () => {
     await flush();
     const note = container.querySelector("li.card .note")!;
     expect(note.getAttribute("role")).toBe("status");
-    expect(note.textContent).toBe("Download cancelled. 500 MB downloaded so far is kept: the next try continues from there.");
+    expect(note.textContent).toBe("Download cancelled. 477 MB downloaded so far is kept: the next try continues from there.");
     const resume = byText(container, "li.card button", "Resume download")!;
     expect(document.activeElement).toBe(resume);
     expect(container.querySelector('button[aria-label^="Cancel downloading"]')).toBeNull();

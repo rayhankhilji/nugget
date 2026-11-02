@@ -11,7 +11,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const GB = 1_000_000_000;
+const GB = 1024 ** 3;
 
 function fit(over: Partial<ModelFit> & { id: string }): ModelFit {
   return {

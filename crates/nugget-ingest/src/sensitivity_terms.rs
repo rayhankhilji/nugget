@@ -18,6 +18,11 @@ const TABLE: &str = "\
 phrase health: mood journal, panic attack
 word credentials: passphrase
 phrase credentials: wifi password
+stem health: psychiatr, antidepres, sertral, fluoxetin, citalopram, paroxetin, venlafaxin
+stem health: bupropion, quetiapin, radiolog, physiotherap
+word health: depressive, x-ray, ultrasound
+phrase health: ct scan, herniated disc, slipped disc, bipolar disorder, anxiety disorder
+phrase credentials: your pin, new pin, pin number, pin reset, reset pin
 -- German
 stem health: befund, diagnose, arzt, ärztin
 phrase health: praxis dr
@@ -27,6 +32,11 @@ stem health: krankschreibung, krankmeldung, arbeitsunfähig
 word health: au-bescheinigung
 stem health: krankenhaus, klinik, therapie, therapeut, blutwerte, laborwerte, schilddrüse
 stem health: medikament, krankenkasse
+word health: depression, depressionen, depressiv, mrt
+stem health: psychiater, kernspin, rontgen, bandscheib, angststorung
+phrase credentials: ihre pin, deine pin, neue pin
+word credentials: geheimzahl, pin-nummer, pin-code
+stem credentials: sicherheitscode
 stem financial: gehalt, lohnsteuer, lohnabrechnung, kontoauszug, kontostand, girokonto
 stem financial: dispositionskredit, dispokredit, lastschrift, überweisung, kreditkarte
 stem financial: steuerbescheid, steuererklärung, darlehen, hypothek, schulden
@@ -44,6 +54,10 @@ phrase health: resultados de su analisis
 word health: medico, medica, doctora
 phrase health: centro de salud, consulta medica, receta medica
 word health: diagnostico, colesterol, hospital, clinica, terapia, psicologo, psicologa
+stem health: terapia, psiquiatr, depresi, ansiedad
+word health: radiografia, ecografia, tomografia
+phrase health: resonancia magnetica, hernia discal
+phrase credentials: tu pin, su pin, nuevo pin, codigo pin, codigo de seguridad
 phrase health: baja medica
 word financial: extracto
 phrase financial: saldo anterior, saldo actual, saldo disponible, saldo de su cuenta
@@ -68,6 +82,10 @@ phrase health: arret de travail, arret maladie
 word health: hopital, clinique, therapie, psychologue
 phrase health: analyses de sang
 word health: mutuelle
+stem health: therapie, depressi
+word health: radiographie, echographie, anxiete
+phrase health: hernie discale
+phrase credentials: code pin, votre pin, nouveau pin, code confidentiel, code de securite
 phrase financial: releve de compte, releve bancaire, solde au, solde du compte
 phrase financial: solde de votre compte
 word financial: decouvert, prelevement, virement
@@ -89,6 +107,10 @@ phrase health: receita medica
 word health: diagnostico
 phrase health: plano de saude, atestado medico
 word health: psicologo, terapia
+stem health: terapia, psiquiatr
+word health: depressao, depressivo, depressiva, ansiedade, radiografia, tomografia, ultrassom
+phrase health: ressonancia magnetica, hernia de disco
+phrase credentials: seu pin, novo pin, codigo pin, codigo de seguranca
 word financial: extrato
 phrase financial: saldo anterior, saldo atual, saldo disponivel, saldo em conta, conta corrente
 word financial: salario, holerite, contracheque
@@ -105,12 +127,16 @@ phrase legal: guarda dos filhos
 word identity: cpf, passaporte
 -- Japanese
 sub health: 診察, 診断, 糖尿病, 病院, クリニック, 検査結果, 健康診断, 処方, 治療, カウンセリング
+sub health: 精神科, 心療内科, うつ病, 抑うつ, 抗うつ, 不安障害, セルトラリン, レントゲン, 椎間板
+sub credentials: セキュリティコード, 確認コード, PINコード
 sub financial: 給与, 給料, 口座, 残高, 引き落とし, ローン, 源泉徴収, 確定申告
 sub credentials: パスワード, 暗証番号, 認証コード
 sub legal: 裁判, 訴訟, 弁護士, 離婚, 親権, 調停
 sub identity: マイナンバー, パスポート, 保険証
 -- Chinese (Simplified)
 sub health: 诊断, 确诊, 糖尿病, 医院, 门诊, 体检, 检查结果, 化验, 处方, 治疗, 心理咨询, 病历
+sub health: 精神科, 心理医生, 抑郁, 焦虑症, 舍曲林, 核磁共振, 磁共振, 椎间盘, X光
+sub credentials: 安全码, 动态码, PIN码
 sub financial: 工资, 薪资, 银行卡, 余额, 账户对账单, 银行对账单, 信用卡对账单, 贷款, 房贷, 个税
 sub credentials: 密码, 验证码
 sub legal: 法院, 起诉, 诉讼, 律师, 离婚, 抚养权, 传票
@@ -118,7 +144,9 @@ sub identity: 身份证, 护照, 社保
 -- Hindi
 sub health: डॉक्टर, अस्पताल, जांच रिपोर्ट, दवा, इलाज, निदान, मधुमेह, मनोवैज्ञानिक, मनोचिकित्सक
 sub health: परामर्श सत्र, काउंसलिंग, थेरेपी
-sub financial: वेतन, सैलरी, बैंक खाता, बैलेंस, बैंक स्टेटमेंट, होम लोन, पर्सनल लोन, लोन की किस्त
+sub health: मनोचिकित्सा, मनोरोग, अवसाद, डिप्रेशन, सर्ट्रालाइन, एमआरआई, सीटी स्कैन, एक्स-रे
+sub credentials: पिन रीसेट, एटीएम पिन, नया पिन
+sub financial: वेतन, सैलरी, बैंक खाता, बैंक बैलेंस, खाते का बैलेंस, उपलब्ध बैलेंस, बैंक स्टेटमेंट, होम लोन, पर्सनल लोन, लोन की किस्त
 sub financial: कर्ज, ऋण, खाता संख्या, खाता विवरण
 sub credentials: पासवर्ड, ओटीपी, सत्यापन कोड, वन टाइम पासवर्ड
 sub legal: अदालत, कोर्ट, वकील, मुकदमा, तलाक
@@ -127,6 +155,9 @@ sub identity: आधार कार्ड, आधार नंबर, पैन
 sub health: طبيب, مستشفى, عيادة, تحاليل, تشخيص, وصفة طبية, علاج, السكري, أخصائي نفسي
 sub health: أخصائية نفسية, طبيب نفسي, طبيبة نفسية, معالج نفسي, معالجة نفسية, علاج نفسي
 sub health: الصحة النفسية, استشارة نفسية
+sub health: الطب النفسي, اكتئاب, سيرترالين, الرنين المغناطيسي, أشعة سينية, الأشعة المقطعية
+sub health: انزلاق غضروفي
+sub credentials: الرقم السري, رقم التعريف الشخصي
 sub financial: الراتب, راتبك, كشف حساب, رصيد, حساب بنكي, قرض, قروض, تحويل بنكي
 sub credentials: كلمة المرور, كلمة السر, رمز التحقق
 sub legal: محكمة, محامي, دعوى, طلاق, حضانة
@@ -381,7 +412,29 @@ ar|S|موعد المحكمة|أبلغنا المحامي أن جلسة المح�
 ar|S|جواز سفر|يرجى إحضار جواز سفر ساري المفعول.
 ar|-|شواء يوم السبت|سنقيم حفلة شواء يوم السبت في الحديقة، أحضر السلطة.
 ar|-|محضر الاجتماع|مرفق محضر اجتماع يوم الاثنين.
-ar|-|صور الرحلة|أرسلت لك صور الرحلة إلى البحيرة.";
+ar|-|صور الرحلة|أرسلت لك صور الرحلة إلى البحيرة.
+en|S|Follow-up|The psychiatrist increased the fluoxetine to 40 mg.
+en|S|Card update|Your new PIN arrives in a separate letter.
+de|S|Überweisung zum Psychiater|Wegen der Depression bekommen Sie ein Antidepressivum.
+de|S|Röntgenbild|Das Röntgenbild der Wirbelsäule ist da, Kontrolle per MRT.
+de|S|Neue Karte|Ihre neue PIN kommt mit getrennter Post.
+es|S|Cita en psiquiatría|Seguimos con el tratamiento para la ansiedad.
+es|S|Resultados|La resonancia magnética confirma la lesión. Empezamos fisioterapia.
+es|S|Tarjeta nueva|Su PIN llegará por correo separado.
+fr|S|Rendez-vous|Le psychiatre propose un antidépresseur.
+fr|S|Nouvelle carte|Votre code PIN arrive par un courrier séparé.
+pt-BR|S|Consulta|O psiquiatra ajustou o antidepressivo para a depressão.
+pt-BR|S|Cartão novo|Seu PIN chega em outra correspondência.
+ja|S|ご案内|心療内科の予約は来週です。
+ja|S|新しいカード|PINコードは別送します。
+zh-CN|S|复查|精神科医生建议继续服药治疗焦虑症。
+zh-CN|S|检查|您的磁共振检查已预约。
+zh-CN|S|新卡|新卡的PIN码将另行寄送。
+hi|S|अपॉइंटमेंट|मनोरोग विशेषज्ञ से अगले हफ्ते मिलना है।
+hi|S|नया कार्ड|आपका एटीएम पिन अलग से भेजा जाएगा।
+hi|-|तिमाही रिपोर्ट|बैलेंस शीट और लाभ-हानि का खाका साझा फ़ोल्डर में है।
+ar|S|موعد|حجزنا لك موعدا في عيادة الطب النفسي.
+ar|S|بطاقة جديدة|سيصلك الرقم السري في رسالة منفصلة.";
 
     #[test]
     fn every_ui_language() {

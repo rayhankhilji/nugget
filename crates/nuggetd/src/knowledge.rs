@@ -1,6 +1,7 @@
 //! Knowledge extraction and the Markdown vault, wired into the daemon.
 //!
-//! - **Extraction** ([`Knowledge::run_once`]) runs at startup, after ingest commits (debounced),
+//! - **Extraction** ([`Knowledge::run_once`]) runs at startup, after ingest commits and triage
+//!   verdicts (debounced; items waiting for triage are extracted with the model once sorted),
 //!   every `interval_minutes`, and again right away while a run leaves planned items behind.
 //!   While the power policy is constrained, runs make no LLM requests and periodic runs skip.
 //! - Entity ids changed by runs, merges, claim-status changes and vault edits are broadcast as

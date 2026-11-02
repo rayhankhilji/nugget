@@ -36,6 +36,13 @@ impl Metrics {
         self.committed.send_modify(|n| *n += 1);
     }
 
+    /// Wake [`subscribe_committed`](Self::subscribe_committed) watchers for a change that is not
+    /// an ingest commit: triage labelled items (metadata only), so work that waited for its
+    /// verdict (knowledge extraction) can go on now instead of at its next periodic run.
+    pub fn signal_relabelled(&self) {
+        self.committed.send_modify(|n| *n += 1);
+    }
+
     /// `(p50, p95)` in milliseconds over the window (nearest-rank).
     pub fn freshness(&self) -> (Option<u64>, Option<u64>) {
         let mut v: Vec<u64> = self

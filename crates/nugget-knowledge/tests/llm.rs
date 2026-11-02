@@ -330,6 +330,55 @@ async fn an_item_waiting_for_triage_reaches_the_model_once_triage_clears_it() {
 }
 
 #[tokio::test]
+async fn items_queued_for_triage_count_as_pending_until_extracted_with_the_model() {
+    // MM1-9: an item extracted without the model while triage has it queued is still work for
+    // knowledge (it was reported as 0 pending); unknown or failed verdicts are not on their way.
+    let env = Env::new();
+    let item = |key: &str, state: &str| {
+        let mut it = memo("files:notes", key, Some(true));
+        it.metadata["triage"] = json!({ "state": state });
+        it
+    };
+    env.put(item("queued", "pending"), &[MEMO]);
+    env.put(item("undecided", "unknown"), &[MEMO]);
+    let local = FakeProvider::new("local", Locality::OnDevice, |_| reply());
+    let k = env.knowledge(
+        llm_cfg(),
+        Some(router(Tier::Synthesis, vec![local.clone()])),
+    );
+    let pending = || {
+        let k = k.clone();
+        async move {
+            tokio::task::spawn_blocking(move || k.pending_items())
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    };
+    run(&k).await;
+    assert_eq!(local.calls(), 0);
+    assert_eq!(pending().await, 1, "the item queued for triage waits");
+    let again = run(&k).await;
+    assert_eq!(again.items_processed, 1, "only the unknown one is redone");
+    assert_eq!(pending().await, 1);
+    // Triage clears it (metadata only): pending until a run extracts it with the model.
+    let r = item_ref("files:notes", "queued");
+    let it = env.store.get_item(&r).unwrap().unwrap();
+    let mut meta = it.metadata.clone();
+    meta["sensitive"] = json!(false);
+    meta["triage"] = json!({"state": "done", "sensitive": false});
+    assert!(
+        env.store
+            .set_item_metadata(&r, &it.content_hash, &meta)
+            .unwrap()
+    );
+    assert_eq!(pending().await, 1);
+    run(&k).await;
+    assert_eq!(local.calls(), 1);
+    assert_eq!(pending().await, 0);
+}
+
+#[tokio::test]
 async fn llm_requests_are_batched_and_budgeted() {
     let env = Env::new();
     let chunk = "Priya Patel works at Initech. ".repeat(20);

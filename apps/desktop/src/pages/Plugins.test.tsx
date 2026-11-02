@@ -17,7 +17,7 @@ const staged = (over: Partial<PluginInstallResult> = {}): PluginInstallResult =>
   kinds: ["tool"],
   signature: "trusted",
   signer: "cd".repeat(32),
-  requested: { hosts: ["api.weather.example", "*.tiles.example"], secrets: ["api_key"], kv_max_bytes: 10_000 },
+  requested: { hosts: ["api.weather.example", "*.tiles.example"], secrets: ["api_key"], kv_max_bytes: 10 * 1024 },
   previously_approved: null,
   installed_version: null,
   needs_approval: true,

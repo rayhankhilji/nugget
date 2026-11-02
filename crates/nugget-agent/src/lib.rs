@@ -26,7 +26,7 @@ pub use agent::{
 };
 pub use chained::{AGENT_SOURCE, ChainedLog, agent_entries};
 pub use clarify::{Ambiguity, ambiguity};
-pub use events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
+pub use events::{AgentEvent, Answered, ConfirmationRequest, Confirmations, EventSink, NoEvents};
 pub use injection::{HeuristicDetector, InjectionDetector, InjectionFinding};
 pub use ledger::{ActionLedger, LedgerEntry, MemoryLedger, action_id};
 pub use log::{ActionLog, JsonlLog, LogEntry, MemoryLog, Record, check_complete, explain};

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDatesInText, formatLatency, formatRelative } from "./format";
+import { formatBytes, formatDatesInText, formatLatency, formatRelative } from "./format";
 
 describe("formatRelative", () => {
   const now = Date.parse("2026-10-28T12:00:00Z");
@@ -30,6 +30,14 @@ describe("formatLatency", () => {
     expect(formatLatency(4200)).toBe("4.2 s");
     expect(formatLatency(42_000)).toBe("42 s");
     expect(formatLatency(185_000)).toBe("3m 5s");
+  });
+});
+
+describe("formatBytes", () => {
+  it("MM1-8: counts in binary units, like the daemon (its 50 MiB limit reads 50 MB)", () => {
+    expect(formatBytes(50 * 1024 * 1024)).toBe("50 MB");
+    expect(formatBytes(1536)).toBe("1.5 kB");
+    expect(formatBytes(512)).toBe("512 byte");
   });
 });
 

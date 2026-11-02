@@ -22,8 +22,9 @@ open issue. Numbers come from [`bench/README.md`](https://github.com/rayhankhilj
 - **Unsigned:** release keys and signing certificates do not exist, so Gatekeeper and SmartScreen warn
   ([how to get past that](guide/install.md#unsigned-builds)); signing is untested with real
   certificates. Linux packages are not GPG-signed.
-- **Fixed but not re-verified on real models:** Ask obeying planted instructions, card numbers in the
-  vault, slow onboarding indexing.
+- **Re-verified on the real 4B only:** Ask ignores planted instructions, card numbers stay out of the
+  vault, and onboarding indexes in seconds (Linux only). Not yet run: the 8B, macOS and Windows
+  onboarding, a real-model computer-use run.
 - **Privacy with a cloud provider:** an Ask follow-up can forward earlier answers unscanned; Double Tap
   sent texts are readable by MCP clients and cloud Ask.
 - **MCP:** an HTTP client can send its token to a program that took Nugget's port while `nuggetd` was

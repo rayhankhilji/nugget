@@ -43,7 +43,7 @@ describe("Onboarding", () => {
     await click(local);
     await flush();
     expect(container.textContent).toContain("qwen3-4b-q4");
-    expect(container.textContent).toContain("2.5 GB download");
+    expect(container.textContent).toContain("2.3 GB download");
     expect(container.textContent).not.toContain("llama-8b-q4");
     await click(button(container, /Show all models/));
     expect(container.textContent).toContain("llama-8b-q4");
@@ -51,7 +51,7 @@ describe("Onboarding", () => {
     await act(() => emit("nugget:models-progress", { id: "qwen3-4b-q4", downloaded: 1_250_000_000, total: 2_500_000_000, phase: "downloading", error: null }));
     await flush();
     expect(container.querySelector("progress")?.getAttribute("value")).toBe("50");
-    expect(container.textContent).toContain("Downloading · 50% · 1.3 GB of 2.5 GB");
+    expect(container.textContent).toContain("Downloading · 50% · 1.2 GB of 2.3 GB");
     // A download in progress doesn't set the step up yet (it can still fail): Continue would skip it.
     const hint = () => container.querySelector("#ob-continue-hint");
     expect(hint()?.textContent).toBe("Nothing set up here yet: Continue skips this step.");
@@ -121,7 +121,7 @@ describe("Onboarding", () => {
         unreadable: 0,
         roots_missing: 0,
         roots_denied: 0,
-        max_file_bytes: 50_000_000,
+        max_file_bytes: 50 * 1024 * 1024,
         skipped: [
           { path: "holiday.jpg", reason: "unsupported" },
           { path: "film.mov", reason: "too_large", bytes: 200_000_000 },
@@ -137,7 +137,8 @@ describe("Onboarding", () => {
     expect(container.querySelector(".ob-index")?.getAttribute("aria-busy")).toBe("false");
     expect(row.textContent).toContain("Pictures: nothing in this folder can be indexed.");
     expect(row.textContent).toContain("3 files of a type Nugget doesn't read");
-    expect(row.textContent).toContain("1 file larger than 50 MB");
+    // MM1-8: the same limit and unit the daemon states (50 MiB reads "50 MB", not "52 MB").
+    expect(row.textContent).toContain("1 file larger than the 50 MB limit");
     expect(row.textContent).toContain("holiday.jpg");
     expect(row.textContent).toContain("film.mov");
     expect(container.textContent).toContain("Add a different folder, or continue without one.");
@@ -145,6 +146,25 @@ describe("Onboarding", () => {
     expect(container.querySelector("#ob-continue-hint")).not.toBeNull();
     await click(button(container, "Continue"));
     expect(loadState().skipped).toContain("source");
+  });
+
+  it("MM1-6: the last step doesn't claim search works when nothing was indexed", async () => {
+    const empty: SourceInfo = { id: "files-4", kind: "files", name: "Empty", enabled: true, state: "watching", items: 0, chunks: 0 };
+    mockDaemon({ sources_list: () => [empty] });
+    const all = ["welcome", "ai", "source", "permissions", "trigger"] as const;
+    const { container } = await render(
+      <Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "done", ai: "later", completed: [...all], sources: ["Empty"] }} />,
+    );
+    await flush();
+    expect(heading(container)).toBe("Almost there");
+    expect(container.textContent).toContain("Nothing has been indexed from your sources yet");
+    expect(container.textContent).not.toContain("Search works straight away");
+    expect(container.textContent).not.toContain("Every step is done.");
+    const row = container.querySelectorAll(".ob-summary > div")[1]!;
+    expect(row.className).toBe("ob-summary-unset");
+    expect(row.textContent).toContain("Nothing indexed yet");
+    await click(button(container, "Add another source"));
+    expect(heading(container)).toBe("Add your first source");
   });
 
   it("GG6-2: a folder Nugget can't open says so", async () => {
