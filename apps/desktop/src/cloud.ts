@@ -40,6 +40,8 @@ export interface CloudSyncResult {
   toolkit: string;
   added: number;
   updated: number;
+  /** Items removed because they were deleted upstream (absent from older servers). */
+  deleted?: number;
   error: string | null;
 }
 
@@ -59,6 +61,91 @@ export interface CloudAnswer {
   answer: string;
   citations: CloudCitation[];
   usage: { input_tokens: number; output_tokens: number };
+}
+
+export type CloudAppCategory = "mail" | "calendar" | "chat" | "docs" | "files";
+
+/** An app in the catalogue (`cloud_apps`): what it syncs, which actions it can take. */
+export interface CloudAppInfo {
+  slug: string;
+  name: string;
+  logo: string | null;
+  /** One of {@link CloudAppCategory}; other strings are possible from a newer server. */
+  category: CloudAppCategory | (string & {});
+  syncs: boolean;
+  /** Action kinds this app supports (see {@link CloudActionKind}). */
+  actions: string[];
+  sync_mode: "poll" | "trigger" | (string & {});
+  connectable: boolean;
+  connected: boolean;
+}
+
+export type CloudActionKind =
+  | "send_mail"
+  | "reply_mail"
+  | "create_event"
+  | "update_event"
+  | "post_message"
+  | "create_page";
+
+export type CloudActionStatus =
+  | "pending"
+  | "executing"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "expired"
+  | "denied"
+  /** A status this build doesn't know (from a newer server). */
+  | "unknown";
+
+export interface CloudActionPreviewField {
+  label: string;
+  value: string;
+}
+
+export interface CloudActionPreviewDiff {
+  field: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface CloudActionPreview {
+  fields: CloudActionPreviewField[];
+  diff: CloudActionPreviewDiff[];
+}
+
+/** A proposed write to a connected app; nothing is sent until it is approved. */
+export interface CloudAction {
+  id: string;
+  kind: CloudActionKind;
+  toolkit: string;
+  status: CloudActionStatus;
+  /** e.g. `send`. */
+  risk: string;
+  /** The policy's verdict. */
+  decision: "confirm" | "deny";
+  reason: string | null;
+  summary: string;
+  preview: CloudActionPreview;
+  /** Hex SHA-256 of what will run; {@link cloudApi.approveAction} must echo it. */
+  digest: string;
+  idempotency_key: string;
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  executed_at: string | null;
+  result: unknown;
+  error: string | null;
+}
+
+export interface ProposeCloudAction {
+  kind: CloudActionKind;
+  toolkit: string;
+  /** The kind's input object, e.g. send_mail `{to, cc?, bcc?, subject, body}`. */
+  input: Record<string, unknown>;
+  /** 1-128 chars of `[A-Za-z0-9_\-:.]`; reusing one returns the same action. */
+  idempotencyKey: string;
 }
 
 /** Sign in with Apple is not in M1 (no Apple Developer account yet). */
@@ -120,6 +207,16 @@ export const cloudApi = {
   sync: () => call<{ synced: CloudSyncResult[] }>("cloud_sync"),
   ask: (question: string, conversationId?: string | null) =>
     call<CloudAnswer>("cloud_ask", conversationId ? { question, conversationId } : { question }),
+  apps: () => call<CloudAppInfo[]>("cloud_apps"),
+  actions: (status?: CloudActionStatus) =>
+    call<CloudAction[]>("cloud_actions_list", status ? { status } : {}),
+  proposeAction: ({ kind, toolkit, input, idempotencyKey }: ProposeCloudAction) =>
+    call<CloudAction>("cloud_action_propose", { kind, toolkit, input, idempotencyKey }),
+  /** A dry run: what the action would send, with no side effects. */
+  actionPreview: (id: string) => call<CloudAction>("cloud_action_preview", { id }),
+  actionStatus: (id: string) => call<CloudAction>("cloud_action_status", { id }),
+  approveAction: (id: string, digest: string) => call<CloudAction>("cloud_action_approve", { id, digest }),
+  cancelAction: (id: string) => call<CloudAction>("cloud_action_cancel", { id }),
   /** Malformed payloads are dropped. */
   onSession: (h: (e: CloudSessionEvent) => void) =>
     on<unknown>(CLOUD_SESSION_EVENT, (p) => {

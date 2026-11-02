@@ -16,8 +16,10 @@ pub mod pkce;
 pub mod session;
 
 pub use api::{
-    Answer, Api, AskRequest, AskUsage, AvailableApp, Citation, ConnectStart, Connection,
-    Connections, Me, SyncReport, SyncResult, Usage,
+    Action, ActionInput, ActionKind, ActionPreview, ActionStatus, Answer, Api, AppInfo, AskRequest,
+    AskUsage, AvailableApp, Citation, ConnectStart, Connection, Connections, CreateEvent,
+    CreatePage, Me, PostMessage, PreviewDiff, PreviewField, ProposeAction, ReplyMail, SendMail,
+    SyncReport, SyncResult, UpdateEvent, Usage,
 };
 pub use auth::{Callback, Provider, REDIRECT_URL, parse_callback};
 pub use session::{

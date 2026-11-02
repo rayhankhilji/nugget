@@ -259,6 +259,13 @@ fn main() {
             cloud::cloud_disconnect,
             cloud::cloud_sync,
             cloud::cloud_ask,
+            cloud::cloud_apps,
+            cloud::cloud_actions_list,
+            cloud::cloud_action_propose,
+            cloud::cloud_action_preview,
+            cloud::cloud_action_status,
+            cloud::cloud_action_approve,
+            cloud::cloud_action_cancel,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])
