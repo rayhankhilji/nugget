@@ -128,10 +128,11 @@ export NUGGET_TRUST_DEV_MANIFEST_KEY=1   # optional, see below
 cargo build --release -p nuggetd
 # Desktop app (optional)
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
-cargo build --release -p nugget-desktop
+cargo build --release -p nugget-desktop --features tauri/custom-protocol
 ```
 
-Both binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
+`--features tauri/custom-protocol` embeds the interface; without it the window stays blank. Both
+binaries land in `target/release/`; the app finds `nuggetd` next to itself or on `PATH`. Run
 `./target/release/nugget-desktop` (it starts the daemon), or `./target/release/nuggetd` in the
 foreground and check it with `./target/release/nuggetd status`.
 
