@@ -63,8 +63,10 @@ const faqLd = {
     <div class="wrap">
       <div class="canvas" data-bg>
         <figure class="window-wrap shot" data-reveal>
+          <div class="crop">
           <img class="l" src="/screens/home-light.webp" srcset="/screens/home-light-960.webp 960w, /screens/home-light.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
           <img class="d" src="/screens/home-dark.webp" srcset="/screens/home-dark-960.webp 960w, /screens/home-dark.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
+          </div>
           <figcaption>The Home screen in Heed. Real screenshot; every name in it is fictional.</figcaption>
         </figure>
       </div>
@@ -900,8 +902,35 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
       grid-template-columns: 1fr;
     }
     .print {
-      max-width: 360px;
+      max-width: min(300px, 82vw);
       justify-self: center;
+      transform: rotate(0.8deg);
+    }
+    /* On phones the full 1440px screenshot is too small to read, so show its main column (greeting,
+       ask box, brief) enlarged and cropped instead. */
+    .canvas {
+      padding: 14px;
+    }
+    .shot .crop {
+      overflow: hidden;
+      border-radius: 10px;
+      aspect-ratio: 4 / 5;
+      box-shadow:
+        0 0 0 1px rgb(20 17 15 / 0.14),
+        0 24px 50px -20px rgb(7 7 50 / 0.6);
+    }
+    /* Zoomed to ~0.72 so the UI text stays legible (about 11px); the right edge fades to show the window
+       continues. The crop starts at the main column (x ≈ 505 of 1440). */
+    .shot .crop {
+      -webkit-mask-image: linear-gradient(90deg, #000 82%, transparent);
+      mask-image: linear-gradient(90deg, #000 82%, transparent);
+    }
+    .shot .crop img {
+      width: 290%;
+      max-width: none;
+      margin-left: -101.7%;
+      border-radius: 0;
+      box-shadow: none;
     }
   }
   @media (max-width: 640px) {
@@ -920,7 +949,12 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
       padding: 20px 16px;
     }
     .feat:nth-child(n + 2) {
-      margin-top: 40px;
+      margin-top: 48px;
+    }
+    /* One column: the image leads each block. */
+    .feat .tile {
+      order: -1;
+      margin: 0 0 6px;
     }
     .facts div,
     .specs div {
