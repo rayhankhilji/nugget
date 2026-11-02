@@ -6,6 +6,7 @@ export const OG_PAGES: Record<string, { label: string; line: string }> = {
   privacy: { label: "Privacy policy", line: "Your data, in plain English." },
   terms: { label: "Terms of service", line: "The terms, in plain English." },
   account: { label: "Account", line: "Everything that needs you. Nothing that doesn't." },
+  about: { label: "Why Heed", line: "An assistant that reads your mail should be one you can read." },
   "self-host": { label: "Docs · Self-hosting", line: "Run Heed Cloud on your own machine." },
 };
 

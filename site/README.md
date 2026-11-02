@@ -35,6 +35,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
 | `/checkout?plan=heed\|heed_max&interval=month\|year` | Sends you to sign up if you're signed out, then starts Stripe Checkout. |
 | `/docs/self-host` | The book's self-hosting guide (`docs/book/src/guide/self-host.md`), copied into `src/content/docs/` by `npm run docs` and rendered with a sticky contents list. The smoke test fails if the copy is stale. |
+| `/about` | "Why Heed": the open-core story, why it's open source, and who makes it. The founder's name is a placeholder (`[Founder name]`) until they choose how to be named. |
 | `/legal/privacy`, `/legal/terms` | **Drafts that need legal review**. Each one is marked at the top, and its placeholders are in `[brackets]`. |
 
 The `account` and `checkout` pages are `noindex` and left out of the sitemap. They're also disallowed
@@ -283,6 +284,15 @@ text of every built page after the build, leaving code, scripts and attributes a
 `src/lib/smartquotes.mjs` handles the head, the social cards and the FAQ structured data, and the
 client-side messages are written with ’ in source. The smoke test fails on straight apostrophes in
 visible text.
+
+**Performance budgets:** `tests/budgets.mjs`, run by `npm test`, fails if a page's JavaScript
+grows more than 10% past its baseline. The count covers inline scripts, module scripts and
+everything they import. It also fails if any image in the build is over 300 KB. There are two
+baselines: `budgets.json` for the build without Heed Cloud settings (production today) and
+`budgets-cloud.json` for the configured build. To accept a deliberate change, run
+`node tests/budgets.mjs --update` (add `--cloud` for the configured build). The account and checkout
+UIs are components that render only when the cloud is configured, so a closed build doesn't ship
+the Supabase client (5 KB instead of about 230 KB on those pages).
 
 **Performance:**
 - CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within

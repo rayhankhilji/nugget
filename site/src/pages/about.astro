@@ -1,0 +1,249 @@
+---
+/**
+ * Why Heed: the open-core story, why an assistant that reads your mail should be open source, and
+ * who makes it. Facts come from README.md, SECURITY.md, docs/architecture-cloud.md and the
+ * self-hosting guide. The founder's name is a placeholder until they choose how to be named.
+ */
+import Base from "../layouts/Base.astro";
+import { supportEmail } from "../lib/config";
+import { GITHUB_URL } from "../lib/plans";
+
+const reasons: [string, string][] = [
+  [
+    "You can read what it does",
+    "Heed reads your mail, calendar and documents, and it can act for you. You shouldn’t have to take our word for how it handles that. Every line of the app and of Heed Cloud is on GitHub under Apache-2.0.",
+  ],
+  [
+    "You can run it without us",
+    "The free app works on its own, with your data on your Mac and the AI you choose, including a local model. If you want the cloud features without our servers, the cloud service runs on your own machine too.",
+  ],
+  [
+    "You can check what left",
+    "The app keeps a list of every request it sent off your Mac: when, where and which items were included. With Heed Cloud, every action waits for your approval and goes in a log you can read.",
+  ],
+  [
+    "Problems get found",
+    "Open code means more people can look for mistakes. Security reports go through GitHub’s private reporting, and we treat security bugs as the most serious kind.",
+  ],
+];
+---
+<Base title="Why Heed" description="Heed is open core: a free, open-source Mac app you can run yourself, and Heed Cloud for people who'd rather not. Here's why, and who makes it.">
+  <section class="hero" aria-labelledby="about-h">
+    <div class="art" data-bg aria-hidden="true"></div>
+    <div class="wrap top">
+      <p class="eyebrow">Why Heed</p>
+      <h1 id="about-h">An assistant that reads your mail should be one you can read.</h1>
+      <p class="lede">
+        Heed watches your inbox, calendar and documents and tells you what needs you. That’s a lot of trust to ask for, so
+        we built it in the open.
+      </p>
+    </div>
+  </section>
+
+  <section class="wrap block" aria-labelledby="core-h">
+    <h2 id="core-h">Open core</h2>
+    <div class="core">
+      <div>
+        <p class="tag">Free · Apache-2.0</p>
+        <h3>The app</h3>
+        <p>
+          The full Mac app is free and open source. Bring your own AI, connect your own accounts, and keep everything on your
+          Mac in an encrypted database. No account, no telemetry.
+        </p>
+        <a href="/download">Get the app →</a>
+      </div>
+      <div>
+        <p class="tag">Paid · also open source</p>
+        <h3>Heed Cloud</h3>
+        <p>
+          For people who’d rather not set up OAuth or API keys. One-click connections, sync while your Mac sleeps, and the AI
+          included. Its code is in the same repository, and you can host it yourself.
+        </p>
+        <a href="/pricing">See pricing →</a>
+      </div>
+    </div>
+    <p class="muted note">
+      Heed Cloud pays for the work on both. The free app isn’t a trial or a cut-down version: it’s the same app.
+    </p>
+  </section>
+
+  <section class="wrap block" aria-labelledby="why-h">
+    <h2 id="why-h">Why open source</h2>
+    <ol class="reasons">
+      {
+        reasons.map(([title, body], i) => (
+          <li>
+            <span class="n">{String(i + 1).padStart(2, "0")}</span>
+            <div>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+    <p class="links">
+      <a href={GITHUB_URL} rel="noopener">Read the code on GitHub</a>
+      <a href="/privacy">Privacy, in plain English</a>
+      <a href="/docs/self-host">Host Heed Cloud yourself</a>
+    </p>
+  </section>
+
+  <section class="wrap block who" aria-labelledby="who-h">
+    <h2 id="who-h">Who makes it</h2>
+    <p>
+      Heed is made by <span class="ph">[Founder name]</span>, with help from people who contribute on GitHub. It’s
+      pre-release: the app runs and is tested on every change, but there’s no signed release yet.
+    </p>
+    <p>
+      Questions, ideas or problems: email <a href={`mailto:${supportEmail}`}>{supportEmail}</a> or
+      <a href={`${GITHUB_URL}/issues`} rel="noopener">open an issue</a>. For security reports, use
+      <a href={`${GITHUB_URL}/security/advisories/new`} rel="noopener">private reporting on GitHub</a>.
+    </p>
+  </section>
+</Base>
+
+<style>
+  .art {
+    --bg-img: url("/art/painting-harvesters.webp");
+    height: clamp(160px, 22vw, 280px);
+    background-color: var(--surface-2);
+    background-position: 50% 60%;
+    background-size: cover;
+    border-bottom: 1px solid var(--text);
+  }
+  .top {
+    display: grid;
+    gap: 20px;
+    padding-block: clamp(40px, 6vw, 80px) 0;
+  }
+  h1 {
+    font-size: clamp(40px, 6.4vw, 88px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
+    max-width: 16ch;
+  }
+  .lede {
+    max-width: 36em;
+    font-size: clamp(17px, 1.5vw, 19px);
+    color: var(--text-2);
+  }
+  .block {
+    padding-top: clamp(56px, 7vw, 96px);
+  }
+  .block h2 {
+    font-size: clamp(32px, 4.4vw, 52px);
+    margin-bottom: 20px;
+  }
+  .core {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--text);
+  }
+  .core > div {
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    padding: 24px clamp(20px, 3vw, 40px) 24px 0;
+  }
+  .core > div + div {
+    padding-left: clamp(20px, 3vw, 40px);
+    padding-right: 0;
+    border-left: 1px dashed var(--line-2);
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  h3 {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: clamp(24px, 2.4vw, 30px);
+    letter-spacing: -0.02em;
+  }
+  .core p:not(.tag),
+  .reasons p {
+    color: var(--text-2);
+    max-width: 34em;
+  }
+  .core a,
+  .links a,
+  .who a {
+    color: var(--text);
+    text-underline-offset: 3px;
+  }
+  .note {
+    max-width: 44em;
+    padding-top: 16px;
+    border-top: 1px dashed var(--line-2);
+  }
+  .reasons {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--text);
+  }
+  .reasons li {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 16px;
+    padding: 22px 0;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .reasons h3 {
+    margin-bottom: 6px;
+  }
+  .n {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-3);
+    padding-top: 8px;
+  }
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 28px;
+    margin-top: 20px;
+    font-size: 15px;
+  }
+  .who {
+    display: grid;
+    gap: 14px;
+    padding-bottom: 120px;
+  }
+  .who p {
+    max-width: 40em;
+    font-size: 17px;
+  }
+  .who h2 {
+    margin-bottom: 6px;
+  }
+  .ph {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    padding: 1px 6px;
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    border-radius: 2px;
+  }
+  @media (max-width: 760px) {
+    .core {
+      grid-template-columns: 1fr;
+    }
+    .core > div,
+    .core > div + div {
+      padding: 24px 0;
+      border-left: 0;
+    }
+    .core > div + div {
+      border-top: 1px dashed var(--line-2);
+    }
+    .reasons li {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+  }
+</style>
