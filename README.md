@@ -38,22 +38,22 @@ regenerate with `pnpm run screenshots` in `apps/desktop`.
 
 <p>
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/today-dark.png">
+  <img src="docs/book/src/images/screenshots/today-light.png" alt="Home: the ask box and today's brief" width="49%">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/needs-dark.png">
+  <img src="docs/book/src/images/screenshots/needs-light.png" alt="Needs you: the list of things that need a reply or a decision, and the selected one with the reasons it is shown" width="49%">
+</picture>
+</p>
+<p>
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/search-dark.png">
   <img src="docs/book/src/images/screenshots/search-light.png" alt="Search: results for Tidewater budget, each with its passage and source" width="49%">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/chat-dark.png">
   <img src="docs/book/src/images/screenshots/chat-light.png" alt="Chat: an answer about Tidewater Billing with [1] and [2] citations and the sources it was given" width="49%">
-</picture>
-</p>
-<p>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/knowledge-why-dark.png">
-  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Based on 1 source to show the quoted calendar event" width="49%">
-</picture>
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/today-dark.png">
-  <img src="docs/book/src/images/screenshots/today-light.png" alt="Today: the morning brief and a card suggesting a reply, with the reasons it is shown" width="49%">
 </picture>
 </p>
 

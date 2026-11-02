@@ -43,7 +43,7 @@ const newChat = channel<void>();
 
 /**
  * Ask the Search page to run `q`, or with `run: false` only to type it in and wait for Enter (a
- * `nugget://search` link never acts by itself). The caller navigates to the page itself.
+ * `heed://search` link never acts by itself). The caller navigates to the page itself.
  */
 export function requestSearch(q: string, run = true): void {
   search.request({ q, run });

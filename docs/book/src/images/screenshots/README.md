@@ -31,11 +31,13 @@ daemon's uptime, so those two change on every run.
 |---|---|---|
 | `welcome` | Setup, first step | `guide/first-run.md` |
 | `status` | Status | `guide/first-run.md` |
-| `today` | Today, after a card refresh | `guide/today.md`, `README.md` |
+| `today` | Home: the ask box and the morning brief | `guide/today.md`, `README.md` |
+| `needs` | Needs you, the card list and reading pane | `README.md` |
+| `connections` | Connections (Heed Cloud) | |
 | `search` | Search for "Tidewater budget" | `guide/search-ask.md`, `README.md` |
 | `chat` | Chat, a cited answer | `guide/search-ask.md`, `README.md` |
 | `knowledge` | Knowledge, Ada Wexford | `guide/knowledge.md` |
-| `knowledge-why` | Knowledge, a fact's evidence (Based on N sources) | `guide/knowledge.md`, `README.md` |
+| `knowledge-why` | Knowledge, a fact's evidence (Based on N sources) | `guide/knowledge.md` |
 | `graph` | Knowledge, the graph view | `guide/knowledge.md` |
 | `sources` | Sources | `guide/sources.md` |
 | `safety` | Safety | `guide/safety.md` |

@@ -181,8 +181,14 @@
   }
 }
 
-/* The mark keeps its graphite tile in both themes. */
+/* The mark keeps its graphite tile in both themes, a step lighter on dark backgrounds. */
 :root {
   --mark-tile: #16171b;
   --mark-line: #f7f7f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mark-tile: #2c2d34;
+  }
 }

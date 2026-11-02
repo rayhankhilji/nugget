@@ -1,5 +1,5 @@
 /**
- * Acts on `nugget://` links and opened `.nuggetplugin` files, already validated by the shell
+ * Acts on `heed://` links and opened `.nuggetplugin` files, already validated by the shell
  * (`src-tauri/src/deeplink.rs`). Takes the waiting link at mount and on each `nugget:deeplink`
  * event. A page just navigates and a search is only typed in (Enter runs it); opening an item or
  * installing a plugin asks first.

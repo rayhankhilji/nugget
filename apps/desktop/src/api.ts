@@ -2882,7 +2882,7 @@ export const lifecycleApi = {
   togglePause: () => call<ShellInfo>("indexing_pause_toggle"),
 };
 
-/** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
+/** A validated `heed://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
 export type DeepLink =
   | { kind: "page"; page: PageId }
   | { kind: "search"; query: string }
