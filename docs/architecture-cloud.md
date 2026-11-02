@@ -22,14 +22,14 @@ The desktop app stays the only client. Everything that needs the local OS stays 
               │ browser sign-in          └──┬──────────┬───────────┬─────┘
               ▼                             │ SQL      │ HTTPS     │ HTTPS
  Supabase Auth (magic link,  ◀──────────────┤          ▼           ▼
- Google, Apple) → nugget://auth/callback    │     Composio     Anthropic /
+ Google) → nugget://auth/callback           │     Composio     Anthropic /
                                             ▼     (OAuth,      OpenAI
                                    Supabase Postgres  tools,    (LLM, embeddings)
                                    + pgvector + Storage triggers)
 ```
 
 ### Supabase (Pro plan)
-- **Auth:** email magic link, Google sign-in and Apple sign-in. The desktop app uses the PKCE flow through the system browser, and the redirect URL is `nugget://auth/callback` (allow-listed in Auth → URL Configuration). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
+- **Auth:** email magic link and Google sign-in in M1. Apple sign-in waits until M4, because it needs an Apple Developer account ($99/yr). The desktop app uses the PKCE flow through the system browser, and the redirect URL is `nugget://auth/callback` (allow-listed in Auth → URL Configuration). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
 - **Postgres + pgvector.** The schema is in `supabase/migrations/`. Every table has a `user_id` column and Row-Level Security enabled:
   - `profiles`: plan (`free` or `pro`), created by a trigger on `auth.users`.
   - `connections`: one row per Composio connected account (toolkit, status, sync cursor).
@@ -74,7 +74,7 @@ These run inside `nugget-cloud`, as a tokio task per process:
 - **Pricing** (composio.dev/pricing, for signups after 2026-08-15):
   - Hobby: $0, with 100k tool calls and 50k trigger events a month. Usage *pauses* at the cap.
   - Pro: $29/month, with the same allowance as a credit, then $0.0003 per call and $0.003 per trigger event.
-  - **Start on Hobby.** It covers about 30–60 active users. Move to Pro before the cap, because a pause stops ingest for everyone.
+  - **The decision: start on Hobby** (confirmed by the founder). It covers about 30–60 active users. Move to Pro before the cap, because a pause stops ingest for everyone.
 
 ## 3. AI gateway
 All model calls go through `nugget-cloud`'s gateway module. No provider key is ever sent to a client.
@@ -114,7 +114,7 @@ Asks are the variable that matters. Prompt caching and the 24k cap keep them bou
 
 ## 4. Desktop app changes
 - **Sign-in:**
-  1. A new crate, `crates/nugget-cloud-client`, builds the PKCE `authorize` URL (for Google or Apple) or sends the magic-link request (`POST /auth/v1/otp` with a code challenge). The system browser opens it.
+  1. A new crate, `crates/nugget-cloud-client`, builds the PKCE `authorize` URL (for Google; Apple is added in M4) or sends the magic-link request (`POST /auth/v1/otp` with a code challenge). The system browser opens it.
   2. Supabase redirects to `nugget://auth/callback?code=…`.
   3. `deeplink.rs` validates the link and hands the code over, and the client exchanges it with `grant_type=pkce`. The verifier lives only in memory and is valid for 10 minutes.
   4. The **refresh token** is stored in the OS keychain (entry `nugget/cloud-session`, using the same `keyring` backends as `nugget-store`). The access token is kept only in memory and refreshed 60 seconds before it expires. Signing out revokes the session (`POST /auth/v1/logout`) and deletes the keychain entry.
@@ -173,5 +173,6 @@ Asks are the variable that matters. Prompt caching and the 24k cap keep them bou
   - More toolkits: Slack, Notion and Drive.
 - **M4: hardening and scale.**
   - Billing (Stripe) tied to `profiles.plan`, and triggers for low-volume toolkits.
+  - Sign in with Apple. This needs an Apple Developer account, a Services ID and a key, and the provider enabled in Supabase.
   - Local files uploaded as chunks, MCP backed by the cloud, and application-level encryption review.
   - An offline-mode decision, and load tests.
