@@ -69,7 +69,7 @@ The trust boundaries are:
 | 20 | Info | Secrets | The desktop bakes in only `NUGGET_SUPABASE_URL`, `NUGGET_SUPABASE_ANON_KEY` and `NUGGET_CLOUD_URL`, all public by design. Provider and service-role keys are read only by the service. `Config`'s `Debug` output hides them. | OK. Checklist: Fly secrets only, and secret scanning on the repository. |
 | 21 | Info | SSRF | The service fetches only fixed base URLs from config. Account ids in paths come from Composio, and toolkit slugs are checked against an allow-list. No user-controlled URL is fetched. | OK today. **Open (CL4):** keep it so for apps and actions. |
 | 22 | Medium | Logging | The service wrote no request logs and no request ids. Sync errors were logged with upstream text. | **Fixed:** one JSON line per request with `request_id`, method, route template, status and latency. It contains no user id, IP, email, token, prompt or body. Sync errors are logged as a flag; the text goes only to the user's own `connections.last_error`. Error reports carry only the route, status and request id. |
-| 23 | Medium | GDPR deletion | `DELETE /v1/me` revokes Composio first, then deletes the auth user, which cascades. Three copies remain outside that path:<br>• backups (7 days);<br>• provider logs (Anthropic and OpenAI, up to 30 days);<br>• from billing onwards, Stripe. | **Accepted:** disclose backups and provider logs in the privacy policy, and re-apply deletions after a restore ([runbook §5 and §7](../ops/runbook.md)). **Open (AR1):** Stripe customer deletion, sent 2026-11-02. |
+| 23 | Medium | GDPR deletion | `DELETE /v1/me` revokes Composio first, then deletes the auth user, which cascades. Three copies remain outside that path:<br>• backups (7 days);<br>• provider logs (Anthropic and OpenAI, up to 30 days);<br>• from billing onwards, Stripe. | **Accepted:** disclose backups and provider logs in the privacy policy, and re-apply deletions after a restore ([runbook §5 and §7](../ops/runbook.md)). **Stripe:** handled on `ar/cloud` at `57b0d9bf`, reviewed by SEC1. `DELETE /v1/me` deletes the Stripe customer before the auth user, and aborts if that fails. |
 | 24 | Info | GDPR export | `GET /v1/export` covers every user table. Embeddings and chunks are left out because they are derived. | OK. New tables (billing, cards, actions) must be added to the export. |
 | 25 | Medium | Database role | `set local role nugget_service` drops privileges, but if `DATABASE_URL` logs in as `postgres`, anything that could run `reset role` would regain them. All queries are parameterised, so this is not reachable today. | **Open (founder):** log in as a dedicated `nugget_service` LOGIN role (checklist). |
 | 26 | Low | Rate limits | The limits are in-process, so with N machines a client gets N times the limit. | **Accepted:** the AI quota is global and is the hard cost limit. |
@@ -79,7 +79,11 @@ The trust boundaries are:
 
 ## Notes for in-flight work
 
-- **AR1 (Stripe billing):** I have sent a detailed note covering:
+- **AR1 (Stripe billing):** reviewed at `ar/cloud` `57b0d9bf`; every item below is addressed. A trial merge with `sec/cloud` passes `hardening.sql` (including the billing tables) and all nugget-cloud tests. Two notes:
+  - The signature check re-serialises `t` instead of using the raw header value. That is harmless with Stripe's plain-digit timestamps.
+  - Device ids come from the client, so the device limit is a fair-use limit, not a security control.
+
+  The requirements I sent:
   - new tables must pass `hardening.sql` and grant explicitly;
   - the plan is changed only by verified webhooks;
   - Stripe signatures are checked on the raw body, with a 300 s tolerance, and processing is idempotent on `event.id`;
