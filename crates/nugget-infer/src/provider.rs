@@ -96,6 +96,8 @@ pub(crate) struct Prepared {
     pub locality: Locality,
     pub resolved: Resolved,
     pub headers: Vec<(HeaderName, HeaderValue)>,
+    /// A rotating bearer token (Heed cloud), sent as `Authorization` on every request.
+    pub bearer: Option<Arc<dyn crate::cloud::BearerSource>>,
 }
 
 pub(crate) fn build_provider_inner(
@@ -110,6 +112,7 @@ pub(crate) fn build_provider_inner(
         locality,
         resolved,
         headers: resolve_headers(cfg, secrets)?,
+        bearer: None,
     };
     let key = cfg
         .api_key
@@ -154,6 +157,7 @@ impl Common {
             locality,
             resolved,
             headers,
+            bearer,
         } = prepared;
         let settings = HttpSettings {
             connect_timeout: Duration::from_secs(cfg.connect_timeout_secs.unwrap_or(10)),
@@ -167,6 +171,7 @@ impl Common {
             // re-resolve the name and defeat the pin).
             direct: resolved.locality != Locality::Cloud,
             unix_socket: cfg.socket_path.clone(),
+            bearer,
         };
         let http = Http::new(cfg.id.clone(), base, locality, egress, settings, auth)?;
         Ok(Self {
@@ -180,6 +185,21 @@ impl Common {
             http,
             cfg: cfg.clone(),
         })
+    }
+
+    /// Another provider on the same endpoint and connection pool, differing in `cfg` (model,
+    /// id) only.
+    pub(crate) fn sibling(&self, cfg: &ProviderConfig) -> Self {
+        Self {
+            id: cfg.id.clone(),
+            meta: ProviderMeta {
+                model: cfg.model.clone(),
+                context_tokens: cfg.context_tokens,
+                ..self.meta.clone()
+            },
+            http: self.http.sibling(cfg.id.clone()),
+            cfg: cfg.clone(),
+        }
     }
 
     /// POST `body` and stream the SSE response through `decoder`.

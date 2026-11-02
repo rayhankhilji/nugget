@@ -16,3 +16,7 @@ export const privacyEmail = "privacy@heed.app";
 
 /** Heed Cloud accounts work only when Supabase and the cloud API are configured for this build. */
 export const cloudOpen = Boolean(config.supabaseUrl && config.supabaseAnonKey && config.cloudUrl);
+
+/** "Tell me when…" goes by email until there's a real list. */
+export const notifyHref = (subject: string, body: string) =>
+  `mailto:${supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;

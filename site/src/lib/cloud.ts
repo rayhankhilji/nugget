@@ -12,7 +12,7 @@ export class CloudError extends Error {
 
 /** Calls the Heed cloud API (crates/nugget-cloud) as the signed-in user. */
 export async function cloud<T>(path: string, token: string, init: { method: string; body?: unknown }): Promise<T> {
-  if (!config.cloudUrl) throw new CloudError(0, "not_configured", "The Heed cloud URL isn't configured for this site.");
+  if (!config.cloudUrl) throw new CloudError(0, "not_configured", "The Heed cloud URL isn’t configured for this site.");
   let res: Response;
   try {
     res = await fetch(`${config.cloudUrl}${path}`, {
@@ -24,7 +24,7 @@ export async function cloud<T>(path: string, token: string, init: { method: stri
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
   } catch {
-    throw new CloudError(0, "network", "We couldn't reach Heed. Check your connection and try again.");
+    throw new CloudError(0, "network", "We couldn’t reach Heed. Check your connection and try again.");
   }
   if (res.status === 204) return undefined as T;
   const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };

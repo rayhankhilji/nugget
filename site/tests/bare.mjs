@@ -32,8 +32,12 @@ for (const r of ROUTES) {
 for (const r of ["/account", "/checkout?plan=heed&interval=month", "/signin", "/signup"]) {
   await page.goto(base + r, { waitUntil: "networkidle" });
   const closed = await page.locator("[data-cloud-closed] h1").textContent().catch(() => null);
-  check(closed === "Heed Cloud isn't open yet." && page.url() === base + r, `bare ${r} shows the calm closed state`);
+  check(closed === "Heed Cloud isn’t open yet." && page.url() === base + r, `bare ${r} shows the calm closed state`);
 }
+await page.goto(base + "/download");
+check((await page.locator('a[href$=".dmg"], [data-dl]').count()) === 0, "bare /download links to no binary");
+check((await page.locator('a[href^="mailto:"]', { hasText: "Notify me" }).count()) === 1 && (await page.locator("form[data-waitlist]").count()) === 0, "bare /download offers Notify me by email (no cloud, no form)");
+check((await page.textContent("body"))?.includes("scripts/build-macos-app.sh") === true, "bare /download gives the build-from-source steps");
 await page.goto(base + "/pricing");
 check((await page.getAttribute(".pricing", "data-plans-source")) === "fallback", "bare pricing uses the built-in plans");
 check((await page.locator('[data-tier="heed"] .amt:visible').first().textContent()) === "£39", "bare pricing shows £39");

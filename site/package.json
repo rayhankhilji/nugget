@@ -12,8 +12,9 @@
     "preview": "astro preview --port 4321",
     "check": "astro check",
     "lint": "eslint .",
-    "test": "node tests/smoke.mjs && node tests/bare.mjs",
+    "test": "node tests/smoke.mjs && node tests/bare.mjs && node tests/budgets.mjs && node tests/budgets.mjs --cloud",
     "apps": "node scripts/sync-apps.mjs",
+    "docs": "node scripts/sync-docs.mjs",
     "lighthouse": "node tests/lighthouse.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },
@@ -24,9 +25,12 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",
+    "@resvg/resvg-js": "2.6.2",
+    "axe-core": "4.14.0",
     "eslint": "9.39.5",
     "eslint-plugin-astro": "1.7.0",
     "lighthouse": "13.6.0",
+    "satori": "0.63.2",
     "sharp": "0.35.5",
     "simple-icons": "16.0.0",
     "typescript": "5.9.3",

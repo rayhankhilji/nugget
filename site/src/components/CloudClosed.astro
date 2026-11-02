@@ -4,9 +4,8 @@
  * (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_CLOUD_URL): a calm "not open
  * yet" note pointing at the free app and the waitlist, instead of an error.
  */
-import { supportEmail } from "../lib/config";
+import WaitlistForm from "./WaitlistForm.astro";
 import { GITHUB_URL } from "../lib/plans";
-const waitlist = `mailto:${supportEmail}?subject=${encodeURIComponent("Heed Cloud waitlist")}&body=${encodeURIComponent("Please let me know when Heed Cloud opens.")}`;
 ---
 <section class="wrap closed" data-cloud-closed>
   <p class="eyebrow">Heed Cloud</p>
@@ -17,8 +16,9 @@ const waitlist = `mailto:${supportEmail}?subject=${encodeURIComponent("Heed Clou
   </p>
   <div class="cta">
     <a class="btn btn-primary btn-lg" href="/download">Download the free app</a>
-    <a class="btn btn-secondary btn-lg" href={waitlist}>Join the waitlist</a>
   </div>
+  <p class="wl-k">Or get one email when Heed Cloud opens:</p>
+  <WaitlistForm source="account-closed" label="Email me when Heed Cloud opens" button="Join the waitlist" />
   <p class="small">Or <a href={GITHUB_URL} rel="noopener">view the source on GitHub</a>.</p>
 </section>
 
@@ -37,6 +37,10 @@ const waitlist = `mailto:${supportEmail}?subject=${encodeURIComponent("Heed Clou
     font-size: 18px;
     color: var(--text-2);
     max-width: 34em;
+  }
+  .wl-k {
+    margin-top: 12px;
+    color: var(--text-2);
   }
   .cta {
     display: flex;

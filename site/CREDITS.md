@@ -14,7 +14,7 @@ taken from other products' sites.
 | `public/screens/home-{light,dark}*.webp` (the product window under the hero) | DS1's real screenshots of the Heed app (`docs/brand/screens/` on ds/brand 0e692ba7), converted to WebP; every name in them is fictional | Same as this repository |
 | The UI details in the feature tiles (answer, ghost text, Needs you, approval steps) | Recreated in HTML and CSS from the v4 app design, with fictional names and data | Same as this repository |
 | `public/brand/*.svg`, `public/favicon.svg` (logo, mark, wordmark) | DS1's brand assets, from `docs/brand/assets/`. Original artwork drawn from Fraunces outlines | Apache-2.0 (artwork); Fraunces under SIL OFL 1.1 |
-| `public/og.png`, `public/apple-touch-icon.png` | Rendered from the brand assets and the site's fonts | Same as this repository |
+| Social cards (`/og/*.png`, built from `src/pages/og/[slug].png.ts`), `public/apple-touch-icon.png`, `public/icon-*.png`, `public/site.webmanifest` | Rendered at build time from the dithered sky, DS1's wordmark and static instances of Fraunces and Geist Mono (`src/og/*.ttf`, SIL OFL 1.1, instanced with fontTools) | Same as this repository; fonts under SIL OFL 1.1 |
 
 Regenerate the art with `node scripts/art/sky.mjs && node scripts/art/landscape.mjs`.
 

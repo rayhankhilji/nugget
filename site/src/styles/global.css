@@ -120,10 +120,14 @@ p {
 ::selection {
   background: rgb(255 90 60 / 0.28);
 }
+/* Focus: a 2px ring in --focus (ink on cream, cream on dark and on the blue hero), offset so it shows
+   on any fill, including filled buttons. */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline: 2px solid var(--focus, var(--text));
+  outline-offset: 3px;
+}
+.btn:focus-visible {
+  outline-offset: 3px;
 }
 
 .wrap {
@@ -393,7 +397,7 @@ kbd,
   transition:
     opacity var(--t-brand) var(--ease),
     transform var(--t-brand) var(--ease);
-  transition-delay: calc(var(--i, 0) * 30ms);
+  transition-delay: calc(var(--i, 0) * var(--stagger, 30ms));
 }
 [data-reveal].in {
   opacity: 1;
@@ -446,8 +450,11 @@ html:not(.js) [data-reveal] {
     font-size: 16px;
     transition: box-shadow 0.15s;
   }
+  .input:focus-visible {
+    outline: 2px solid var(--focus, var(--text));
+    outline-offset: 2px;
+  }
   .input:focus {
-    outline: none;
     box-shadow:
       0 0 0 1px var(--accent),
       0 0 0 4px var(--accent-soft);
@@ -506,4 +513,8 @@ html:not(.js) [data-reveal] {
 html [data-bg].near,
 html:not(.js) [data-bg] {
   background-image: var(--bg-img); /* outranks component background shorthands */
+}
+
+main:focus {
+  outline: none; /* focused only as the skip link's target */
 }

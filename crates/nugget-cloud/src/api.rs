@@ -31,6 +31,7 @@ use crate::stripe::{Stripe, StripeError};
 use crate::webhook::{self, ReplayGuard};
 
 mod billing;
+pub(crate) mod waitlist;
 
 const MAX_QUESTION_CHARS: usize = 2_000;
 const CATALOG_TTL: Duration = Duration::from_secs(3600);
@@ -47,6 +48,10 @@ pub struct Limiters {
     pub sync: RateLimiter<Uuid>,
     /// `GET /v1/export` builds the whole corpus in memory: once a minute per user.
     pub export: RateLimiter<Uuid>,
+    /// `POST /v1/waitlist` per client IP.
+    pub waitlist: RateLimiter<std::net::IpAddr>,
+    /// The model endpoint (`/llm/v1/*`) per user.
+    pub llm: RateLimiter<Uuid>,
     /// Proposing and approving actions (see [`Limits::action_per_min`]).
     pub action: RateLimiter<Uuid>,
 }
@@ -60,6 +65,8 @@ impl Limiters {
             sync: RateLimiter::every(l.sync_every_secs),
             export: RateLimiter::every(if l.user_per_min == 0 { 0 } else { 60 }),
             action: RateLimiter::per_minute(l.action_per_min),
+            waitlist: RateLimiter::new(l.waitlist_per_hour, Duration::from_secs(3600)),
+            llm: RateLimiter::per_minute(l.llm_per_min),
         }
     }
 }
@@ -91,6 +98,8 @@ pub struct AppState {
     /// How long `POST /v1/sync` waits for its runs before answering 202 (they continue in the
     /// background; progress is in `GET /v1/connections`).
     pub sync_wait: Duration,
+    /// Salt for waitlist IP hashes (`NUGGET_WAITLIST_SALT`); `None` stores no IP hash.
+    pub waitlist_salt: Option<String>,
     toolkits: Mutex<Option<(Instant, Vec<Toolkit>)>>,
     pub limits: Limiters,
     /// Header with the real client IP set by the edge proxy; `None` uses the TCP peer.
@@ -116,6 +125,7 @@ impl AppState {
             app_scheme: "nugget".into(),
             site_origins: Vec::new(),
             sync_wait: Duration::from_secs(20),
+            waitlist_salt: None,
             toolkits: Mutex::new(None),
             limiter: apps::RateLimiter::default(),
             policy: Arc::new(crate::actions::default_policy()),
@@ -403,8 +413,20 @@ async fn user(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthUser> {
 
 /// The client address: the edge proxy's header when configured and present, else the peer.
 fn client_ip(state: &AppState, req: &Request) -> Option<std::net::IpAddr> {
+    let peer = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0);
+    client_ip_of(state, req.headers(), peer)
+}
+
+fn client_ip_of(
+    state: &AppState,
+    headers: &HeaderMap,
+    peer: Option<std::net::SocketAddr>,
+) -> Option<std::net::IpAddr> {
     let from_header = state.client_ip_header.as_ref().and_then(|h| {
-        req.headers()
+        headers
             .get(h.as_str())?
             .to_str()
             .ok()?
@@ -414,11 +436,7 @@ fn client_ip(state: &AppState, req: &Request) -> Option<std::net::IpAddr> {
             .parse()
             .ok()
     });
-    from_header.or_else(|| {
-        req.extensions()
-            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-            .map(|c| c.0.ip())
-    })
+    from_header.or_else(|| peer.map(|p| p.ip()))
 }
 
 /// Per-IP limit on everything but the health checks.
@@ -505,6 +523,10 @@ fn routes(state: Arc<AppState>) -> Router {
             "/v1/webhooks/composio",
             post(composio_webhook).layer(DefaultBodyLimit::max(MAX_WEBHOOK_BYTES)),
         )
+        .route(
+            "/v1/waitlist",
+            post(waitlist::join).layer(DefaultBodyLimit::max(waitlist::MAX_BODY)),
+        )
         .route("/v1/billing/plans", get(billing::plans))
         .route("/v1/billing/checkout", post(billing::checkout))
         .route("/v1/billing/portal", post(billing::portal))
@@ -554,6 +576,10 @@ async fn delete_me(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<St
     if let Some(customer) = s.db.customer(u.id).await? {
         let stripe = s.stripe.as_ref().ok_or(StripeError::NotConfigured)?;
         stripe.delete_customer(&customer).await?;
+    }
+    // A waitlist entry under the same address goes too.
+    if let Some(email) = u.email.as_deref() {
+        s.db.waitlist_forget(email).await?;
     }
     s.auth.delete_user(u.id).await?;
     Ok(StatusCode::NO_CONTENT)

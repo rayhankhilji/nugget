@@ -5,8 +5,10 @@ import AppMark from "../components/AppMark.astro";
 import ApprovalCard from "../components/cards/ApprovalCard.astro";
 import GhostCard from "../components/cards/GhostCard.astro";
 import StepCard from "../components/cards/StepCard.astro";
+import WaitlistForm from "../components/WaitlistForm.astro";
 import { APPS, label } from "../lib/apps";
 import { FAQ } from "../lib/faq";
+import { smart } from "../lib/smartquotes.mjs";
 import { loadPlans, GITHUB_URL } from "../lib/plans";
 
 const { plans } = await loadPlans();
@@ -16,7 +18,7 @@ const from = Math.min(...plans.map((p) => p.monthly_gbp));
 const faqLd = {
   "@context": "https://schema.org",
   "@type": "FAQPage",
-  mainEntity: FAQ.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
+  mainEntity: FAQ.map((f) => ({ "@type": "Question", name: smart(f.q), acceptedAnswer: { "@type": "Answer", text: smart(f.a) } })),
 };
 ---
 <Base
@@ -27,6 +29,7 @@ const faqLd = {
   <!-- Hero: one signal-blue field, one huge line, one monumental print. -->
   <section class="hero" aria-labelledby="hero-h">
     <div class="sky" aria-hidden="true" data-sky><div class="drift"></div></div>
+    <button type="button" class="motion" data-motion aria-pressed="false" hidden>Pause motion</button>
     <div class="wrap hero-in">
       <div class="hero-copy">
         <p class="kicker">Heed for Mac</p>
@@ -42,7 +45,7 @@ const faqLd = {
         <p class="sys">Heed Cloud: {trial}-day free trial · card needed · cancel any time before you're charged</p>
         <p class="oss">Open source · Apache-2.0 · <a href={GITHUB_URL} rel="noopener">View on GitHub</a></p>
       </div>
-      <figure class="print">
+      <figure class="print" data-print>
         <img
           src="/art/painting-toledo.webp"
           srcset="/art/painting-toledo-720.webp 720w, /art/painting-toledo.webp 960w"
@@ -63,11 +66,13 @@ const faqLd = {
     <div class="wrap">
       <div class="canvas" data-bg>
         <figure class="window-wrap shot" data-reveal>
+          <div class="crop">
           <img class="l" src="/screens/home-light.webp" srcset="/screens/home-light-960.webp 960w, /screens/home-light.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
           <img class="d" src="/screens/home-dark.webp" srcset="/screens/home-dark-960.webp 960w, /screens/home-dark.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
-          <figcaption>The Home screen in Heed. Real screenshot; every name in it is fictional.</figcaption>
+          </div>
         </figure>
       </div>
+      <p class="shot-cap">The Home screen in Heed. Real screenshot; every name in it is fictional.</p>
       <ul class="apps" data-apps aria-label="Apps Heed connects to">
         <li class="apps-k">Works with</li>
         {
@@ -180,10 +185,10 @@ const faqLd = {
           <p class="tag">Privacy</p>
           <h2 id="privacy-h">Your data, in plain English.</h2>
           <p class="muted">The free app keeps your data on your Mac. Heed Cloud runs in the cloud, and this is what that means for you.</p>
-          <p class="more"><a href="/legal/privacy">Read the privacy policy</a></p>
+          <p class="more"><a href="/privacy">Privacy, in plain English</a> · <a href="/legal/privacy">Privacy policy</a></p>
         </div>
         <dl class="facts">
-          <div><dt>Where it lives</dt><dd>Your synced items are stored in your account in London. To answer or write, Heed sends only the relevant snippets and your request to our AI provider, Anthropic, or OpenAI as a fallback.</dd></div>
+          <div><dt>Where it lives</dt><dd>Your synced items are stored in your account, in London (planned). To answer or write, Heed sends only the relevant snippets and your request to our AI provider, Anthropic, or OpenAI as a fallback.</dd></div>
           <div><dt>How it's protected</dt><dd>It's encrypted in transit and at rest, and each account is isolated at the database level. It isn't end-to-end encrypted, because Heed has to read it to help you.</dd></div>
           <div><dt>What we never do</dt><dd>We never sell your data, use it for ads or train models on it. Our AI providers don't train on API data by default.</dd></div>
           <div><dt>Passwords and actions</dt><dd>Apps connect through each app's own sign-in, so we never see your passwords. Sending an email or creating an event always waits for your approval.</dd></div>
@@ -201,6 +206,10 @@ const faqLd = {
         <div class="cta left">
           <a class="btn btn-lg btn-primary" href="/download">Download for Mac</a>
           <a class="btn btn-lg btn-secondary" href={GITHUB_URL} rel="noopener">View on GitHub</a>
+        </div>
+        <div class="cloud-wl">
+          <p>Heed Cloud is opening soon. Get one email when it does.</p>
+          <WaitlistForm source="landing" label="Email me when Heed Cloud opens" button="Notify me" />
         </div>
         <pre class="install" aria-label="Get the source"><code><span class="c"># or get the source</span>
 git clone https://github.com/rayhankhilji/nugget</code></pre>
@@ -227,7 +236,15 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
                 {f.q}
                 <span class="plus" aria-hidden="true" />
               </summary>
-              <p>{f.a}</p>
+              <p>
+                {f.a}
+                {f.link && (
+                  <>
+                    {" "}
+                    <a href={f.link.href}>{f.link.text}</a>.
+                  </>
+                )}
+              </p>
             </details>
           ))
         }
@@ -239,8 +256,35 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 </Base>
 
 <script>
-  // Sky parallax: at most 12px, and none under reduced motion. (The drift itself is pure CSS.)
+  // "Pause motion" (WCAG 2.2.2): stops the sky drift, the parallax and the ghost-text loop; remembered.
+  const toggle = document.querySelector<HTMLButtonElement>("[data-motion]");
+  if (toggle && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    const set = (off: boolean) => {
+      document.documentElement.classList.toggle("motion-off", off);
+      toggle.setAttribute("aria-pressed", String(off));
+      toggle.textContent = off ? "Play motion" : "Pause motion";
+      try {
+        if (off) localStorage.setItem("heed-motion", "off");
+        else localStorage.removeItem("heed-motion");
+      } catch {
+        /* storage blocked */
+      }
+    };
+    let saved = false;
+    try {
+      saved = localStorage.getItem("heed-motion") === "off";
+    } catch {
+      /* storage blocked */
+    }
+    set(saved);
+    toggle.hidden = false;
+    toggle.addEventListener("click", () => set(!document.documentElement.classList.contains("motion-off")));
+  }
+
+  // Parallax on scroll, at most 12px each and none under reduced motion: the sky sinks, the print
+  // rises a little, so the two separate. (The sky's drift itself is pure CSS.)
   const layer = document.querySelector<HTMLElement>("[data-sky]");
+  const print = document.querySelector<HTMLElement>("[data-print]");
   if (layer && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
     let ticking = false;
     addEventListener(
@@ -249,7 +293,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
         if (ticking) return;
         ticking = true;
         requestAnimationFrame(() => {
-          layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
+          if (scrollY < 1400 && !document.documentElement.classList.contains("motion-off")) {
+            layer.style.setProperty("--py", `${Math.min(12, scrollY * 0.03).toFixed(1)}px`);
+            print?.style.setProperty("--pp", `${(-Math.min(12, scrollY * 0.04)).toFixed(1)}px`);
+          }
           ticking = false;
         });
       },
@@ -261,6 +308,7 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
 <style>
   /* ---------- Hero ---------- */
   .hero {
+    --focus: #f6f3ec;
     position: relative;
     overflow: hidden;
     isolation: isolate;
@@ -289,6 +337,29 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     image-rendering: pixelated;
     animation: drift 36s linear infinite;
     will-change: transform;
+  }
+  :global(html.motion-off) .drift {
+    animation-play-state: paused;
+  }
+  /* WCAG 2.2.2: a control to stop the moving sky and the looping demo. Hidden under reduced motion,
+     where nothing moves anyway. */
+  .motion {
+    position: absolute;
+    right: var(--gutter);
+    bottom: 16px;
+    z-index: 2;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: #f6f3ec;
+    background: rgb(7 7 50 / 0.45);
+    box-shadow: inset 0 0 0 1px rgb(246 243 236 / 0.35);
+    cursor: pointer;
+  }
+  .motion:hover {
+    background: rgb(7 7 50 / 0.65);
   }
   @keyframes drift {
     to {
@@ -384,7 +455,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     background: #f6f3ec;
     border-radius: 2px;
     box-shadow: 0 40px 80px -30px rgb(0 0 40 / 0.6);
-    transform: rotate(1.2deg);
+    --tilt: 1.2deg;
+    /* --pp: scroll parallax set by the hero script (at most 12px); 0 under reduced motion. */
+    transform: translate3d(0, var(--pp, 0px), 0) rotate(var(--tilt));
+    will-change: transform;
   }
   .print img {
     width: 100%;
@@ -444,12 +518,19 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
   :global(:root[data-theme="dark"]) .shot .d {
     display: block;
   }
-  .shot figcaption {
-    margin-top: 14px;
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .shot .crop::after {
+      background: linear-gradient(90deg, rgb(11 11 26 / 0), rgb(11 11 26 / 0.92));
+    }
+  }
+  :global(:root[data-theme="dark"]) .shot .crop::after {
+    background: linear-gradient(90deg, rgb(11 11 26 / 0), rgb(11 11 26 / 0.92));
+  }
+  .shot-cap {
+    margin-top: 12px;
     font-family: var(--mono);
-    font-size: 11.5px;
-    color: rgb(255 255 255 / 0.92);
-    text-shadow: 0 1px 2px rgb(0 0 40 / 0.6);
+    font-size: 12px;
+    color: var(--text-3);
   }
   .apps {
     list-style: none;
@@ -501,6 +582,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     grid-template-columns: repeat(3, minmax(0, 1fr));
     column-gap: clamp(24px, 3vw, 40px);
     row-gap: 10px;
+  }
+  /* Features rise in a row at a time, 90ms apart (the reveal uses --i × --stagger). */
+  .feat {
+    --stagger: 90ms;
   }
   .feat:nth-child(n + 4) {
     margin-top: clamp(48px, 6vw, 80px);
@@ -765,6 +850,14 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     font-size: clamp(44px, 6.4vw, 88px);
     margin-bottom: 28px;
   }
+  .cloud-wl {
+    display: grid;
+    gap: 10px;
+    margin-top: 28px;
+  }
+  .cloud-wl p {
+    color: var(--text-2);
+  }
   .get-in > * {
     min-width: 0;
   }
@@ -872,6 +965,10 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
     padding: 0 32px 22px 0;
     color: var(--text-2);
   }
+  details p a {
+    color: var(--text);
+    text-underline-offset: 3px;
+  }
 
   /* ---------- Responsive ---------- */
   @media (max-width: 1020px) {
@@ -900,8 +997,47 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
       grid-template-columns: 1fr;
     }
     .print {
-      max-width: 360px;
+      max-width: min(300px, 82vw);
       justify-self: center;
+      --tilt: 0.8deg;
+    }
+    /* On phones the full 1440px screenshot is too small to read, so show its main column (greeting,
+       ask box, brief) enlarged and cropped instead. */
+    .canvas {
+      padding: 14px;
+    }
+    .shot .crop {
+      overflow: hidden;
+      border-radius: 10px;
+      aspect-ratio: 4 / 5;
+      box-shadow:
+        0 0 0 1px rgb(20 17 15 / 0.14),
+        0 24px 50px -20px rgb(7 7 50 / 0.6);
+    }
+    /* Zoomed to ~0.72 so the UI text stays legible (about 11px); the right edge fades to show the window
+       continues. The crop starts at the main column (x ≈ 505 of 1440). */
+    .shot .crop {
+      position: relative;
+      background: #f6f3ec;
+    }
+    /* A narrow strip on the right edge hints that the window continues; the screenshot itself stays
+       fully opaque. */
+    .shot .crop::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 28px;
+      background: linear-gradient(90deg, rgb(246 243 236 / 0), rgb(246 243 236 / 0.92));
+      pointer-events: none;
+    }
+    .shot .crop img {
+      width: 290%;
+      max-width: none;
+      margin-left: -101.7%;
+      border-radius: 0;
+      box-shadow: none;
     }
   }
   @media (max-width: 640px) {
@@ -920,7 +1056,12 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
       padding: 20px 16px;
     }
     .feat:nth-child(n + 2) {
-      margin-top: 40px;
+      margin-top: 48px;
+    }
+    /* One column: the image leads each block. */
+    .feat .tile {
+      order: -1;
+      margin: 0 0 6px;
     }
     .facts div,
     .specs div {

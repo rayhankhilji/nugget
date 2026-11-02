@@ -13,6 +13,9 @@
 //!   requests.
 //! - [`Router`]: tier → ordered providers, capability-aware, with fallback.
 //!
+//! - [`cloud`]: the signed-in user's Heed cloud endpoint (fast and smart tiers), with the access
+//!   token read at each request.
+//!
 //! Model ids appear only in configuration (see `examples/providers.example.toml`).
 //!
 //! # Latency
@@ -36,6 +39,7 @@
 //!   context is processed.
 
 pub mod adapters;
+pub mod cloud;
 pub mod config;
 mod http;
 pub mod locality;

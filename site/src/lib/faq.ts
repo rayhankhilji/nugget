@@ -1,13 +1,13 @@
 import { appList } from "./apps";
 
-export const FAQ: { q: string; a: string }[] = [
+export const FAQ: { q: string; a: string; link?: { href: string; text: string } }[] = [
   {
     q: "Is Heed free?",
     a: "The Heed app is free and open source under Apache-2.0. You run it on your Mac, bring your own AI and connect your apps yourself. Heed Cloud is the paid option: one-click connections, always-on sync, AI included and support. Both cloud plans start with a 14-day free trial; a card is needed, and you can cancel any time before you're charged. One trial per person.",
   },
   {
     q: "Does my data leave my Mac?",
-    a: "With the free app, your synced data stays on your Mac. Your questions and the relevant snippets go only to the AI you chose, or nowhere at all if you use a local model through Ollama. With Heed Cloud, yes, and we'd rather be upfront about it: the apps you connect sync to your account in our London data centre, and the relevant snippets go to our AI provider (Anthropic, or OpenAI as a fallback) to produce each answer.",
+    a: "With the free app, your synced data stays on your Mac. Your questions and the relevant snippets go only to the AI you chose, or nowhere at all if you use a local model through Ollama. With Heed Cloud, yes, and we'd rather be upfront about it: the apps you connect sync to your account in our data centre (planned for London), and the relevant snippets go to our AI provider (Anthropic, or OpenAI as a fallback) to produce each answer.",
   },
   {
     q: "Do you sell my data or use it to train AI?",
@@ -39,7 +39,8 @@ export const FAQ: { q: string; a: string }[] = [
   },
   {
     q: "Can I self-host the cloud?",
-    a: "Yes. Heed is open core, and the cloud service is in the same repository. There's a community-supported self-hosting guide in the docs (docs/book/src/guide/self-host.md on GitHub). It comes with no warranty or support from us.",
+    a: "Yes. Heed is open core, and the cloud service is in the same repository. There's a community-supported self-hosting guide. It comes with no warranty or support from us.",
+    link: { href: "/docs/self-host", text: "Read the self-hosting guide" },
   },
   {
     q: "How do I cancel or delete my account?",

@@ -22,7 +22,9 @@
 //!   cached prompt tokens.
 //! - **Read-ahead.** While a reply field keeps focus, the desktop sends `draft.read_ahead` with
 //!   the context it would send at the trigger; the engine prefills that whole prompt into a
-//!   non-cloud provider's cache, generating nothing ([`Drafter::read_ahead`]). The call answers
+//!   non-cloud provider's cache, generating nothing ([`Drafter::read_ahead`]). For a cloud
+//!   provider (Heed cloud when signed in) it sends no content and only opens the connection
+//!   (bodiless, at most every 20 s), answering `"skipped": "cloud"` as before. The call answers
 //!   within ~100 ms: `{"started": false, "skipped": <reason>}` when it did nothing (`"disabled"`,
 //!   `"refused"`, `"cloud"`, `"rate_limited"`, `"unchanged"`, `"unavailable"`, `"cancelled"`),
 //!   `{"started": true, "done": true}` when it already finished, else `{"started": true}` (it
@@ -40,6 +42,8 @@
 //! [draft]
 //! enabled = true                  # false: draft.begin / draft.prewarm refuse ("disabled")
 //! tier = "synthesis"              # routing tier when neither request nor app names a provider
+//! continue_tier = "light"         # ghost text (`mode: continue`): the fast tier when it has a
+//!                                 # provider (Heed cloud's fast model when signed in), else `tier`
 //! budget_tokens = 1500            # retrieval budget, capped at nugget_draft::MAX_BUDGET_TOKENS
 //! app_providers = { "com.tinyspeck.slackmacgap" = "local-chat", "mail.google.com" = "remote" }
 //! excluded_apps = ["com.example.bank"]   # ADDED to the built-in password-manager list...
@@ -140,6 +144,8 @@ const READ_AHEAD_MIN_SPACING: Duration = Duration::from_secs(1);
 struct DraftSection {
     enabled: bool,
     tier: Tier,
+    /// Tier for ghost text (`mode: continue`) when it has a provider, else `tier`.
+    continue_tier: Tier,
     budget_tokens: u32,
     app_providers: HashMap<String, ProviderId>,
     /// Added to [`DEFAULT_EXCLUDED_APPS`], unless `replace_default_excluded`.
@@ -224,6 +230,7 @@ impl Default for DraftSection {
         Self {
             enabled: true,
             tier: d.tier,
+            continue_tier: d.continue_tier,
             budget_tokens: d.budget_tokens,
             app_providers: HashMap::new(),
             excluded_apps: Vec::new(),
@@ -292,6 +299,7 @@ impl DraftSection {
         }
         DraftConfig {
             tier: self.tier,
+            continue_tier: self.continue_tier,
             budget_tokens: self.budget_tokens.clamp(1, MAX_BUDGET_TOKENS),
             app_providers: self.app_providers.clone(),
             allow_cloud_screenshots: self.allow_cloud_screenshots,

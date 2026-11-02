@@ -21,6 +21,8 @@ mod billing;
 
 mod security;
 
+mod waitlist;
+
 struct Harness {
     app: Router,
     db: crate::db::Db,
@@ -585,86 +587,104 @@ async fn embeddings_are_batched_per_page() {
 
 #[tokio::test]
 async fn slow_first_backfill_runs_in_background_with_progress() {
+    use std::sync::atomic::Ordering::SeqCst;
+    // Deterministic: Composio calls wait at a gate the test opens, and every step waits on
+    // observable state (call entered, lease shown, progress recorded), never on a fixed sleep.
     let Some(h) = harness_opts(
         false,
-        &[("gmail", "ac_gmail"), ("googlecalendar", "ac_cal")],
-        std::time::Duration::from_millis(50),
+        &[("gmail", "ac_gmail")],
+        std::time::Duration::from_secs(2),
     )
     .await
     else {
         return;
     };
     let u = subscriber(&h.pool, "heed").await;
-    for t in ["gmail", "googlecalendar"] {
-        call(
-            &h.app,
-            "POST",
-            "/v1/connections",
-            Some(u),
-            Some(json!({"toolkit": t})),
-        )
-        .await;
-    }
+    call(
+        &h.app,
+        "POST",
+        "/v1/connections",
+        Some(u),
+        Some(json!({"toolkit": "gmail"})),
+    )
+    .await;
     call(&h.app, "GET", "/v1/connections", Some(u), None).await;
-    h.composio
-        .delay_ms
-        .store(300, std::sync::atomic::Ordering::SeqCst);
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *h.composio.gate.lock().unwrap() = Some(gate.clone());
+    let gmail = |v: &Value| {
+        v["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["toolkit"] == "gmail")
+            .cloned()
+            .unwrap()
+    };
+
+    // The import cannot finish while the gate is shut, so the request must answer 202.
     let (s, v) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
     assert_eq!(
         (s, v["running"].as_bool()),
         (StatusCode::ACCEPTED, Some(true)),
         "{v}"
     );
+    crate::testkit::wait_until("the background run reaches Composio", 60, || async {
+        h.composio.entered.load(SeqCst) >= 1
+    })
+    .await;
     let (_, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
-    assert!(
-        v["connections"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["syncing"] == true),
+    let g = gmail(&v);
+    assert_eq!(
+        (g["syncing"].as_bool(), g["items_synced"].as_i64()),
+        (Some(true), Some(0)),
+        "lease shown, nothing stored yet: {v}"
+    );
+
+    // A second request while the lease is held must not start a parallel run.
+    let (s, v2) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
+    if s == StatusCode::OK {
+        assert_eq!(v2["synced"][0]["in_progress"], true, "{v2}");
+        assert_eq!(v2["running"], true, "{v2}");
+    }
+    assert_eq!(
+        h.composio.entered.load(SeqCst),
+        1,
+        "no second Composio call while the first runs"
+    );
+
+    // Open the gate; the run completes and records its progress.
+    gate.add_permits(1);
+    let app = h.app.clone();
+    crate::testkit::wait_until("the import finishes", 60, || {
+        let app = app.clone();
+        async move {
+            let (_, v) = call(&app, "GET", "/v1/connections", Some(u), None).await;
+            v["connections"][0]["syncing"] == false
+        }
+    })
+    .await;
+    let (_, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+    let g = gmail(&v);
+    assert_eq!(
+        (g["items_synced"].as_i64(), g["backfill_done"].as_bool()),
+        (Some(2), Some(true)),
         "{v}"
     );
-    // A second request while it runs does not start a parallel run.
-    let calls_before = h.composio.calls.lock().unwrap().len();
-    let (_, v2) = call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
-    // Wait for the background work to finish.
-    let mut done = Value::Null;
-    for _ in 0..50 {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let (_, v) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
-        if v["connections"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|c| c["syncing"] == false)
-        {
-            done = v;
-            break;
-        }
-    }
-    let conns = done["connections"]
-        .as_array()
-        .expect("background sync finished");
-    let gmail = conns.iter().find(|c| c["toolkit"] == "gmail").unwrap();
-    assert_eq!(
-        (
-            gmail["items_synced"].as_i64(),
-            gmail["backfill_done"].as_bool()
-        ),
-        (Some(2), Some(true)),
-        "{done}"
-    );
-    assert!(gmail["last_synced_at"].is_string());
-    let calls_after = h.composio.calls.lock().unwrap().len();
-    assert!(
-        calls_after - calls_before <= 2,
-        "the overlapping request found runs in progress: {v2}"
-    );
+    assert!(g["last_synced_at"].is_string());
+    let gmail_calls = h
+        .composio
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|c| c.1 == "GMAIL_FETCH_EMAILS")
+        .count();
+    assert_eq!(gmail_calls, 1, "exactly one run fetched mail");
     let n: i64 = h
         .pool
         .query_one("select count(*) from public.items", &[])
         .await
         .unwrap()
         .get(0);
-    assert_eq!(n, 3);
+    assert_eq!(n, 2);
 }

@@ -34,6 +34,8 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
 | `/checkout?plan=heed\|heed_max&interval=month\|year` | Sends you to sign up if you're signed out, then starts Stripe Checkout. |
+| `/docs/self-host` | The book's self-hosting guide (`docs/book/src/guide/self-host.md`), copied into `src/content/docs/` by `npm run docs` and rendered with a sticky contents list. The smoke test fails if the copy is stale. |
+| `/about` | "Why Heed": the open-core story, why it's open source, and who makes it. The founder's name is a placeholder (`[Founder name]`) until they choose how to be named. |
 | `/legal/privacy`, `/legal/terms` | **Drafts that need legal review**. Each one is marked at the top, and its placeholders are in `[brackets]`. |
 
 The `account` and `checkout` pages are `noindex` and left out of the sitemap. They're also disallowed
@@ -60,6 +62,15 @@ The "Connects to" strip and the FAQ list exactly the apps in `crates/nugget-clou
 (`CATALOG`). `npm run apps` regenerates `src/data/apps.json` from that file, and
 `node scripts/sync-apps.mjs --check` checks it's up to date. The smoke test fails if the JSON, the
 strip or the FAQ drift from the catalogue. Add an app to the cloud first, then run `npm run apps`.
+
+### Waitlist
+
+`WaitlistForm` (on /download, the landing's get-it block, and the "Heed Cloud isn’t open yet" pages)
+posts `{email, source}` to `POST {CLOUD_URL}/v1/waitlist`. The cloud answers 202 to any well-formed
+request and never says whether an address is new, so the form only confirms "You’re on the list".
+A 429 asks the user to wait a bit. A 404 or a network error, which includes a CORS rejection before
+the site's origin is in `NUGGET_SITE_ORIGINS`, falls back to an email link. Without
+`NEXT_PUBLIC_CLOUD_URL` the form is just that email link. There are no third-party scripts.
 
 ### Prices come from the API
 
@@ -251,6 +262,38 @@ The footer's theme switch can force dark on a light system. To support that, `Ba
 The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
 them once they exist. Sources and licences are in `CREDITS.md`.
 
+**Social cards:** each page gets a 1200×630 Open Graph and Twitter image: a Fraunces line over the
+dithered sky, with the wordmark. They are rendered once at build time by
+`src/pages/og/[slug].png.ts`, using satori and resvg-js with the static TTF instances in `src/og/`.
+The lines live in `src/lib/og.ts`. `site.webmanifest` lists the app icons.
+
+**Accessibility:**
+- The smoke test runs axe-core on every route, in light and dark, at 1280 and 390 px, and fails on
+  any violation.
+- It also tabs through every route in both themes and checks that each tab stop shows a 2px focus
+  ring (`--focus`: ink on cream, cream on dark and on the blue hero).
+- The skip link comes first and moves focus to `<main>`.
+- The hero has a "Pause motion" button (WCAG 2.2.2). It stops the sky drift, the parallax and the
+  ghost-text loop, and the choice is remembered. Under reduced motion nothing moves, so the button
+  is hidden.
+- The FAQ uses native `<details>`/`<summary>`, which exposes the expanded state.
+- Scrolling tables are focusable, labelled regions.
+
+**Typography:** copy uses typographic quotes (’ ‘ ’ “ ”). `integrations/smartquotes.mjs` rewrites the
+text of every built page after the build, leaving code, scripts and attributes alone.
+`src/lib/smartquotes.mjs` handles the head, the social cards and the FAQ structured data, and the
+client-side messages are written with ’ in source. The smoke test fails on straight apostrophes in
+visible text.
+
+**Performance budgets:** `tests/budgets.mjs`, run by `npm test`, fails if a page's JavaScript
+grows more than 10% past its baseline. The count covers inline scripts, module scripts and
+everything they import. It also fails if any image in the build is over 300 KB. There are two
+baselines: `budgets.json` for the build without Heed Cloud settings (production today) and
+`budgets-cloud.json` for the configured build. To accept a deliberate change, run
+`node tests/budgets.mjs --update` (add `--cloud` for the configured build). The account and checkout
+UIs are components that render only when the cloud is configured, so a closed build doesn't ship
+the Supabase client (5 KB instead of about 230 KB on those pages).
+
 **Performance:**
 - CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within
   200px of the viewport.
@@ -261,7 +304,9 @@ them once they exist. Sources and licences are in `CREDITS.md`.
 
 **Motion:**
 - Easing is `cubic-bezier(.2,.8,.2,1)`. UI transitions take 200ms; brand moments take 600–900ms.
-- `[data-reveal]` cards rise 8px and fade in, and lists stagger by 30ms.
+- `[data-reveal]` cards rise 8px and fade in, and lists stagger by 30ms. Feature blocks stagger by
+  90ms (`--stagger`).
+- On scroll, the hero sky sinks and the print rises, each by at most 12px.
 - Agent steps tick to a check with a 180ms stroke draw.
 - Under `prefers-reduced-motion`, only fades remain: the sky doesn't drift, the agent card renders
   in its final state, and the ghost text shows its accepted state.

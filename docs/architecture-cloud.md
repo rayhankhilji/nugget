@@ -261,6 +261,51 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - The smart model is Claude Sonnet 5.5, at $2 in and $10 out. The same Ask costs $0.0208.
   - Prompts over 100k tokens are billed at 5× on Haiku 5.5. The gateway packs at most 24k tokens of context, so that rate is never reached.
 
+### Streaming model endpoint for the desktop (`/llm/v1`)
+The desktop's AI features (ghost-text autocomplete, Double Tap, quick ask, chat and the agent) run in nuggetd, through `nugget-infer`. When the user is signed in they use Heed's own model endpoint, `crates/nugget-cloud/src/llm`:
+- **Shape: Anthropic-Messages-compatible**, `POST /llm/v1/messages` (streaming or not, tools, images, `cache_control`) and `GET /llm/v1/models`. We chose it over an OpenAI-compatible endpoint because Anthropic is the primary provider. The primary path forwards the checked body and relays the provider's bytes unchanged. That means no translation on the latency-critical path, and prompt caching (breakpoints, `max_tokens: 0` prefix warming), tool use and images keep their exact semantics. `nugget-infer` already speaks this API. Only the OpenAI fallback is translated (`llm/openai.rs`), and it is used when Anthropic is unset, or fails or times out before the first byte.
+- **Auth:** the user's Supabase access token, as `Authorization: Bearer` (or `x-api-key`, so a stock Anthropic client works with base URL `{api}/llm`). It is checked like every `/v1` route. If our own provider key is refused, the client gets a 502, never a 401, because a 401 would sign the user out.
+- **Tiers, not models:** `model` is `heed-fast` (ghost text, triage, light work) or `heed-smart` (drafting, asks, the agent). The service picks the real model from the tier and the user's entitlements, read through one function, `llm::entitlements()`. That function is a view of billing's `plans::entitlement`. Without a live subscription the answer is `402` (`code: subscription_required`). `heed-smart` follows the gateway's rule (`Allowance::choose`, shared with Ask): it falls back to the fast model once the plan's fair-use budget or smart allowance is used up.
+- **Metering and quotas:** each call writes one `usage_events` row (`kind = 'llm'`, `route` such as `heed-fast:anthropic`, input, output and prompt-cache tokens). The cost charges cache reads at 0.1× and cache writes at 1.25× input. Before sending, the month-to-date cost is checked against the plan's hard cap (`429`, `code: quota_exceeded`). Entitlements, month-to-date cost and smart calls are cached per user for 15 s, and requests metered in that window are added locally. A keystroke's request therefore makes no database round trip, and a limit can be overshot only by requests already in flight (at most `max_concurrent` per user: 4 per device seat of the plan).
+- **Reserve, then settle** (`20261102140003_ai_reservations.sql`). Quotas are not checked against a cached month total, which concurrent streams could jointly overshoot:
+  - **Reserve.** Before forwarding, the endpoint reserves the request's worst-case cost: `max_tokens` at the tier's output price, plus the estimated input at the input price. The input estimate is about 3 characters per token, plus a flat 2,000 per image. `nugget_private.ai_reserve` does this in one statement. It takes the user's advisory lock, checks *month spend (`usage_events`) + open reservations + estimate ≤ limit*, and inserts the reservation.
+  - **Smart and fast.** A `heed-smart` request must fit the plan's fair-use budget and smart allowance. If it doesn't, it falls back to fast, which must fit the hard cap. If neither fits, the answer is `429 quota_exceeded`. This is the gateway's `Allowance::choose` rule, made atomic.
+  - **Settle.** When the request ends, `ai_settle` records the real usage and deletes the reservation in one transaction, so the unused part is released. A disconnect settles with the input reported so far and the output estimated from the relayed text.
+  - **Release and expiry.** A request that fails before any usage, for example when the fallback serves it instead, releases its reservation. A crashed server's reservations expire 5 minutes after the longest request (15 min).
+  - **Cost.** Ghost text pays one extra round trip, and its small `max_tokens` keeps the reservation small. Entitlements and the smart-call count are still cached for 15 s.
+- **Rate limit and deadlines.**
+  - **Per-user bucket.** Both `/llm/v1/*` routes share a per-user bucket of `NUGGET_RATE_LLM_PER_MIN`, default 120 a minute with an equal burst. That is two a second sustained, well above a fast typist's debounced ghost text (about one a second), and far below abuse rates. It is separate from the API's `user_per_min`, because ghost text is chatty. Over the limit, the answer is `429` with `Retry-After`, in this endpoint's Anthropic error shape with `code: rate_limited`, so the desktop's Anthropic client reads it.
+  - **Deadlines.** `GET /llm/v1/models` gets the API's 30 s deadline, and a non-streaming request gets Ask's 60 s. Streams keep their own limits instead: 60 s to the first byte, 90 s idle, and 15 min in all. An agent's stream may rightly run that long.
+- **Limits:** the body is capped at 8 MB (413), with at most 4,000 messages. `max_tokens` is capped per tier and plan. Only known fields are forwarded: server tools, MCP servers, containers, service tiers and betas are dropped or refused. Timeouts are 60 s to the provider's headers, 90 s of silence mid-stream (the stream then ends with an `error` event) and 15 min overall.
+- **Cancellation:** a client that disconnects drops the provider request at once, so generation stops. What was relayed is metered: output tokens are estimated from the relayed text when the provider never reported them.
+- **Prompt caching:** client breakpoints pass through. A request with none gets one on its system prompt, so the stable prefix (rules, voice) is cached across a user's keystrokes. OpenAI gets a `prompt_cache_key` per user and tier.
+- **Logging:** user id, tier, model, route, status, token counts, cost and timings. Never prompt or answer text, and never a provider error body (provider errors are relayed to the client, not logged).
+
+### Desktop routing (nuggetd)
+- **Token handoff:** the shell keeps the session (`nugget-cloud-client`: refresh token in the keychain, access token in memory). It hands nuggetd the **short-lived access token over the IPC socket** (`cloud.llm.session`). That socket is owner-only (a 0700 directory and a peer uid check). The token goes over at sign-in, just inside each refresh margin (`next_handoff_in`, at most every 5 min), and on every daemon (re)connect. Sign-out withdraws it. nuggetd keeps it in memory only: never on disk, in config, logs or the audit log. It refuses tokens that are expired or valid for more than 24 h, and `http` URLs off this machine. We chose IPC over a config file because a file would put a bearer token on disk (and in backups) for its whole lifetime, and an hour-long token gains nothing from surviving a restart.
+- **Routing:** `nugget_infer::cloud` builds `heed-cloud-fast` (tiers Triage and Light) and `heed-cloud-smart` (Synthesis and Agentic) on **one shared connection pool**. The token is read at each request, so a refresh never drops the warm connection. Both are routed **first** on their tiers, and local models stay behind them as the fallback. A provider error, the quota answer (429), a refused token (401, which also drops the token) or an expired token falls through to the local model at once (no client-side retries). When signed out, the providers leave the router. Ghost text (`draft.begin` with `mode: continue`) routes by `[draft] continue_tier` (default `light`, so the fast tier). Replies route by `[draft] tier`.
+- **Egress and sensitivity, unchanged in meaning:** the cloud providers are `Locality::Cloud`. So the egress ledger lists every request under the Heed host. Every rule that decided what may go to a cloud model now decides what may go to Heed cloud:
+  - passages marked sensitive are withheld, and the draft engine refuses outright if one slips through;
+  - the field and thread text the PII scan flags is withheld;
+  - screenshots are sent only with `allow_cloud_screenshots`;
+  - read-ahead sends no content to the cloud (it only opens the connection);
+  - triage of local items and embeddings stay on local models.
+- **Safety checks on cloud output:** the draft engine's per-sentence checks (grounding, injected links and contact details, credentials) run on the cloud stream exactly as on a local one.
+
+### Ghost-text latency
+Measured end to end in `llm::tests::desktop_provider_end_to_end_time_to_first_token`. The test drives the desktop's real provider against the real endpoint over HTTP, with a provider double that answers its first token at once. Cold time to first token is about 15 ms, which includes a new connection and the uncached auth and usage reads. Warm requests run at typing cadence, after a prewarm on the connection that prewarm opened: p50 about 4 ms, p95 about 20 ms, and no new connection. That is the endpoint's own overhead plus the client's. Two fixes came out of measuring:
+- `TCP_NODELAY` on the service listener. Without it, Nagle held the first token for about 40 ms.
+- The streaming client reads a finished response to its end. Before this, every request closed its connection and the next keystroke paid for a new one.
+
+What keeps the warm path short:
+- HTTP/2 keep-alive pooling on both hops: desktop→Fly, and Fly→Anthropic (`/llm/v1/models` also warms the service's provider connection when it has been idle).
+- A connection prewarm when a supported field gets focus (`draft.read_ahead` → bodiless `GET /llm/v1/models`, at most every 20 s) and on the trigger (`draft.prewarm`).
+- Cached auth and entitlements.
+- A minimal prompt for `continue`: the small prompt caps and at most 3 retrieved passages, as for local models, and an output of a few words.
+- A cached system-prompt prefix.
+
+**Expected real-world time to first token, warm** (estimate, not measured against the live provider): network round trip to Fly `lhr` (about 10–20 ms from the UK, about 80 ms from the US east coast), plus the endpoint (a few ms), plus Anthropic's time to first token for the fast model on a short, prefix-cached prompt (typically 250–500 ms). That is **about 0.3–0.5 s in the UK and 0.4–0.6 s from the US**. A cold start adds TCP and TLS (2–3 round trips) and an auth check against Supabase (about 20–50 ms), so about 0.1–0.2 s more. A fallback to OpenAI adds the failed attempt's time. If the cloud fails, the local model answers within the same request.
+
 ## 4. Desktop app changes
 - **Sign-in:**
   1. A new crate, `crates/nugget-cloud-client`, builds the PKCE `authorize` URL (for Google; Apple is added in M4) or sends the magic-link request (`POST /auth/v1/otp` with a code challenge). The system browser opens it.
@@ -271,7 +316,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
 - **UI:** a Sign-in screen gates the app. A Connections page reuses the existing `ui.tsx` components (`PageHeader`, `Badge`, `EmptyState`). The markup stays structural, because DS1 owns the visual redesign.
 - **What nuggetd keeps doing locally:**
   - Double Tap, the overlay, quick ask, the global hotkey, a11y capture, computer use and the agent loop all stay local, because they need OS access.
-  - Their *retrieval and LLM calls* switch to the cloud: `nugget-infer` gets a `cloud` provider that calls the gateway with the user's JWT, and retrieval calls `/v1/search`.
+  - Their *retrieval and LLM calls* switch to the cloud: `nugget-infer`'s `cloud` providers call `/llm/v1/messages` with the user's JWT (see "Desktop routing" above), and retrieval calls `/v1/search`.
   - Screen and a11y text is sent to the cloud only as part of a query the user makes, and is never indexed.
   - The local store becomes a cache (settings, Double Tap history, the action log). It is no longer the corpus.
 
@@ -299,7 +344,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - Google OAuth tokens are held by Composio, encrypted by them. We never see them.
   - Supabase refresh tokens on the desktop are kept in the OS keychain.
   - Supabase Postgres disks are encrypted with AES-256 at rest. Encrypting item bodies in the application (with per-user keys from a KMS) is deliberately not done in M1, because it would block full-text search inside Postgres. It is revisited in M4.
-- **Egress to LLM providers. In plain terms:** the text of retrieved emails and events, and the user's question, are sent to Anthropic (or OpenAI) for every Ask and every extraction. Both providers' API terms say they do not train on API data by default, and both retain it for a limited period for abuse monitoring. The privacy policy and the onboarding screen must say this. A setting to opt out of extraction is planned for M2.
+- **Egress to LLM providers. In plain terms:** the text of retrieved emails and events, and the user's question, are sent to Anthropic (or OpenAI) for every Ask and every extraction. When the user is signed in, the desktop's AI features also send their prompts to Heed cloud, and from there to Anthropic (or OpenAI). That covers the text around the caret for ghost text, the field and thread for Double Tap, the question for quick ask and chat, and the agent's context. Only what the existing cloud rules allow is sent: passages marked sensitive are withheld, text the PII scan flags is withheld, screenshots go only with `allow_cloud_screenshots`, and local triage and embeddings stay local. Each request is in the desktop's egress ledger under the Heed host. Prompts are never logged by the service. Both providers' API terms say they do not train on API data by default, and both retain it for a limited period for abuse monitoring. The privacy policy and the onboarding screen must say this. A setting to opt out of extraction is planned for M2.
 - **Webhooks:** Composio webhooks are verified with HMAC-SHA256 over `id.timestamp.body` (the Standard Webhooks scheme), and a timestamp more than 5 minutes off is rejected.
 - **GDPR (UK GDPR / DPA 2018):**
   - **Export:** `GET /v1/export` returns all of the user's rows as JSON. The desktop's "Download my data" saves it.
@@ -371,6 +416,26 @@ The hard caps bound the worst case. That is £10.45 for Heed (67%) and £24.12 f
 - Supabase Pro is $25 and Fly about $4.
 - Composio Pro is $29. It is needed once paying users exist: a heavy Max user alone makes about 23k calls a month, and Hobby stops at 100k.
 - That totals about £44 a month, which **two Heed subscriptions cover**. The founder's £99/month infrastructure ceiling holds until about 40–50 active subscribers. From there, Supabase compute and Composio overage grow with users and are paid by revenue.
+
+## 7. Waitlist
+`POST /v1/waitlist {email, source?}` takes sign-ups from the website while Heed Cloud is not open.
+
+- **No account, no auth.** The route is limited to `NUGGET_SITE_ORIGINS` by CORS, capped at 1 KiB
+  of body, and rate-limited to `NUGGET_RATE_WAITLIST_PER_HOUR` (default 5) per client IP.
+- **Nothing to enumerate.** Every well-formed JSON body gets the same empty `202`, whether the
+  address is new, already listed or invalid. Invalid addresses are not stored. Only malformed JSON
+  gets `400`.
+- **Validation.** Addresses are trimmed and lowercased. Each must be at most 254 characters, with
+  one `@`, a dot in the domain, and no spaces or control characters.
+- **Storage.** Rows go into `public.waitlist (email citext primary key, created_at, source,
+  ip_hash)`. `ip_hash` is a SHA-256 of the IP salted with `NUGGET_WAITLIST_SALT`, a per-deploy
+  secret. Without a salt, no IP is kept.
+- **Privacy.** RLS is on. `anon` and `authenticated` have no access at all, and `nugget_service`
+  may only insert.
+- **Deletion on request.** Support removes an address with
+  `select nugget_private.waitlist_forget('person@example.com')`, as the database owner.
+  `DELETE /v1/me` also removes the entry for the account's own address.
+- **Self-hosted.** The route works there too, but it is harmless: nothing reads the list.
 
 ## Migration plan
 - **M1: cloud Ask over mail and calendar.** This is "sign in, connect Gmail and Google Calendar via Composio, ask a question and get a cited answer from cloud-indexed mail". It includes:

@@ -61,6 +61,18 @@ pub struct Connection {
     pub items_synced: i32,
 }
 
+/// One model-endpoint request's usage, for [`Db::ai_settle`].
+#[derive(Debug, Clone)]
+pub struct LlmUsage<'a> {
+    pub model: &'a str,
+    pub route: &'a str,
+    pub input: u32,
+    pub output: u32,
+    pub cache_read: u32,
+    pub cache_write: u32,
+    pub cost: i64,
+}
+
 /// The outcome of one sync run, for [`Db::finish_sync`].
 #[derive(Debug, Default)]
 pub struct SyncRun<'a> {
@@ -1136,6 +1148,114 @@ impl Db {
                 out.insert((*name).into(), r.get::<_, Value>(0));
             }
             Ok(Value::Object(out))
+        })
+        .await
+    }
+
+    // ---- AI spend reservations (model endpoint) ----------------------------------------------
+    // One autocommit statement each (a single round trip): the definer functions take the
+    // user's advisory lock themselves.
+
+    /// Reserves `estimate` micro-USD against `cap` (this month's spend plus open reservations);
+    /// `None` when it does not fit.
+    pub async fn ai_reserve(
+        &self,
+        user: Uuid,
+        estimate: i64,
+        cap: i64,
+        hold_secs: i32,
+    ) -> Result<Option<Uuid>, DbError> {
+        let c = self.pool.get().await?;
+        let r = c
+            .query_one(
+                "select nugget_private.ai_reserve($1, $2, $3, $4)",
+                &[&user, &estimate, &cap, &hold_secs],
+            )
+            .await?;
+        Ok(r.get(0))
+    }
+
+    /// Records a request's real usage and releases its reservation, atomically.
+    pub async fn ai_settle(
+        &self,
+        reservation: Uuid,
+        user: Uuid,
+        u: &LlmUsage<'_>,
+    ) -> Result<(), DbError> {
+        let int = |v: u32| i32::try_from(v).unwrap_or(i32::MAX);
+        let c = self.pool.get().await?;
+        c.execute(
+            "select nugget_private.ai_settle($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            &[
+                &reservation,
+                &user,
+                &u.model,
+                &u.route,
+                &int(u.input),
+                &int(u.output),
+                &int(u.cache_read),
+                &int(u.cache_write),
+                &u.cost,
+            ],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Releases an unused reservation.
+    pub async fn ai_release(&self, reservation: Uuid, user: Uuid) -> Result<(), DbError> {
+        let c = self.pool.get().await?;
+        c.execute(
+            "select nugget_private.ai_release($1, $2)",
+            &[&reservation, &user],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Micro-USD currently reserved for the user (open, unexpired reservations).
+    pub async fn ai_reserved(&self, user: Uuid) -> Result<i64, DbError> {
+        self.scoped(Some(user), async |tx| {
+            let r = tx
+                .query_one(
+                    "select coalesce(sum(micros), 0)::bigint from public.ai_reservations
+                     where user_id = $1 and expires_at > now()",
+                    &[&user],
+                )
+                .await?;
+            Ok(r.get(0))
+        })
+        .await
+    }
+
+    // ---- waitlist (no user: the service may only insert) ------------------------------------
+
+    /// Adds an address; an existing one is left as it is.
+    pub async fn waitlist_add(
+        &self,
+        email: &str,
+        source: &str,
+        ip_hash: Option<&str>,
+    ) -> Result<(), DbError> {
+        self.scoped(None, async |tx| {
+            tx.execute(
+                "insert into public.waitlist (email, source, ip_hash) values ($1::text::extensions.citext, $2, $3)
+                 on conflict do nothing",
+                &[&email, &source, &ip_hash],
+            )
+            .await?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Removes an address from the waitlist; whether it was there.
+    pub async fn waitlist_forget(&self, email: &str) -> Result<bool, DbError> {
+        self.scoped(None, async |tx| {
+            Ok(tx
+                .query_one("select nugget_private.waitlist_forget($1)", &[&email])
+                .await?
+                .get(0))
         })
         .await
     }

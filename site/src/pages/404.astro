@@ -1,9 +1,122 @@
 ---
 import Base from "../layouts/Base.astro";
-import Panel from "../components/Panel.astro";
 ---
-<Base title="Not found" description="This page doesn't exist." noindex minimal>
-  <Panel title="Nothing needs you here" lede="That page doesn't exist, or it moved.">
-    <div><a class="btn btn-primary" href="/">Go home</a></div>
-  </Panel>
+<Base title="Not found" description="This page doesn't exist." noindex footerCta={false}>
+  <section class="nf" aria-labelledby="nf-h">
+    <div class="art" data-bg aria-hidden="true">
+      <span class="code">404</span>
+    </div>
+    <div class="wrap copy">
+      <p class="eyebrow">Page not found</p>
+      <h1 id="nf-h">Nothing needs you here.</h1>
+      <p class="lede">
+        This page doesn't exist, or it has moved. Heed has read everything you've connected, and it can't find it either.
+      </p>
+      <nav aria-label="Where to next">
+        <ul>
+          <li><a href="/"><span>Home</span><small>What Heed does</small></a></li>
+          <li><a href="/pricing"><span>Pricing</span><small>Free, Heed and Heed Max</small></a></li>
+          <li><a href="/download"><span>Download</span><small>Heed for Mac</small></a></li>
+          <li><a href="/privacy"><span>Privacy</span><small>Your data, in plain English</small></a></li>
+        </ul>
+      </nav>
+    </div>
+  </section>
 </Base>
+
+<style>
+  .nf {
+    padding-bottom: clamp(48px, 7vw, 96px);
+  }
+  /* DS1's engraved landscape, with the code set huge and faint over it. */
+  .art {
+    --bg-img: url("/art/ds-engr.webp");
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: clamp(200px, 30vw, 360px);
+    background-color: #f6f3ec;
+    background-position: 50% 100%;
+    background-size: cover;
+    overflow: hidden;
+    border-bottom: 1px solid var(--text);
+  }
+  .code {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: 300;
+    font-size: clamp(140px, 26vw, 320px);
+    letter-spacing: -0.04em;
+    line-height: 1;
+    color: #070798;
+    opacity: 0.85;
+    mix-blend-mode: multiply;
+  }
+  .copy {
+    display: grid;
+    gap: 18px;
+    padding-top: clamp(40px, 6vw, 72px);
+  }
+  h1 {
+    font-size: clamp(40px, 6.4vw, 88px);
+    font-weight: 300;
+    letter-spacing: -0.03em;
+  }
+  .lede {
+    max-width: 36em;
+    font-size: clamp(17px, 1.5vw, 19px);
+    color: var(--text-2);
+  }
+  ul {
+    list-style: none;
+    margin: 16px 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid var(--text);
+  }
+  li + li {
+    border-left: 1px dashed var(--line-2);
+  }
+  a {
+    display: grid;
+    gap: 4px;
+    padding: 18px 20px 18px 0;
+    text-decoration: none;
+    color: var(--text);
+  }
+  li + li a {
+    padding-left: 20px;
+  }
+  a span {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: 26px;
+    letter-spacing: -0.02em;
+  }
+  a small {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-2);
+  }
+  a:hover span {
+    text-decoration: underline;
+    text-underline-offset: 5px;
+    text-decoration-thickness: 1px;
+  }
+  @media (max-width: 760px) {
+    ul {
+      grid-template-columns: 1fr 1fr;
+    }
+    li:nth-child(3) {
+      border-left: 0;
+    }
+    li:nth-child(3) a {
+      padding-left: 0;
+    }
+    li:nth-child(n + 3) {
+      border-top: 1px dashed var(--line-2);
+    }
+  }
+</style>

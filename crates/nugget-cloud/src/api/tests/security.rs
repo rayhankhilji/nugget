@@ -4,7 +4,7 @@ use super::*;
 use crate::ratelimit::Limits;
 
 /// The harness's parts behind a router with the given limits.
-fn app_with(h: &Harness, limits: Limits) -> Router {
+pub(super) fn app_with(h: &Harness, limits: Limits) -> Router {
     let gateway = Gateway::new(
         Some(h.llm.clone() as Arc<dyn Llm>),
         None,
@@ -21,6 +21,7 @@ fn app_with(h: &Harness, limits: Limits) -> Router {
     .into_iter()
     .collect();
     state.webhook_secret = Some("whsec".into());
+    state.waitlist_salt = Some("test-salt".into());
     router(Arc::new(state.with_limits(limits)))
 }
 
