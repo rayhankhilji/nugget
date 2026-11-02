@@ -1,0 +1,123 @@
+---
+/**
+ * "What Heed did for you this week": monospaced numbers over dotted (pixel) bar charts.
+ * The figures are an illustrative week, and the section says so.
+ */
+interface Stat {
+  label: string;
+  value: string;
+  unit?: string;
+  note: string;
+  days: number[]; // Mon..Sun, in dots (each dot is a unit)
+  tone?: "signal" | "ink";
+}
+const stats: Stat[] = [
+  { label: "Time handed back", value: "6h 40m", note: "Searches, summaries and replies you didn't do", days: [8, 10, 7, 11, 9, 2, 1], tone: "signal" },
+  { label: "Emails triaged", value: "214", note: "18 surfaced in Needs you, the rest filed", days: [9, 11, 8, 10, 12, 3, 2] },
+  { label: "Drafts written", value: "37", note: "29 sent as written after your approval", days: [6, 8, 5, 9, 7, 1, 1] },
+  { label: "Meetings prepped", value: "11", note: "Each with the threads and docs that matter", days: [3, 2, 3, 2, 1, 0, 0] },
+];
+const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
+const MAX = 12;
+---
+<div class="week">
+  {
+    stats.map((s, i) => (
+      <article class:list={["stat", s.tone ?? "ink"]} data-reveal style={`--i:${i}`}>
+        <p class="label">{s.label}</p>
+        <p class="value">{s.value}</p>
+        <div class="chart" role="img" aria-label={`${s.label} by day: ${s.days.join(", ")}`}>
+          {s.days.map((d, j) => (
+            <span class="col">
+              {Array.from({ length: MAX }, (_, k) => (
+                <i class:list={{ on: MAX - k <= d }} />
+              ))}
+              <b aria-hidden="true">{DAYS[j]}</b>
+            </span>
+          ))}
+        </div>
+        <p class="note">{s.note}</p>
+      </article>
+    ))
+  }
+</div>
+
+<style>
+  .week {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .stat {
+    display: grid;
+    gap: 10px;
+    align-content: start;
+    padding: 20px;
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+  }
+  .label {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+  .value {
+    font-family: var(--mono);
+    font-size: clamp(30px, 3.2vw, 40px);
+    font-weight: 450;
+    letter-spacing: -0.04em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
+  }
+  .signal .value {
+    color: var(--accent-ink);
+  }
+  .chart {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    margin: 8px 0 2px;
+  }
+  .col {
+    display: grid;
+    grid-template-rows: repeat(12, 5px) auto;
+    gap: 3px;
+    justify-items: center;
+  }
+  .col i {
+    width: 5px;
+    height: 5px;
+    border-radius: 1px;
+    background: var(--line-2);
+  }
+  .col i.on {
+    background: var(--text);
+  }
+  .signal .col i.on {
+    background: var(--accent);
+  }
+  .col b {
+    margin-top: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-3);
+  }
+  .note {
+    font-size: 13.5px;
+    color: var(--text-2);
+  }
+  @media (max-width: 980px) {
+    .week {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 520px) {
+    .week {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

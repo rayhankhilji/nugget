@@ -41,7 +41,15 @@ for (const v of VIEWS) {
       const page = priv ? pages.authed : pages.anon;
       const url = r === "/checkout" ? "/checkout?plan=heed_max&interval=year" : r;
       await page.goto(base + url, { waitUntil: r === "/checkout" ? "load" : "networkidle" });
-      await page.waitForTimeout(300);
+      // Scroll through once so scroll-triggered reveals have run, then return to the top.
+      await page.evaluate(async () => {
+        for (let y = 0; y < document.body.scrollHeight; y += 500) {
+          window.scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        window.scrollTo(0, 0);
+      });
+      await page.waitForTimeout(900);
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
       const file = new URL(`${name}.webp`, OUT);

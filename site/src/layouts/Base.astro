@@ -25,10 +25,11 @@ const og = new URL("/og.png", Astro.site);
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
     {noindex && <meta name="robots" content="noindex" />}
-    <meta name="theme-color" content="#F7F7F5" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#16171B" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0B0B1A" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preload" href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Heed" />
@@ -39,6 +40,7 @@ const og = new URL("/og.png", Astro.site);
     <meta name="twitter:card" content="summary_large_image" />
     <script is:inline>
       // Apply the saved theme before first paint so there is no flash.
+      document.documentElement.classList.add("js");
       try {
         const t = localStorage.getItem("heed-theme");
         if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
@@ -52,5 +54,25 @@ const og = new URL("/og.png", Astro.site);
       <slot />
     </main>
     <Footer minimal={minimal} />
+    <script>
+      // Reveal [data-reveal] elements as they scroll into view (rise and fade; fade only under reduced motion).
+      const els = document.querySelectorAll<HTMLElement>("[data-reveal]");
+      if ("IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("in");
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "0px 0px -8% 0px" },
+        );
+        els.forEach((el) => io.observe(el));
+      } else {
+        els.forEach((el) => el.classList.add("in"));
+      }
+    </script>
   </body>
 </html>

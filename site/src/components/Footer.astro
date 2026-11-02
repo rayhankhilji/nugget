@@ -33,14 +33,29 @@ const cols = [
   },
 ];
 ---
-<footer class="ftr">
+<footer class:list={["ftr", { minimal }]}>
+  {
+    !minimal && (
+      <div class="horizon">
+        <div class="wrap horizon-copy">
+          <p class="h-line">Let Heed keep watch.</p>
+          <p class="h-sub">Fourteen days free. Cancel in two clicks if it isn't for you.</p>
+          <div class="h-cta">
+            <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
+            <a class="btn btn-secondary btn-lg" href="/download">Download for Mac</a>
+          </div>
+        </div>
+        <div class="land" aria-hidden="true" />
+      </div>
+    )
+  }
   <div class="wrap">
     {
       !minimal && (
         <div class="top">
           <div class="brand">
             <Logo size={20} pulse={false} />
-            <p class="muted">Your always-on chief of staff. Made in the UK.</p>
+            <p class="muted">The assistant that pays attention for you. Made in the UK.</p>
           </div>
           {cols.map((c) => (
             <nav aria-label={c.title}>
@@ -97,15 +112,67 @@ const cols = [
 
 <style>
   .ftr {
-    border-top: 1px solid var(--line);
-    padding: 56px 0 32px;
+    padding: 0 0 32px;
     font-size: 14px;
+  }
+  .ftr.minimal {
+    padding-top: 32px;
+    border-top: 1px solid var(--line);
+  }
+  .horizon {
+    position: relative;
+    padding-top: clamp(80px, 11vw, 140px);
+    margin-bottom: 56px;
+    border-top: 1px solid var(--line);
+  }
+  .horizon-copy {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    text-align: center;
+  }
+  .h-line {
+    font-family: var(--display);
+    font-weight: 330;
+    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+    font-size: clamp(40px, 7vw, 88px);
+    letter-spacing: -0.025em;
+    line-height: 1;
+  }
+  .h-sub {
+    color: var(--text-2);
+    font-size: 17px;
+  }
+  .h-cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .land {
+    height: clamp(180px, 28vw, 380px);
+    margin-top: clamp(-40px, -3vw, -16px);
+    background: url("/art/landscape-light.webp") center bottom / cover no-repeat;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .land {
+      background-image: url("/art/landscape-dark.webp");
+    }
+  }
+  :global(:root[data-theme="dark"]) .land {
+    background-image: url("/art/landscape-dark.webp");
   }
   .top {
     display: grid;
     grid-template-columns: 1.6fr repeat(3, 1fr);
     gap: 32px;
     padding-bottom: 48px;
+  }
+  .brand :global(.logo) {
+    font-size: 22px;
   }
   .brand {
     display: grid;

@@ -113,7 +113,10 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
   .toggle em {
     font-style: normal;
     font-size: 12px;
-    color: var(--accent-ink);
+    color: var(--text-2);
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
   }
   .toggle input:checked + span {
     background: var(--surface);
@@ -142,11 +145,37 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     background: var(--surface);
     box-shadow: var(--shadow-2), var(--hi);
   }
+  /* The most capable plan sits in the signal field. */
   .plan.hl {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent),
-      0 24px 60px -24px rgb(255 90 60 / 0.35),
-      var(--hi);
+    background: var(--band);
+    color: #fff;
+    box-shadow: 0 30px 60px -28px rgb(7 7 152 / 0.55);
+  }
+  .hl .pitch,
+  .hl .per,
+  .hl .sub {
+    color: rgb(255 255 255 / 0.86);
+  }
+  .hl ul {
+    border-top-color: rgb(255 255 255 / 0.25);
+  }
+  .hl li svg {
+    color: #fff;
+  }
+  .hl .badge {
+    color: #fff;
+    background: rgb(255 255 255 / 0.16);
+  }
+  .hl .name .dot {
+    background: #fff;
+  }
+  .hl .btn-primary {
+    background: #f6f3ec;
+    color: #14110f;
+    box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.4);
+  }
+  .hl .btn-primary:hover {
+    background: #fff;
   }
   .plan-top {
     display: flex;
@@ -155,6 +184,10 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     gap: 12px;
   }
   .name {
+    font-family: var(--font);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -171,7 +204,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     text-transform: uppercase;
     padding: 4px 8px;
     border-radius: 6px;
-    color: var(--accent-ink);
+    color: var(--text);
     background: var(--accent-soft);
   }
   .pitch {
@@ -183,10 +216,12 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     margin: 0;
   }
   .amt {
-    font-size: 48px;
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    font-variant-numeric: tabular-nums;
+    font-family: var(--display);
+    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+    font-size: 72px;
+    font-weight: 320;
+    letter-spacing: -0.03em;
+    line-height: 1;
   }
   .per {
     color: var(--text-2);
@@ -217,7 +252,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
   li svg {
     flex: none;
     margin-top: 3px;
-    color: var(--accent-ink);
+    color: var(--brand);
   }
   .fine {
     max-width: 620px;

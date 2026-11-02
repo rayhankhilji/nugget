@@ -1,0 +1,99 @@
+---
+/** HTML recreation of the Home morning brief (until real v4 app screens are available). */
+import AppIcon from "../AppIcon.astro";
+---
+<article class="card brief" aria-label="Example: Heed's morning brief">
+  <header>
+    <span class="label">Morning brief · Tue 4 Nov</span>
+    <span class="live"><i></i>Up to date</span>
+  </header>
+  <p class="hello">Good morning, Ada. Three things matter today.</p>
+  <ol>
+    <li>
+      <AppIcon slug="googlecalendar" size={18} tile />
+      <span><b>11:00 Driftwood review.</b> Ines wants a call on pagination first.</span>
+    </li>
+    <li>
+      <AppIcon slug="gmail" size={18} tile />
+      <span><b>Margaret</b> is waiting on a kickoff time. 2 days.</span>
+    </li>
+    <li>
+      <AppIcon slug="notion" size={18} tile />
+      <span><b>Q4 board notes</b> changed overnight. 3 edits.</span>
+    </li>
+  </ol>
+</article>
+
+<style>
+  .brief {
+    padding: 18px 18px 14px;
+    width: 340px;
+    max-width: 100%;
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: var(--shadow-3);
+    font-size: 13.5px;
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .label {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+    color: var(--text-3);
+  }
+  .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--text-2);
+  }
+  .live i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ok);
+  }
+  .hello {
+    font-family: var(--display);
+    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 48;
+    font-weight: 380;
+    font-size: 20px;
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    margin-bottom: 12px;
+  }
+  ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+  }
+  li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px;
+    margin: 0 -8px;
+    border-radius: 10px;
+    color: var(--text-2);
+    line-height: 1.4;
+  }
+  li:first-child {
+    background: var(--accent-soft);
+  }
+  li b {
+    color: var(--text);
+    font-weight: 560;
+  }
+  li :global(.app) {
+    margin-top: 1px;
+  }
+</style>

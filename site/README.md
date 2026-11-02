@@ -28,7 +28,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 
 | Route | What it does |
 | --- | --- |
-| `/` | The hero, with a looping ghost-text demo in HTML and CSS (mail, chat, docs), plus the app logos, the four features, how it works, privacy and security, pricing, FAQ and the CTA. There are no testimonials, on purpose. |
+| `/` | A Fraunces hero over a drifting dithered sky, with floating product cards: the brief, ghost text in an email, and a Needs-you approval. Then the app logos; an ultramarine feature band with three features; "What Heed did for you this week" with dotted charts (labelled as an example week); how it works, as an agent-progress card; privacy in plain English; a pricing teaser; the FAQ; and a footer with the engraved landscape. There are no testimonials, on purpose. |
 | `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. |
 | `/download` | The macOS builds, from env vars. It leads with the Intel build when the browser reports x86. Windows and Linux show as "Coming soon". |
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
@@ -162,21 +162,59 @@ Pages serves `/pricing` from `pricing.html` (the build uses `format: "file"`) an
 unknown paths. Any static host that does the same will work, for example Vercel with
 `cleanUrls: true`, or Netlify.
 
-## Brand
+## Brand (v4: ultramarine and Fraunces)
 
-These match the desktop app (`ds/brand`):
-- **Mark:** `public/favicon.svg` is `packaging/icons/nugget.svg`: a coral attention dot above a
-  chalk line, on a graphite tile. `src/components/Logo.astro` inlines it, and the dot's glow pulses
-  unless reduced motion is on. The wordmark is "heed" in Geist 600 at -0.04em. The Geist woff2 is
-  byte-identical to `apps/desktop/src/fonts`.
-- **Tokens:** the same two as `apps/desktop/src/tokens.css`:
-  - `--brand` is `#FF5A3C`, for the mark, dots and the ghost-text shimmer;
-  - `--accent` is for actions: `#BC3416` with white text in light mode (meets AA), and coral with
-    graphite text in dark mode;
-  - the rest of the palette is Graphite `#16171B`, Chalk `#F7F7F5` and Mist `#9AA3AE`. In light mode,
-    secondary text uses a deeper Mist, `#4F5661`, to meet AA.
-- **App screenshots:** `public/app/*.webp` are converted from `docs/book/src/images/screenshots/` on
-  `ds/brand`, which are taken from the real app running against a fictional corpus. The landing
-  page shows them in tabs (Needs you, Home, Answers, Connections), and switches light and dark with
-  the site theme. To refresh them, regenerate the app screenshots and convert again with sharp
-  (WebP, quality 82).
+These follow the founder's v4 direction, the same brief DS1 is using to restyle the app. Keep the
+two in sync. When DS1 publishes `docs/brand/` (the shared `tokens.css`, the SVG logo and the brand
+sheet), switch `src/styles/global.css` and `src/components/Logo.astro` over to those files.
+
+**Look:** warm cream canvas, warm near-black ink, and one bold signal colour used in big fields.
+That covers the hero sky, the feature band and the Heed Max card. Calm white product cards float
+over the imagery.
+
+**Colour tokens**, in `src/styles/global.css`:
+
+| Light | Value |
+| --- | --- |
+| Canvas | `#F6F3EC` |
+| Surfaces | `#FFFFFF` and `#FBF9F4` |
+| Ink | `#14110F`, `#4A4540`, and `#6B655D` |
+| Signal | `#1F3BFF` (hover `#1830D6`, deep `#070798`, wash `#E9ECFF`) |
+| Lilac | `#E8E3FF` |
+| States | ok `#1E8E5A`, warn `#C77700`, danger `#D93A2B` |
+
+| Dark | Value |
+| --- | --- |
+| Canvas | `#0B0B1A` |
+| Surfaces | `#131327` and `#1A1A33` |
+| Ink | `#F3F1EC`, `#B9B6C8`, and `#8F8CA6` |
+| Signal | `#5A6CFF` |
+
+Two values differ from the brief, so that small text meets AA:
+- The third ink, `ink-3`, is deepened from `#8A847C` (light) and `#7D7A92` (dark). The brief values
+  are kept as `--ink-3` for decorative use only.
+- Signal-coloured text is used only at 18px and above.
+
+**Type:**
+- Fraunces (variable, with the opsz, wght, SOFT and WONK axes) is the display face. It is set at
+  SOFT 100, WONK 1, weights 300–420 and tracking between -2% and -2.5%, and is used for headlines,
+  the hero, big prices and the wordmark.
+- Geist is the UI and body face. Geist Mono is for numbers and labels.
+- All fonts are bundled locally. See `CREDITS.md`.
+
+**Logo:** an ultramarine rounded-square mark with the lowercase "heed" wordmark in Fraunces. This is
+an interim drawing until DS1's SVGs arrive.
+
+**Imagery:** original procedural art, from `scripts/art/`:
+- the dithered sky in the hero, which drifts in a 36-second loop with at most 12px of parallax;
+- the engraved landscape in the footer.
+
+The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
+them once they exist. Sources and licences are in `CREDITS.md`.
+
+**Motion:**
+- Easing is `cubic-bezier(.2,.8,.2,1)`. UI transitions take 200ms; brand moments take 600–900ms.
+- `[data-reveal]` cards rise 8px and fade in, and lists stagger by 30ms.
+- Agent steps tick to a check with a 180ms stroke draw.
+- Under `prefers-reduced-motion`, only fades remain: the sky doesn't drift, the agent card renders
+  in its final state, and the ghost text shows its accepted state.
