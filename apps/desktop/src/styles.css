@@ -4843,3 +4843,72 @@ section[hidden] {
   flex-wrap: wrap;
   gap: 4px;
 }
+
+/* Approval pane: Edit and Snooze sit right of Approve / Reject; the editor and menu stay inline. */
+.action-footer-gap {
+  flex: 1;
+}
+
+.action-editor {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.action-editor textarea {
+  resize: vertical;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.snooze-menu {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  animation: rise-in var(--dur-2) var(--ease-out);
+}
+
+.snooze-menu-title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.snooze-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.snooze-time {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.snooze-custom {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.snooze-custom input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* "£60.00 today, then £99 a month" beside Upgrade. */
+.upgrade-preview {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snooze-menu {
+    animation: fade-in var(--dur-1) linear;
+  }
+}

@@ -319,14 +319,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
                   )}
                 </div>
                 {selectedAction && (
-                  <ActionPane
-                    key={selectedAction.id}
-                    a={selectedAction}
-                    appInfo={approvals.appOf(selectedAction.toolkit)}
-                    busy={approvals.busy}
-                    onApprove={() => approvals.approve(selectedAction)}
-                    onReject={() => void approvals.reject(selectedAction)}
-                  />
+                  <ActionPane key={selectedAction.id} a={selectedAction} approvals={approvals} />
                 )}
                 {selected && (
                 <ul className="today-cards needs-pane" aria-labelledby="today-inbox">

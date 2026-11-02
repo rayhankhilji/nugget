@@ -48,7 +48,7 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
               p.kind === "text" ? (
                 <span key={i}>{p.text}</span>
               ) : (
-                <CiteChip key={i} n={p.n} source={byN.get(p.n)?.source ?? null} onClick={() => cite(p.n)} />
+                <CiteChip key={i} n={p.n} source={byN.get(p.n)?.source ?? null} author={byN.get(p.n)?.author ?? null} onClick={() => cite(p.n)} />
               ),
             )}
           </p>
@@ -100,8 +100,8 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
   );
 }
 
-/** A citation chip: the source's app by name, or the bare number when there is none. */
-function CiteChip({ n, source, onClick }: { n: number; source: string | null; onClick: () => void }) {
+/** A citation chip: who and where ("Jane · Gmail"), the app alone, or the bare number. */
+function CiteChip({ n, source, author, onClick }: { n: number; source: string | null; author: string | null; onClick: () => void }) {
   const t = useT();
   if (!source) {
     return (
@@ -110,11 +110,12 @@ function CiteChip({ n, source, onClick }: { n: number; source: string | null; on
       </button>
     );
   }
-  const name = appName(source);
+  const app = appName(source);
+  const name = author ? `${author} · ${app}` : app;
   return (
     <button type="button" className="cite cite-app" onClick={onClick} aria-label={t("cite.label", { name, n })}>
       <span className="cite-glyph" aria-hidden="true">
-        {name.slice(0, 1)}
+        {app.slice(0, 1)}
       </span>
       {name}
     </button>

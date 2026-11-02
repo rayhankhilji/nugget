@@ -41,7 +41,7 @@ const cloudBrief: CloudBrief = {
   day: "2026-11-02",
   timezone: "Europe/London",
   prose: "Margaret is waiting on a time for the Moorland sync [1].",
-  citations: [{ n: 1, item_id: "i1", title: "Moorland sync", source: "gmail", url: "https://mail.google.com/m/1", occurred_at: null, snippet: "Thursday?" }],
+  citations: [{ n: 1, item_id: "i1", title: "Moorland sync", source: "gmail", url: "https://mail.google.com/m/1", occurred_at: null, snippet: "Thursday?", author: "Margaret" }],
   brief: briefView,
   created_at: "2026-11-02T07:00:00Z",
 } as CloudBrief;
@@ -82,7 +82,7 @@ describe("signed in to Heed Cloud", () => {
     expect(calls).toContain("cloud_cards");
     expect(calls).toContain("cloud_brief");
     expect(container.textContent).toContain("Margaret is waiting on a time for the Moorland sync");
-    expect(container.querySelector("button.cite")?.getAttribute("aria-label")).toBe("Gmail, source 1");
+    expect(container.querySelector("button.cite")?.getAttribute("aria-label")).toBe("Margaret · Gmail, source 1");
     expect(container.querySelector(".sources-stack")?.textContent).toContain("1 source");
     expect(container.querySelector(".citations")?.textContent).toContain("Moorland sync");
   });
@@ -206,6 +206,58 @@ describe("signed in to Heed Cloud", () => {
     expect(container.querySelector(".cloud-apps")?.textContent).not.toContain("Notion");
   });
 
+  it("E edits only the editable fields and sends just what changed; H snoozes before expiry", async () => {
+    const updates: unknown[] = [];
+    const snoozes: unknown[] = [];
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_cards: { cards: [], last_refresh: null },
+      cloud_brief: null,
+      cloud_apps: [],
+      sources_list: [],
+      proactive_metrics: { total: 0, by_state: {}, shown: 0, accepted: 0, dismissed: 0, snoozed: 0, precision: null, by_kind: {}, dismiss_reasons: {}, model_updates: 0 },
+      cloud_actions_list: () => [{ ...action, expires_at: new Date(Date.now() + 20 * 3600_000).toISOString() }],
+      cloud_action_update: (a: unknown) => (updates.push(a), { ...action, digest: "sha-new", revision: 2 }),
+      cloud_action_snooze: (a: unknown) => (snoozes.push(a), { ...action, snoozed_until: "x" }),
+    });
+    const { container } = await render(<NeedsPage />);
+    await flush(5);
+    const pane = () => container.querySelector(".needs-pane") as HTMLElement;
+    await click(byText(pane(), "button", "Edit"));
+    const body = pane().querySelector<HTMLTextAreaElement>("textarea")!;
+    expect(body.value).toBe("Thursday works.");
+    // Only the action's editable fields: To and the message.
+    expect(Array.from(pane().querySelectorAll("label"), (l) => l.textContent)).toEqual(["To", "Message"]);
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(body, "Thursday at 3 works.");
+      body.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(byText(pane(), "button", "Save"));
+    await flush(3);
+    expect(updates).toEqual([{ id: "a1", input: { body: "Thursday at 3 works." } }]);
+    await click(byText(pane(), "button", "Snooze"));
+    await click(Array.from(pane().querySelectorAll("button")).find((b) => b.textContent?.startsWith("In 1 hour")));
+    await flush(3);
+    expect(snoozes).toHaveLength(1);
+    expect((snoozes[0] as { id: string }).id).toBe("a1");
+  });
+
+  it("hides Edit for an action that can't be edited", async () => {
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_cards: { cards: [], last_refresh: null },
+      cloud_brief: null,
+      cloud_apps: [],
+      sources_list: [],
+      proactive_metrics: { total: 0, by_state: {}, shown: 0, accepted: 0, dismissed: 0, snoozed: 0, precision: null, by_kind: {}, dismiss_reasons: {}, model_updates: 0 },
+      cloud_actions_list: () => [{ ...action, editable: [] }],
+    });
+    const { container } = await render(<NeedsPage />);
+    await flush(5);
+    expect(byText(container.querySelector(".needs-pane") as HTMLElement, "button", "Edit")).toBeUndefined();
+  });
+
   it("Search runs against the cloud and only offers web links", async () => {
     const res: CloudSearchResponse = {
       mode: "hybrid",
@@ -235,6 +287,19 @@ describe("signed in to Heed Cloud", () => {
     expect(results[1]!.querySelector("button")).toBeNull();
     expect(webUrl("file:///etc/passwd")).toBeNull();
     expect(webUrl("https://example.com/a")).toBe("https://example.com/a");
+  });
+
+  it("Account shows the prorated price before upgrading", async () => {
+    const ent = { plan: "heed", name: "Heed", max_connections: 10, sync_interval_minutes: 5, history_days: null, smart_asks_per_month: 300, default_model: "smart", devices: 3, ghost_text: true, needs_you_inbox: true, daily_brief: true, actions_with_approval: true, agent_tasks: false, computer_use: false, priority_support: false };
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_me: { user_id: "u1", email: "me@example.com", plan: "heed", embeddings: true, subscription: { plan: "heed", status: "active", interval: "month", trial_end: null, current_period_end: "2026-11-20T00:00:00Z", cancel_at_period_end: false }, entitlements: ent, usage: { month_cost_micros: 0, smart_asks_used: 12 } },
+      cloud_billing_plans: { plans: [{ id: "heed", name: "Heed", monthly_gbp: 39, annual_gbp: 390, trial_days: 14, entitlements: ent }, { id: "heed_max", name: "Heed Max", monthly_gbp: 99, annual_gbp: 990, trial_days: 14, entitlements: ent }] },
+      cloud_billing_preview: { plan: "heed_max", interval: "month", amount_due: 6000, currency: "gbp", proration_date: "2026-11-02T12:00:00Z" },
+    });
+    const { container } = await render(<AccountPage />);
+    await flush(6);
+    expect(container.querySelector(".upgrade-preview")?.textContent).toBe("£60.00 today, then £99 a month");
   });
 
   it("Account deletes the account only after confirming", async () => {

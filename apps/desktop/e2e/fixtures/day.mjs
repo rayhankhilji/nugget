@@ -100,9 +100,9 @@ export const BRIEF = {
   prose:
     "Three people are waiting on you this morning. Priya needs a yes on the 14 November launch by lunch [1], and Tom is still waiting for the revised SOW you promised for Monday [2]. The Harbourline review is at 10:30; Jonas wants retainer hours shown against plan on slide 7 [3]. Your afternoon is clear after 15:00.",
   citations: [
-    { n: 1, item_id: "m-4471", title: "Re: Halcyon launch timing", source: "gmail", url: "https://mail.google.com/mail/u/0/#inbox/4471", occurred_at: ago(3 * 24 * 60), snippet: "Does the 14th still hold on your side?" },
-    { n: 2, item_id: "s-7781", title: "#halcyon-sow", source: "slack", url: "https://okafor.slack.com/archives/C7781", occurred_at: ago(5 * 24 * 60), snippet: "I'll get the revised SOW over by Monday" },
-    { n: 3, item_id: "d-qbr", title: "Harbourline Q4 review", source: "googledrive", url: "https://docs.google.com/presentation/d/qbr", occurred_at: ago(11 * 60), snippet: "Slide 7: retainer hours against plan" },
+    { n: 1, item_id: "m-4471", title: "Re: Halcyon launch timing", source: "gmail", url: "https://mail.google.com/mail/u/0/#inbox/4471", occurred_at: ago(3 * 24 * 60), snippet: "Does the 14th still hold on your side?", author: "Priya Raman" },
+    { n: 2, item_id: "s-7781", title: "#halcyon-sow", source: "slack", url: "https://okafor.slack.com/archives/C7781", occurred_at: ago(5 * 24 * 60), snippet: "I'll get the revised SOW over by Monday", author: "Tom Becker" },
+    { n: 3, item_id: "d-qbr", title: "Harbourline Q4 review", source: "googledrive", url: "https://docs.google.com/presentation/d/qbr", occurred_at: ago(11 * 60), snippet: "Slide 7: retainer hours against plan", author: "Jonas Lindqvist" },
   ],
   brief: {
     date: "2026-11-03",
@@ -138,7 +138,19 @@ const action = (id, kind, toolkit, summary, fields, body, mins) => ({
   executed_at: null,
   result: null,
   error: null,
+  snoozed_until: null,
+  revision: 1,
+  editable: EDITABLE[kind] ?? [],
 });
+
+const EDITABLE = {
+  send_mail: ["to", "cc", "bcc", "subject", "body"],
+  reply_mail: ["to", "body"],
+  create_event: ["title", "start", "end", "timezone", "attendees", "location", "description"],
+  update_event: ["title", "start", "end", "timezone", "attendees", "location", "description"],
+  post_message: ["text"],
+  create_page: ["title", "markdown"],
+};
 
 export const ACTIONS = [
   action(
@@ -280,6 +292,7 @@ export function cloudFixture() {
     },
     cloud_me: () => ME_VIEW,
     cloud_billing_plans: () => PLANS,
+    cloud_billing_preview: () => ({ plan: "heed_max", interval: "month", amount_due: 0, currency: "gbp", proration_date: NOW }),
     cloud_search: () => SEARCH,
     retrieve_ask: () => QUICK_ASK.started,
   };

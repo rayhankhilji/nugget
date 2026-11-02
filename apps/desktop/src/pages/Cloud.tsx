@@ -321,6 +321,11 @@ export function Billing() {
   const maxPlan = offers.find((p) => p.id === "heed_max");
   const current = sub ? offers.find((p) => p.id === sub.plan) : undefined;
   const price = current ? (sub?.interval === "year" ? current.annual_gbp : current.monthly_gbp) : null;
+  const upgradeTo = sub && sub.plan !== "heed_max" && me.data?.billing !== false ? maxPlan : undefined;
+  const preview = useAsync(
+    () => (upgradeTo && sub ? cloudApi.billingPreview(upgradeTo.id, sub.interval === "year" ? "year" : "month").catch(() => null) : Promise.resolve(null)),
+    [upgradeTo?.id, sub?.interval],
+  );
   const endsOn = sub ? day(sub.status === "trialing" ? (sub.trial_end ?? sub.current_period_end) : sub.current_period_end) : null;
 
   return (
@@ -393,6 +398,14 @@ export function Billing() {
                 {/* i18n-ignore: the plan's brand name, when the plans list hasn't loaded */}
                 {busy === "upgrade" ? <Spinner /> : t("cloud.billing.upgrade", { name: maxPlan?.name ?? "Heed Max" })}
               </button>
+            )}
+            {preview.data && upgradeTo && (
+              <span className="upgrade-preview">
+                {t(preview.data.interval === "year" ? "cloud.billing.preview.year" : "cloud.billing.preview.month", {
+                  today: formatNumber(preview.data.amount_due / 100, { style: "currency", currency: preview.data.currency.toUpperCase() }),
+                  price: gbp(preview.data.interval === "year" ? upgradeTo.annual_gbp : upgradeTo.monthly_gbp),
+                })}
+              </span>
             )}
           </p>
         </div>
