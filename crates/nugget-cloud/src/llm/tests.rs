@@ -175,6 +175,10 @@ struct H {
 }
 
 async fn harness_with(openai: bool, limits: Limits) -> Option<H> {
+    harness_full(openai, limits, crate::ratelimit::Limits::default()).await
+}
+
+async fn harness_full(openai: bool, limits: Limits, rate: crate::ratelimit::Limits) -> Option<H> {
     let (db, pool) = test_db().await?;
     let auth = Arc::new(FakeAuth {
         deleted: Mutex::new(Vec::new()),
@@ -186,7 +190,7 @@ async fn harness_with(openai: bool, limits: Limits) -> Option<H> {
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let app_state = Arc::new(AppState::new(db, auth, gateway, Arc::new(plans)));
+    let app_state = Arc::new(AppState::new(db, auth, gateway, Arc::new(plans)).with_limits(rate));
     let a = Arc::new(Double::default());
     let o = Arc::new(Double::default());
     let a_url = serve_double(a.clone(), "/v1/messages").await;
@@ -870,4 +874,272 @@ async fn desktop_provider_end_to_end_time_to_first_token() {
     // Auth is cached, entitlements and usage are cached, the provider connection is pooled:
     // the endpoint adds no database or TLS round trip on the warm path.
     assert!(p50 < Duration::from_millis(50), "warm p50 {p50:?}");
+}
+
+// ---- rate limit, deadlines, reserve-then-settle ---------------------------------------------
+
+async fn spend(pool: &Pg, user: Uuid, micros: i64) {
+    pool.execute(
+        "insert into public.usage_events (user_id, kind, model, cost_micros) values ($1, 'llm', 'seed', $2)",
+        &[&user, &micros],
+    )
+    .await
+    .unwrap();
+}
+
+async fn wait_reserved(h: &H, user: Uuid, want: i64) {
+    let db = h.state.app.db.clone();
+    crate::testkit::wait_until(&format!("{want} micro-USD reserved"), 30, || {
+        let db = db.clone();
+        async move { db.ai_reserved(user).await.unwrap() == want }
+    })
+    .await;
+}
+
+/// The worst case the endpoint reserves for `b` on `model`, computed as the handler does.
+fn estimate(h: &H, plan: &str, b: &Value, model: &str) -> i64 {
+    let c = check(b.clone(), &entitled(h, plan), &h.state.cfg.limits).unwrap();
+    estimate_micros(&c.body, model)
+}
+
+#[tokio::test]
+async fn model_endpoint_is_rate_limited_per_user() {
+    let rate = crate::ratelimit::Limits {
+        llm_per_min: 3,
+        ..crate::ratelimit::Limits::unlimited()
+    };
+    let Some(h) = harness_full(false, Limits::default(), rate).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    let other = subscriber(&h.pool, "heed").await;
+    *h.anthropic.script.lock().unwrap() = Some(Script::Json(json!({
+        "id": "m", "type": "message", "content": [], "usage": {"input_tokens": 5, "output_tokens": 1}
+    })));
+    let models = |user: Uuid| {
+        Request::get("/llm/v1/models")
+            .header("authorization", format!("Bearer tok-{user}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // Models and messages share the bucket.
+    assert_eq!(
+        h.app.clone().oneshot(models(u)).await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        send_json(&h.app, Some(u), &body(FAST, false)).await.0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        h.app.clone().oneshot(models(u)).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let res = h
+        .app
+        .clone()
+        .oneshot(request(Some(u), &body(FAST, false)))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(res.headers().get("retry-after").is_some());
+    let v: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        (v["type"].as_str(), v["error"]["code"].as_str()),
+        (Some("error"), Some("rate_limited"))
+    );
+    assert_eq!(
+        h.anthropic.hits.load(Ordering::SeqCst),
+        1,
+        "the refused request never reached the provider"
+    );
+    assert_eq!(
+        h.app.clone().oneshot(models(other)).await.unwrap().status(),
+        StatusCode::OK,
+        "per user"
+    );
+}
+
+#[tokio::test]
+async fn non_streaming_requests_get_a_deadline_and_streams_keep_theirs() {
+    let limits = Limits {
+        non_stream_timeout: Duration::from_millis(300),
+        ..Limits::default()
+    };
+    let Some(h) = harness_full(false, limits, crate::ratelimit::Limits::unlimited()).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    // The provider takes longer than the non-streaming deadline to answer.
+    *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
+        wait: Duration::from_millis(900),
+        chunks: anthropic_stream(&["late"], 10, 0, 1),
+        gap: Duration::ZERO,
+        hang: false,
+    });
+    let (s, v, _) = send_json(&h.app, Some(u), &body(FAST, false)).await;
+    assert_eq!(
+        (s, v["error"]["type"].as_str()),
+        (StatusCode::GATEWAY_TIMEOUT, Some("timeout_error"))
+    );
+    wait_reserved(&h, u, 0).await; // the cancelled request's reservation is released
+    // The same latency is fine for a stream: it is bounded by the stream limits instead.
+    let (s, _, text) = send_json(&h.app, Some(u), &body(FAST, true)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(text.contains("late"), "{text}");
+}
+
+#[tokio::test]
+async fn concurrent_streams_cannot_jointly_pass_the_cap() {
+    let Some(h) = harness().await else { return };
+    let u = subscriber(&h.pool, "heed").await;
+    let b = body(FAST, true);
+    let est = estimate(&h, "heed", &b, "claude-haiku-5-5");
+    assert!(est > 0);
+    // Room for exactly two worst cases under Heed's hard cap.
+    let cap = entitled(&h, "heed").allowance.hard_cap_micros;
+    spend(&h.pool, u, cap - 2 * est - est / 2).await;
+    *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
+        wait: Duration::ZERO,
+        chunks: anthropic_stream(&["a"], 10, 0, 1)[..1].to_vec(),
+        gap: Duration::ZERO,
+        hang: true,
+    });
+    let attempts =
+        futures::future::join_all((0..4).map(|_| h.app.clone().oneshot(request(Some(u), &b))))
+            .await;
+    let mut open = Vec::new();
+    let mut refused = 0;
+    for r in attempts {
+        let r = r.unwrap();
+        match r.status() {
+            StatusCode::OK => open.push(r),
+            StatusCode::TOO_MANY_REQUESTS => {
+                let v: Value =
+                    serde_json::from_slice(&r.into_body().collect().await.unwrap().to_bytes())
+                        .unwrap();
+                assert_eq!(v["error"]["code"], "quota_exceeded");
+                refused += 1;
+            }
+            s => panic!("unexpected {s}"),
+        }
+    }
+    assert_eq!(
+        (open.len(), refused),
+        (2, 2),
+        "only what fits under the cap gets through"
+    );
+    assert_eq!(h.state.app.db.ai_reserved(u).await.unwrap(), 2 * est);
+    assert_eq!(h.anthropic.hits.load(Ordering::SeqCst), 2);
+    // The clients go away: both settle (with the tokens relayed so far) and release their holds.
+    drop(open);
+    wait_reserved(&h, u, 0).await;
+}
+
+#[tokio::test]
+async fn settling_records_real_usage_and_releases_the_rest() {
+    let Some(h) = harness().await else { return };
+    let u = subscriber(&h.pool, "heed").await;
+    *h.anthropic.script.lock().unwrap() = Some(Script::Json(json!({
+        "id": "m", "type": "message", "content": [{"type": "text", "text": "ok"}],
+        "usage": {"input_tokens": 20, "output_tokens": 2}
+    })));
+    let b = body(FAST, false);
+    let est = estimate(&h, "heed", &b, "claude-haiku-5-5");
+    let (s, _, _) = send_json(&h.app, Some(u), &b).await;
+    assert_eq!(s, StatusCode::OK);
+    let rows = usage(&h.pool, u, 1).await;
+    let real = crate::gateway::cost_micros("claude-haiku-5-5", 20, 2);
+    assert_eq!((rows[0].2, rows[0].3, rows[0].5), (20, 2, real));
+    assert!(real < est, "the estimate is a worst case ({real} < {est})");
+    wait_reserved(&h, u, 0).await;
+}
+
+#[tokio::test]
+async fn a_disconnect_settles_with_the_relayed_tokens() {
+    let Some(h) = harness().await else { return };
+    let u = subscriber(&h.pool, "heed").await;
+    let mut chunks = anthropic_stream(&["one two three"], 500, 0, 99);
+    chunks.truncate(3);
+    *h.anthropic.script.lock().unwrap() = Some(Script::Stream {
+        wait: Duration::ZERO,
+        chunks,
+        gap: Duration::from_millis(5),
+        hang: true,
+    });
+    let res = h
+        .app
+        .clone()
+        .oneshot(request(Some(u), &body(FAST, true)))
+        .await
+        .unwrap();
+    assert!(
+        h.state.app.db.ai_reserved(u).await.unwrap() > 0,
+        "held while streaming"
+    );
+    let mut b = res.into_body();
+    let mut got = String::new();
+    while !got.contains("one two three") {
+        let f = b.frame().await.unwrap().unwrap();
+        got.push_str(&String::from_utf8_lossy(&f.into_data().unwrap()));
+    }
+    drop(b);
+    let rows = usage(&h.pool, u, 1).await;
+    assert_eq!(rows[0].2, 500, "input from message_start");
+    assert!(rows[0].3 > 0, "output estimated from what was relayed");
+    wait_reserved(&h, u, 0).await;
+}
+
+#[tokio::test]
+async fn smart_falls_back_to_fast_when_its_reserve_fails() {
+    let Some(h) = harness().await else { return };
+    let u = subscriber(&h.pool, "heed").await;
+    *h.anthropic.script.lock().unwrap() = Some(Script::Json(json!({
+        "id": "m", "type": "message", "content": [], "usage": {"input_tokens": 5, "output_tokens": 1}
+    })));
+    let b = body(SMART, false);
+    let a = entitled(&h, "heed").allowance;
+    // Under the fair-use budget by less than a smart worst case, far under the hard cap.
+    let smart_est = estimate(&h, "heed", &b, "claude-sonnet-5-5");
+    spend(&h.pool, u, a.budget_micros - smart_est / 2).await;
+    let (s, _, _) = send_json(&h.app, Some(u), &b).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        last_sent(&h)["model"],
+        "claude-haiku-5-5",
+        "served by the fast model"
+    );
+    // With room for the smart worst case, smart is served.
+    let v = subscriber(&h.pool, "heed").await;
+    let (s, _, _) = send_json(&h.app, Some(v), &b).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(last_sent(&h)["model"], "claude-sonnet-5-5");
+    // At the hard cap, nothing fits: 429.
+    let w = subscriber(&h.pool, "heed").await;
+    spend(&h.pool, w, a.hard_cap_micros).await;
+    let (s, v, _) = send_json(&h.app, Some(w), &b).await;
+    assert_eq!(
+        (s, v["error"]["code"].as_str()),
+        (StatusCode::TOO_MANY_REQUESTS, Some("quota_exceeded"))
+    );
+}
+
+#[test]
+fn estimates_err_high_and_count_images_flat() {
+    let b = json!({"max_tokens": 100, "system": "abc", "messages": [
+        {"role": "user", "content": [{"type": "text", "text": "x".repeat(300)},
+                                      {"type": "image", "source": {"type": "base64", "data": "A".repeat(100_000)}}]}
+    ]});
+    let Value::Object(m) = b else { unreachable!() };
+    let t = estimate_input_tokens(&m);
+    assert!(
+        (100 + IMAGE_TOKENS_ESTIMATE..100 + IMAGE_TOKENS_ESTIMATE + 100).contains(&t),
+        "{t}"
+    );
+    let (i, o) = price_per_mtok("claude-haiku-5-5");
+    assert_eq!(
+        estimate_micros(&m, "claude-haiku-5-5"),
+        (t as f64 * i + 100.0 * o).ceil() as i64
+    );
 }

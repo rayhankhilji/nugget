@@ -50,6 +50,8 @@ pub struct Limiters {
     pub export: RateLimiter<Uuid>,
     /// `POST /v1/waitlist` per client IP.
     pub waitlist: RateLimiter<std::net::IpAddr>,
+    /// The model endpoint (`/llm/v1/*`) per user.
+    pub llm: RateLimiter<Uuid>,
     /// Proposing and approving actions (see [`Limits::action_per_min`]).
     pub action: RateLimiter<Uuid>,
 }
@@ -64,6 +66,7 @@ impl Limiters {
             export: RateLimiter::every(if l.user_per_min == 0 { 0 } else { 60 }),
             action: RateLimiter::per_minute(l.action_per_min),
             waitlist: RateLimiter::new(l.waitlist_per_hour, Duration::from_secs(3600)),
+            llm: RateLimiter::per_minute(l.llm_per_min),
         }
     }
 }
