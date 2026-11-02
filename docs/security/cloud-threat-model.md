@@ -76,6 +76,8 @@ The trust boundaries are:
 | 27 | Medium | Backups | Supabase Pro keeps daily backups for 7 days; PITR is a paid add-on. No restore has been rehearsed. A restore into a new project changes the URL and keys that are baked into the desktop. | **Open (founder):** rehearse a restore (checklist) and decide on PITR before paid launch. |
 | 28 | Info | Dependencies | `cargo deny check` passes: advisories, bans, licences and sources are all OK. The two documented ignores are tauri-only. | OK. Run it in CI on every PR. |
 | 29 | Low | Supabase Auth settings | OTP and magic-link rate limits, email enumeration, the redirect allow-list and leaked-password protection are dashboard settings, not code. | **Open (founder):** see the checklist. |
+| 30 | Medium | Availability (load test) | The 30 s deadline (finding 13) cut off long `/v1/sync` requests mid-run, so the cursor was never recorded and the connection stayed due. That happened for every user's first sync with embeddings under load, and for one large mailbox even with no load. | **Fixed:** the sync runs detached (`an_abandoned_sync_request_still_records_its_result`). **Open (ingest owner):** batch embeddings across items, and move the first backfill to the background. See `docs/ops/loadtest.md`. |
+| 31 | Low | Search (load test) | Vector search filters by `user_id` after ordering by distance. On a large `chunks` table the planner may switch to the HNSW index, and pgvector 0.6 then filters afterwards, so a user can get few or no candidates. This is a quality and availability issue, not a leak, because RLS still applies. | **Open (CL2):** use pgvector ≥ 0.8 with `hnsw.iterative_scan`, or over-fetch, or partition by user. |
 
 ## Notes for in-flight work
 

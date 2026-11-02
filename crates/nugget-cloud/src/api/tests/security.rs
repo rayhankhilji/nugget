@@ -249,3 +249,50 @@ async fn export_is_limited_to_once_a_minute() {
     let (s, _) = call(&app, "GET", "/v1/export", Some(u), None).await;
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
 }
+
+#[tokio::test]
+async fn an_abandoned_sync_request_still_records_its_result() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    let u = add_user(&h.pool).await;
+    for t in ["gmail", "googlecalendar"] {
+        call(
+            &h.app,
+            "POST",
+            "/v1/connections",
+            Some(u),
+            Some(json!({"toolkit": t})),
+        )
+        .await;
+    }
+    call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+    let req = Request::post("/v1/sync")
+        .header("authorization", format!("Bearer tok-{u}"))
+        .header("content-type", "application/json")
+        .body(Body::from("{}"))
+        .unwrap();
+    // The client (or the request deadline) gives up almost at once.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_millis(5),
+        h.app.clone().oneshot(req),
+    )
+    .await;
+    let synced = || async {
+        h.pool
+            .query_one(
+                "select count(*) from public.connections where user_id = $1 and last_synced_at is not null",
+                &[&u],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0)
+    };
+    for _ in 0..100 {
+        if synced().await == 2 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("the sync was dropped with the request; cursors were never recorded");
+}

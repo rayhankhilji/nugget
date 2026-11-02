@@ -524,15 +524,26 @@ async fn sync(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Va
         .check(&u.id)
         .map_err(|w| ApiError::rate_limited("sync", w))?;
     s.db.mark_due(u.id, None).await?;
-    let mut synced: Vec<SyncReport> = Vec::new();
-    for c in
+    let conns: Vec<_> =
         s.db.connections(u.id)
             .await?
             .into_iter()
             .filter(|c| c.status == "active")
-    {
-        synced.push(ingest.sync(u.id, &c).await);
-    }
+            .collect();
+    // Detached: if the request deadline (or the client) gives up, the sync still finishes and
+    // records its cursor, instead of being dropped half-way with the connection left due.
+    let uid = u.id;
+    let work = tokio::spawn(async move {
+        let mut synced: Vec<SyncReport> = Vec::new();
+        for c in conns {
+            synced.push(ingest.sync(uid, &c).await);
+        }
+        synced
+    });
+    let synced = work.await.map_err(|e| {
+        tracing::error!(error = %e, "sync task failed");
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal", "sync failed")
+    })?;
     Ok(Json(json!({"synced": synced})))
 }
 
