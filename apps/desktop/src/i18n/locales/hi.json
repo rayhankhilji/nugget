@@ -2344,6 +2344,8 @@
   "cloud.connected": "जुड़ा हुआ",
   "cloud.connectInBrowser": "अपने ब्राउज़र में {name} जोड़ना पूरा करें, फिर यहाँ लौटें।",
   "cloud.sync": "अभी सिंक करें",
+  "cloud.importing": "आयात हो रहा है… {count} आइटम",
+  "cloud.syncRunning": "आयात पृष्ठभूमि में जारी है। पहले आयात में कुछ मिनट लग सकते हैं; यह सूची साथ-साथ अपडेट होती है।",
   "cloud.syncing": "सिंक हो रहा है…",
   "cloud.syncResults": "सिंक के नतीजे",
   "cloud.syncResult": "{name}: {added} नए, {updated} अपडेट",

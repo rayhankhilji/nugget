@@ -2344,6 +2344,8 @@
   "cloud.connected": "接続済み",
   "cloud.connectInBrowser": "ブラウザーで {name} の接続を完了してから、ここに戻ってください。",
   "cloud.sync": "今すぐ同期",
+  "cloud.importing": "インポート中… {count} 件",
+  "cloud.syncRunning": "バックグラウンドでインポートしています。初回は数分かかることがあります。この一覧は自動で更新されます。",
   "cloud.syncing": "同期しています…",
   "cloud.syncResults": "同期の結果",
   "cloud.syncResult": "{name}: 新規 {added} 件、更新 {updated} 件",

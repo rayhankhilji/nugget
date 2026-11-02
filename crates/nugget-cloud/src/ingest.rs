@@ -18,7 +18,7 @@ use async_trait::async_trait;
 
 use crate::apps::{self, PullError, RateLimiter, SyncAdapter, SyncMode, Tools};
 use crate::composio::{Composio, ComposioError};
-use crate::db::{Connection, Db, NewItem, Upsert};
+use crate::db::{Connection, Db, NewItem, SyncRun, Upsert};
 use crate::gateway::Gateway;
 use crate::plans::{Catalog, Plan};
 
@@ -33,6 +33,9 @@ const MAX_BACKFILL_DAYS: u32 = 3 * 365;
 /// How soon to continue a backfill that did not finish in one run.
 const CONTINUE_SECS: i64 = 60;
 const IDLE_SECS: i64 = 24 * 60 * 60;
+/// How long one sync run may hold its connection before another may start (a crashed run's
+/// lease simply expires).
+const RUN_LEASE_SECS: i64 = 15 * 60;
 /// Toolkits that get the plan's full cadence; others sync at most every 15 minutes, which keeps
 /// Composio tool-call cost bounded for users with many apps.
 const PRIMARY: &[&str] = &[GMAIL, CALENDAR];
@@ -84,6 +87,8 @@ pub struct SyncReport {
     pub updated: u32,
     pub deleted: u32,
     pub error: Option<String>,
+    /// Another sync of this connection was already running; this one did nothing.
+    pub in_progress: bool,
 }
 
 // ---- text ---------------------------------------------------------------------------------------
@@ -632,6 +637,18 @@ impl Ingest {
             toolkit: conn.toolkit.clone(),
             ..Default::default()
         };
+        // One run per connection at a time, whether started by a request or the scheduler.
+        match self.db.claim_sync(user, conn.id, RUN_LEASE_SECS).await {
+            Ok(true) => {}
+            Ok(false) => {
+                report.in_progress = true;
+                return report;
+            }
+            Err(e) => {
+                report.error = Some(e.to_string());
+                return report;
+            }
+        }
         let started = OffsetDateTime::now_utc();
         let policy = SyncPolicy::for_plan(self.plan_of(user).await.as_ref());
         let mut trigger_id = conn.trigger_id.clone();
@@ -647,18 +664,18 @@ impl Ingest {
             Some(_) => IDLE_SECS,
             None => next_interval(active, &conn.toolkit, policy),
         };
-        let (cursor, err) = match result {
+        let (cursor, err, done) = match result {
             Ok((c, more)) => {
                 if more {
                     next = CONTINUE_SECS;
                 }
-                (Some(c), None)
+                (Some(c), None, !more)
             }
             Err(SyncFailure::RateLimited(e)) => {
                 next = next.min(15 * 60);
-                (None, Some(e))
+                (None, Some(e), false)
             }
-            Err(SyncFailure::Other(e)) => (None, Some(e)),
+            Err(SyncFailure::Other(e)) => (None, Some(e), false),
         };
         if let Some(days) = policy.history_days
             && let Err(e) = self.db.prune_history(user, days).await
@@ -667,7 +684,17 @@ impl Ingest {
         }
         if let Err(e) = self
             .db
-            .finish_sync(user, conn.id, cursor.as_ref(), err.as_deref(), next)
+            .finish_sync(
+                user,
+                conn.id,
+                &SyncRun {
+                    cursor: cursor.as_ref(),
+                    error: err.as_deref(),
+                    next_in_secs: next,
+                    items: report.added + report.updated,
+                    backfill_done: done,
+                },
+            )
             .await
         {
             tracing::warn!(%e, "could not record sync result");
@@ -766,17 +793,10 @@ impl Ingest {
             .await
             .map_err(other)?;
         report.deleted += u32::try_from(deleted).unwrap_or(u32::MAX);
-        for item in &pull.items {
-            match self
-                .store(user, conn.id, item)
-                .await
-                .map_err(SyncFailure::Other)?
-            {
-                Some(Upsert::Added) => report.added += 1,
-                Some(Upsert::Updated) => report.updated += 1,
-                None => {}
-            }
-        }
+        // Unchanged items are skipped; new chunks are embedded in batched calls.
+        self.store_page(user, conn.id, pull.items, report)
+            .await
+            .map_err(SyncFailure::Other)?;
         for w in &pull.windows {
             // An empty listing more likely means a changed response shape than an empty
             // mailbox; never delete a whole window on it.
@@ -789,37 +809,61 @@ impl Ingest {
         Ok((pull.cursor, pull.more))
     }
 
-    /// Stores one item unless its content is unchanged. Embeds chunks when an embedder exists.
-    async fn store(
+    /// Stores a page of items: skips unchanged ones (one hash lookup for the page), embeds all
+    /// new chunks in batched calls, then writes each item with its chunks.
+    async fn store_page(
         &self,
         user: Uuid,
         conn: Uuid,
-        item: &NewItem,
-    ) -> Result<Option<Upsert>, String> {
-        let hash = content_hash(item);
-        let old = self
-            .db
-            .item_hash(user, &item.source, &item.external_id)
-            .await
-            .map_err(|e| e.to_string())?;
-        if old.as_deref() == Some(hash.as_str()) {
-            return Ok(None);
-        }
-        let texts = chunk(&indexed_text(item), CHUNK_CHARS, CHUNK_OVERLAP);
-        let embeddings = self
-            .gateway
-            .embed(&self.db, user, &texts)
-            .await
-            .map_err(|e| e.to_string())?;
-        let chunks: Vec<(String, Option<Vec<f32>>)> = match embeddings {
-            Some(v) => texts.into_iter().zip(v.into_iter().map(Some)).collect(),
-            None => texts.into_iter().map(|t| (t, None)).collect(),
+        items: Vec<NewItem>,
+        report: &mut SyncReport,
+    ) -> Result<(), String> {
+        let Some(source) = items.first().map(|i| i.source.clone()) else {
+            return Ok(());
         };
-        self.db
-            .upsert_item(user, Some(conn), item, &hash, &chunks)
+        let ids: Vec<String> = items.iter().map(|i| i.external_id.clone()).collect();
+        let stored = self
+            .db
+            .item_hashes(user, &source, &ids)
             .await
-            .map(Some)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        let changed: Vec<(NewItem, String, Vec<String>)> = items
+            .into_iter()
+            .filter_map(|item| {
+                let hash = content_hash(&item);
+                if stored.get(&item.external_id) == Some(&hash) {
+                    return None;
+                }
+                let texts = chunk(&indexed_text(&item), CHUNK_CHARS, CHUNK_OVERLAP);
+                Some((item, hash, texts))
+            })
+            .collect();
+        let all: Vec<String> = changed
+            .iter()
+            .flat_map(|(_, _, t)| t.iter().cloned())
+            .collect();
+        let mut vectors = self
+            .gateway
+            .embed(&self.db, user, &all)
+            .await
+            .map_err(|e| e.to_string())?
+            .map(Vec::into_iter);
+        for (item, hash, texts) in changed {
+            let chunks: Vec<(String, Option<Vec<f32>>)> = texts
+                .into_iter()
+                .map(|t| (t, vectors.as_mut().and_then(Iterator::next)))
+                .collect();
+            match self
+                .db
+                .upsert_item(user, Some(conn), &item, &hash, &chunks)
+                .await
+            {
+                Ok(Upsert::Added) => report.added += 1,
+                Ok(Upsert::Updated) => report.updated += 1,
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
     }
 
     /// One pass of the background scheduler: claims up to `max` due connections (with a lease,

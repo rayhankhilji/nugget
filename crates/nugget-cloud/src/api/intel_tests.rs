@@ -191,7 +191,7 @@ async fn seed(db: &crate::db::Db, user: Uuid, now: OffsetDateTime) -> Vec<NewIte
     ];
     for it in &items {
         let texts = chunk(&indexed_text(it), 1200, 200);
-        let emb = FakeEmbedder.embed(&texts).await.unwrap().0;
+        let emb = FakeEmbedder::default().embed(&texts).await.unwrap().0;
         let chunks: Vec<_> = texts.into_iter().zip(emb.into_iter().map(Some)).collect();
         db.upsert_item(user, None, it, &content_hash(it), &chunks)
             .await
@@ -223,7 +223,7 @@ async fn knowledge_cards_brief_and_search() {
     let llm = Arc::new(ScriptLlm::default());
     let gateway = Gateway::new(
         Some(llm.clone() as Arc<dyn Llm>),
-        Some(Arc::new(FakeEmbedder) as Arc<dyn Embedder>),
+        Some(Arc::new(FakeEmbedder::default()) as Arc<dyn Embedder>),
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );

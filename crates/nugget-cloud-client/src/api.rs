@@ -139,6 +139,14 @@ pub struct Connection {
     pub status: String,
     pub last_synced_at: Option<String>,
     pub last_error: Option<String>,
+    /// A sync is running in the cloud now.
+    #[serde(default)]
+    pub syncing: bool,
+    /// The first import (backfill) has finished.
+    #[serde(default)]
+    pub backfill_done: bool,
+    #[serde(default)]
+    pub items_synced: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,11 +177,17 @@ pub struct SyncResult {
     #[serde(default)]
     pub deleted: u64,
     pub error: Option<String>,
+    /// Another sync of this connection was already running.
+    #[serde(default)]
+    pub in_progress: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncReport {
     pub synced: Vec<SyncResult>,
+    /// Work continues in the background (202); poll the connections for progress.
+    #[serde(default)]
+    pub running: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
