@@ -226,22 +226,29 @@ impl Session {
     }
 
     /// Finish a sign-in from the deep link. Refused unless a sign-in started in this process in
-    /// the last 10 minutes; either way the pending sign-in is used up.
+    /// the last 10 minutes. The pending sign-in is used up by success, expiry or an error
+    /// callback, but NOT by a code Supabase refuses: any web page can open the deep link, and a
+    /// forged code must not cancel the real sign-in that is still on its way (PKCE already
+    /// stops a forged code from signing anyone in).
     pub async fn complete(&self, callback: Callback) -> Result<SessionStatus> {
         let mut inner = self.inner.lock().await;
-        let pending = inner.pending.take().ok_or(CloudError::NoPendingSignIn)?;
+        let pending = inner.pending.as_ref().ok_or(CloudError::NoPendingSignIn)?;
         if self.clock.now() - pending.started > PENDING_TTL_SECS {
+            inner.pending = None;
             return Err(CloudError::SignInExpired);
         }
+        let verifier = pending.verifier.clone();
         let code = match callback {
             Callback::Code(code) => code,
             err @ Callback::Error { .. } => {
+                inner.pending = None;
                 return Err(CloudError::SignInFailed(
                     err.error_message().unwrap_or_default(),
                 ));
             }
         };
-        let tokens = self.auth.exchange(&code, &pending.verifier).await?;
+        let tokens = self.auth.exchange(&code, &verifier).await?;
+        inner.pending = None;
         inner.loaded = true;
         self.apply(&mut inner, tokens);
         Ok(status_of(&inner))
@@ -440,6 +447,32 @@ pub(crate) mod tests {
             s.complete(Callback::Code("c".into())).await,
             Err(CloudError::NoPendingSignIn)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_forged_code_does_not_cancel_the_real_sign_in() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({"auth_code": "forged"}),
+            ))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "code": 404, "error_code": "flow_state_not_found", "msg": "invalid flow state"
+            })))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        mount_pkce(&server, 10_000).await;
+        let clock = Arc::new(FakeClock::default());
+        clock.set(1_000);
+        let s = session(&server.uri(), Default::default(), clock);
+        s.begin_oauth(Provider::Google).await.unwrap();
+        // A web page opens heed://auth/callback?code=forged before the real redirect lands.
+        assert!(s.complete(Callback::Code("forged".into())).await.is_err());
+        assert!(!s.status().await.signed_in);
+        let st = s.complete(Callback::Code("c".into())).await.unwrap();
+        assert!(st.signed_in, "the real callback still completes");
     }
 
     #[tokio::test]
