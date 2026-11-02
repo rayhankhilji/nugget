@@ -3660,3 +3660,133 @@ tr[aria-current="true"] {
   line-height: 18px;
   vertical-align: middle;
 }
+
+/* ---- cloud: approval queue, cited prose, connections ---- */
+
+.action-queue {
+  margin-block-end: var(--space-5);
+}
+
+.action-list {
+  list-style: none;
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.action-item {
+  gap: var(--space-3);
+}
+
+.action-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.action-what {
+  display: grid;
+  min-width: 0;
+}
+
+.action-summary {
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+
+.action-fields {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.action-fields div {
+  display: grid;
+  grid-template-columns: minmax(5rem, max-content) 1fr;
+  gap: var(--space-3);
+}
+
+.action-fields dt {
+  color: var(--muted);
+}
+
+.action-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.action-diff-field {
+  display: block;
+  color: var(--muted);
+}
+
+.brief-prose .cited-text,
+.cited-text {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-lg);
+  line-height: 1.65;
+}
+
+.cited-heading {
+  font-size: var(--fs-md);
+  color: var(--muted);
+}
+
+.cloud-conns {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.cloud-conn {
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.cloud-conn-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.cloud-conn-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.cloud-conn-sync {
+  margin: 0;
+}
+
+/* An indeterminate sweep while an app imports. */
+.cloud-conn-meter {
+  display: block;
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100% no-repeat, var(--raised);
+  animation: meter-sweep 1.4s linear infinite;
+}
+
+@keyframes meter-sweep {
+  from {
+    background-position: -40% 0, 0 0;
+  }
+  to {
+    background-position: 140% 0, 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud-conn-meter {
+    animation: none;
+  }
+}

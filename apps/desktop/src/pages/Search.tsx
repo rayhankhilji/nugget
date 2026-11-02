@@ -37,6 +37,8 @@ import { Timeline } from "../components/search/Timeline";
 import { askCitations } from "../askSearch";
 import { AskDateNote, PartialBadge } from "../components/AskSearchNote";
 import "../styles-search.css";
+import { useCloudSignedIn } from "../cloudSignedIn";
+import { CloudSearch } from "./CloudSearch";
 
 const LIMITS = [10, 25, 50];
 const BUDGETS = [1000, 2000, 4000, 8000];
@@ -53,7 +55,12 @@ function mergeHits(prev: Hit[], page: Hit[]): Hit[] {
   return [...prev, ...page.filter((h) => !seen.has(hitKey(h)))];
 }
 
+/** Search: Heed Cloud's index when signed in, else this device's. */
 export function SearchPage() {
+  return useCloudSignedIn() ? <CloudSearch /> : <LocalSearchPage />;
+}
+
+function LocalSearchPage() {
   const t = useT();
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(25);

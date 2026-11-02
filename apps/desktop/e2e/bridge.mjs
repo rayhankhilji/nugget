@@ -116,6 +116,7 @@ function shellCommands(socket, { pickFolders = [], startDaemon = null, onSocket 
     cloud_billing_plans: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_billing_checkout: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     cloud_billing_portal: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
+    cloud_delete_account: () => ({ err: { kind: "other", message: "cloud is not configured in this build" } }),
     pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
     pick_plugin_file: () => null,
     notify: () => null,

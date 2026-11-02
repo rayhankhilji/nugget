@@ -1160,7 +1160,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "today" | "needs" | "chat" | "search" | "knowledge" | "sources" | "connections" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
+export type PageId = "today" | "needs" | "account" | "chat" | "search" | "knowledge" | "sources" | "connections" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};

@@ -34,6 +34,10 @@ import { SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
+import { ActionQueue } from "./today/ActionQueue";
+import { BriefProse } from "./today/BriefProse";
+import { cloudApi, type CloudBrief } from "../cloud";
+import { useCloudSignedIn } from "../cloudSignedIn";
 import { HomeComposer } from "./today/HomeComposer";
 import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
@@ -79,8 +83,14 @@ function greetingKey(hour: number): MessageKey {
 function TodayPage({ view }: { view: "home" | "needs" }) {
   const t = useT();
   const now = useNow();
-  const cards = useAsync(() => proactiveApi.cardsList({}), []);
-  const brief = useAsync(() => proactiveApi.briefGet(), []);
+  // Signed in to Heed Cloud: cards and the brief come from the cloud service, else from this device.
+  const cloud = useCloudSignedIn();
+  const cards = useAsync(() => (cloud ? cloudApi.cards().then((c) => ({ enabled: true, cards: c.cards })) : proactiveApi.cardsList({})), [cloud]);
+  const cloudBrief = useAsync(() => (cloud ? cloudApi.brief() : Promise.resolve(null)), [cloud]);
+  const localBrief = useAsync(() => (cloud ? Promise.resolve(undefined) : proactiveApi.briefGet()), [cloud]);
+  const brief = cloud ? { ...cloudBrief, data: cloudBrief.data?.brief ?? undefined } : localBrief;
+  /** Cloud actions proposed from cards wait in Needs you for approval; bumped to reload them. */
+  const [actionsTick, setActionsTick] = useState(0);
   const metrics = useAsync(() => proactiveApi.metrics(), []);
   const learning = useAsync(() => learningApi.learning(), []);
   // Only to tell "all caught up" from "nothing connected yet"; unknown (`null`) is not "none".
@@ -100,7 +110,8 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
 
   const reloadAll = () => {
     cards.reload();
-    brief.reload();
+    cloudBrief.reload();
+    localBrief.reload();
     metrics.reload();
     learning.reload();
   };
@@ -123,9 +134,9 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
     for (const c of cards.data?.cards ?? []) {
       if (c.state !== "new" || seen.current.has(c.id)) continue;
       seen.current.add(c.id);
-      proactiveApi.cardsFeedback({ card_id: c.id, feedback: "seen" }).catch(() => {});
+      sendFeedback(cloud, c, { feedback: "seen" }).catch(() => {});
     }
-  }, [cards.data, view]);
+  }, [cards.data, view, cloud]);
 
   const refresh = async () => {
     // Busy is aria-disabled, not disabled, so the button keeps keyboard focus while it refreshes.
@@ -133,7 +144,8 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
     setRefreshing(true);
     setRefreshError(null);
     try {
-      await proactiveApi.refresh();
+      if (cloud) await cloudApi.refreshCards();
+      else await proactiveApi.refresh();
       reloadAll();
     } catch (e) {
       setRefreshError(e);
@@ -144,7 +156,9 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
 
   const feedback = async (card: CardView, request: Omit<CardFeedbackRequest, "card_id">, done: string) => {
     try {
-      await proactiveApi.cardsFeedback({ card_id: card.id, ...request });
+      await sendFeedback(cloud, card, request);
+      // In the cloud, accepting a card proposes its action: it waits for approval below.
+      if (cloud && request.feedback === "accept") setActionsTick((n) => n + 1);
       setHidden((h) => new Set(h).add(card.id));
       setActed((h) => new Set(h).add(card.id));
       setStatus(done);
@@ -154,6 +168,20 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
       brief.reload();
       metrics.reload();
       learning.reload();
+    } catch (e) {
+      setStatus(t("today.feedbackFailed", { error: errorMessage(e) }));
+    }
+  };
+
+  /** Cloud: accepting a card with one of its actions proposes that action; it waits for approval below. */
+  const proposeFromCard = async (card: CardView, a: CardActionView) => {
+    try {
+      await cloudApi.acceptCard(card.id, { index: a.index });
+      setHidden((h) => new Set(h).add(card.id));
+      setActed((h) => new Set(h).add(card.id));
+      setActionsTick((n) => n + 1);
+      setStatus(t("needs.actions.proposed", { title: localText(card.title_text, card.title) }));
+      cards.reload();
     } catch (e) {
       setStatus(t("today.feedbackFailed", { error: errorMessage(e) }));
     }
@@ -200,7 +228,16 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
           {disabled ? (
             <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
           ) : (
-            <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} inbox={visible.length} home />
+            <BriefSection
+              brief={brief.data}
+              error={brief.error}
+              loading={brief.loading}
+              onRetry={brief.reload}
+              listed={listed}
+              inbox={visible.length}
+              home
+              prose={cloud ? (cloudBrief.data ?? null) : null}
+            />
           )}
         </div>
       </SourcesContext.Provider>
@@ -259,14 +296,16 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
                           t("today.snoozed", { title: localText(c.title_text, c.title), until: formatTime(until) }),
                         );
                       }}
-                      onAction={(a) => setAction({ card: c, action: a })}
+                      onAction={(a) => (cloud ? void proposeFromCard(c, a) : setAction({ card: c, action: a }))}
                       onForget={forget}
                     />
                   ))}
                 </ul>
               </div>
             )}
-            {metrics.data &&
+            {cloud && <ActionQueue tick={actionsTick} onDone={setStatus} />}
+          {!cloud &&
+            metrics.data &&
               // A rate means something only once a card has been accepted or dismissed.
               (metrics.data.precision != null && metrics.data.accepted + metrics.data.dismissed > 0 ? (
                 <p className="muted small today-metrics">
@@ -279,7 +318,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
               ) : metrics.data.shown > 0 ? (
                 <p className="muted small today-metrics">{t("today.noFeedback")}</p>
               ) : null)}
-            <LearningPanel learning={learning.data} error={learning.error} loading={learning.loading} onRetry={learning.reload} onForget={forget} />
+            {!cloud && <LearningPanel learning={learning.data} error={learning.error} loading={learning.loading} onRetry={learning.reload} onForget={forget} />}
           </>
         )}
 
@@ -297,6 +336,20 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
       </div>
     </SourcesContext.Provider>
   );
+}
+
+// ---- where cards live ----
+
+/** Card feedback, to Heed Cloud when signed in or to the local background service. */
+async function sendFeedback(cloud: boolean, card: CardView, r: Omit<CardFeedbackRequest, "card_id">): Promise<void> {
+  if (!cloud) {
+    await proactiveApi.cardsFeedback({ card_id: card.id, ...r });
+    return;
+  }
+  if (r.feedback === "accept") await cloudApi.acceptCard(card.id);
+  else if (r.feedback === "dismiss") await cloudApi.dismissCard(card.id, r.reason ?? "other", r.reason_text ?? undefined);
+  else if (r.feedback === "snooze") await cloudApi.snoozeCard(card.id, r.until ?? snoozeUntil("tomorrow"));
+  else if (r.feedback === "seen") await cloudApi.cardsSeen([card.id]);
 }
 
 // ---- home ----
@@ -395,6 +448,7 @@ function BriefSection({
   listed,
   inbox,
   home = false,
+  prose = null,
 }: {
   brief: BriefView | undefined;
   error: unknown;
@@ -406,6 +460,8 @@ function BriefSection({
   inbox: number;
   /** On Home: an empty brief gets a calm empty state rather than a line. */
   home?: boolean;
+  /** The cloud's written brief, with citations, shown above the lists. */
+  prose?: CloudBrief | null;
 }) {
   const t = useT();
   const headingId = useId();
@@ -423,7 +479,8 @@ function BriefSection({
   return (
     <section aria-labelledby={headingId} className="today-brief">
       <h2 id={headingId}>{t("today.brief.titleDate", { date: formatBriefDate(brief.date) })}</h2>
-      {empty && home ? (
+      {prose?.prose && <BriefProse brief={prose} />}
+      {empty && home && prose?.prose ? null : empty && home ? (
         <div className="home-empty">
           <span className="home-empty-ring" aria-hidden="true" />
           <p className="home-empty-title">{inbox > 0 ? t("today.brief.nothingElse") : t("today.brief.empty")}</p>

@@ -7,6 +7,7 @@ import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
 import { Icon, type IconName } from "./components/Icon";
 import { cloudApi } from "./cloud";
+import { useCloudSignedIn } from "./cloudSignedIn";
 import { Offline } from "./components/Offline";
 import { RecoveryBanner } from "./components/BackupSettings";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -28,6 +29,7 @@ import { HomePage, NeedsPage } from "./pages/Today";
 import { startProactiveNotifications } from "./proactiveNotifications";
 import { DoubleTapPage } from "./pages/DoubleTap";
 import { CloudPage } from "./pages/Cloud";
+import { AccountPage } from "./pages/Account";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
@@ -73,10 +75,14 @@ export const PAGES: readonly PageDef[] = [
   { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models", place: "settings" },
   { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage, place: "settings" },
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy", place: "settings" },
-  { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: ",", place: "settings" },
+  { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", place: "settings" },
+  { id: "account", label: "app.nav.account", Component: AccountPage, standalone: true, keywords: "app.keywords.account", place: "settings", shortcut: "," },
 ];
 
 const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
+
+/** The Settings list: Account first, then the rest in page order. */
+const SETTINGS_NAV = [...PAGES.filter((p) => p.id === "account"), ...PAGES.filter((p) => p.place === "settings" && p.id !== "account")];
 
 const PAGE_KEY = "nugget.page";
 const RECENT_CHATS = 5;
@@ -381,7 +387,7 @@ export function App() {
             <p className="nav-group-label" id="nav-group-settings">
               {t("app.navGroup.settings")}
             </p>
-            <ul aria-labelledby="nav-group-settings">{PAGES.filter((p) => p.place === "settings").map(navItem)}</ul>
+            <ul aria-labelledby="nav-group-settings">{SETTINGS_NAV.map(navItem)}</ul>
             <SidebarSettings onSetup={() => setOnboarding(true)} />
           </nav>
         ) : (
@@ -432,7 +438,7 @@ export function App() {
           </nav>
         )}
         <div className="sidebar-foot">
-          <AccountButton active={inSettings} onOpen={() => go(inSettings ? page : "status")} />
+          <AccountButton active={inSettings} onOpen={() => go(inSettings ? page : "account")} />
           <ConnectionPill conn={conn} />
         </div>
       </aside>
@@ -503,20 +509,19 @@ function useRecentChats(page: PageId): StoredConversation[] {
 
 /** How many cards wait in Needs you (0 while unknown or offline). */
 function useNeedsCount(connected: boolean, page: PageId): number {
+  const cloud = useCloudSignedIn();
   const [n, setN] = useState(0);
   const [tick, setTick] = useState(0);
   useEvent(proactiveEvents.onCardsChanged, () => setTick((x) => x + 1));
   useEffect(() => {
-    if (!connected) return;
+    if (!cloud && !connected) return;
     let alive = true;
-    proactiveApi
-      .cardsList({})
-      .then((l) => alive && setN(l.enabled ? l.cards.length : 0))
-      .catch(() => {});
+    const count = cloud ? cloudApi.cards().then((c) => c.cards.length) : proactiveApi.cardsList({}).then((l) => (l.enabled ? l.cards.length : 0));
+    count.then((c) => alive && setN(c)).catch(() => {});
     return () => {
       alive = false;
     };
-  }, [connected, page, tick]);
+  }, [cloud, connected, page, tick]);
   return n;
 }
 

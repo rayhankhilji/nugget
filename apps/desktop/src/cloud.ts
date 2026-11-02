@@ -359,6 +359,8 @@ export const cloudApi = {
   checkout: (plan: string, interval: BillingInterval) => call<void>("cloud_billing_checkout", { plan, interval }),
   /** Opens the Stripe customer portal in the browser. */
   portal: () => call<void>("cloud_billing_portal"),
+  /** Deletes the account and all its cloud data, then signs this computer out. Not undoable. */
+  deleteAccount: () => call<void>("cloud_delete_account"),
   search: (request: CloudSearchRequest) => call<CloudSearchResponse>("cloud_search", { request: { ...request, tz: deviceTimeZone() } }),
   cards: () => call<CloudCards>("cloud_cards", { tz: deviceTimeZone() }),
   /** Runs knowledge and cards now (slow: seconds). */
