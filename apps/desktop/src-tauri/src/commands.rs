@@ -667,6 +667,72 @@ fn check_plugin_install(request: &PluginInstallParams) -> Result<()> {
     Ok(())
 }
 
+// ---- Sign in with ChatGPT (local mode only) ----
+
+no_arg_commands! {
+    chatgpt_status -> Value = "ai.chatgpt.status", json!({});
+    chatgpt_cancel -> Value = "ai.chatgpt.cancel", json!({});
+    chatgpt_resume -> Value = "ai.chatgpt.resume", json!({});
+    chatgpt_sign_out -> Value = "ai.chatgpt.sign_out", json!({});
+}
+
+/// The only page a ChatGPT sign-in may open: OpenAI's authorize endpoint.
+const CHATGPT_AUTH_PREFIX: &str = "https://auth.openai.com/";
+const CHATGPT_AUTH_HOST: &str = "auth.openai.com";
+
+/// `ai.chatgpt.sign_in`'s answer: the authorize URL to open, and the status (`signing_in`).
+/// No URL when the daemon refused (Heed Cloud is active: `status.error.code` is `cloud_mode`).
+#[derive(serde::Deserialize)]
+struct ChatgptSignIn {
+    #[serde(default)]
+    auth_url: Option<String>,
+    status: Value,
+}
+
+/// Check the daemon's authorize URL before the browser opens it: `https://auth.openai.com/…`
+/// only, and a well-formed web link (no spaces, control characters or other hosts).
+fn chatgpt_auth_target(url: &str) -> std::result::Result<open::Target, String> {
+    if !url.starts_with(CHATGPT_AUTH_PREFIX) {
+        return Err("The ChatGPT sign-in link doesn't go to OpenAI's sign-in page.".into());
+    }
+    match open::classify(url)? {
+        open::Target::Web(u)
+            if u.host_str() == Some(CHATGPT_AUTH_HOST) && u.username().is_empty() =>
+        {
+            Ok(open::Target::Web(u))
+        }
+        _ => Err("The ChatGPT sign-in link doesn't go to OpenAI's sign-in page.".into()),
+    }
+}
+
+/// Starts Sign in with ChatGPT: the daemon listens on 127.0.0.1 for the redirect and returns
+/// OpenAI's authorize URL, which is checked and opened in the default browser. Returns the
+/// status (`signing_in`); the page polls `chatgpt_status` until the sign-in finishes. When the
+/// daemon refuses (`auth_url: null`, e.g. Heed Cloud is active) nothing opens and its status is
+/// returned. When the link is refused or the browser can't open, the daemon's sign-in is cancelled.
+#[tauri::command]
+pub async fn chatgpt_sign_in(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
+    let started: ChatgptSignIn = daemon.call(&app, "ai.chatgpt.sign_in", &json!({})).await?;
+    // Refused (e.g. `cloud_mode`): nothing to open; the status says why.
+    let Some(auth_url) = started.auth_url.as_deref() else {
+        return Ok(started.status);
+    };
+    let opened = match chatgpt_auth_target(auth_url) {
+        Ok(target) => tauri::async_runtime::spawn_blocking(move || open::open(target))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r.map(|_| ())),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = opened {
+        // Stop the loopback listener; the error the user sees is the one above.
+        let _: std::result::Result<Value, CmdError> =
+            daemon.call(&app, "ai.chatgpt.cancel", &json!({})).await;
+        return Err(CmdError::Other(e));
+    }
+    Ok(started.status)
+}
+
 // ---- shell helpers ----
 
 /// Opens an `https:`, `obsidian:` or local `file:` URL with the OS default handler. Anything else
@@ -852,6 +918,46 @@ mod tests {
     use super::*;
     use nugget_core::ids::EntityId;
     use serde_json::json;
+
+    #[test]
+    fn chatgpt_sign_in_opens_only_openai_auth_pages() {
+        let ok = "https://auth.openai.com/oauth/authorize?client_id=app_x&redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Fauth%2Fcallback&state=abc";
+        assert!(
+            matches!(chatgpt_auth_target(ok), Ok(open::Target::Web(u)) if u.host_str() == Some("auth.openai.com"))
+        );
+        for bad in [
+            "",
+            "http://auth.openai.com/oauth/authorize",
+            "https://auth.openai.com",
+            "https://auth.openai.com.evil.example/oauth/authorize",
+            "https://auth.openai.com@evil.example/oauth/authorize",
+            "https://evil.example/?next=https://auth.openai.com/",
+            "https://AUTH.openai.com/oauth/authorize",
+            "https://auth.openai.com/oauth/authorize?x=a b",
+            "https://auth.openai.com/oauth/authorize\n",
+            "javascript:alert(1)//https://auth.openai.com/",
+            "file:///https://auth.openai.com/",
+        ] {
+            assert!(chatgpt_auth_target(bad).is_err(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn chatgpt_sign_in_refusal_has_no_url() {
+        let refused: ChatgptSignIn = serde_json::from_value(json!({
+            "auth_url": null,
+            "status": { "state": "signed_out", "error": { "code": "cloud_mode", "message": "Heed Cloud is active" } }
+        }))
+        .unwrap();
+        assert!(refused.auth_url.is_none());
+        assert_eq!(refused.status["error"]["code"], "cloud_mode");
+        let started: ChatgptSignIn = serde_json::from_value(json!({
+            "auth_url": "https://auth.openai.com/oauth/authorize?x=1",
+            "status": { "state": "signing_in" }
+        }))
+        .unwrap();
+        assert!(chatgpt_auth_target(started.auth_url.as_deref().unwrap()).is_ok());
+    }
 
     #[test]
     fn requests_are_bounded_and_validated() {

@@ -1,0 +1,32 @@
+[
+ {
+  "src": "../../apps/desktop/src/brand/img/dither-landscape.png",
+  "alt": "Ultramarine dither landscape",
+  "caption": "Original procedural dither"
+ },
+ {
+  "src": "../../apps/desktop/src/brand/img/engraving-landscape.png",
+  "alt": "Engraved landscape",
+  "caption": "Original procedural engraving"
+ },
+ {
+  "src": "../../apps/desktop/src/brand/img/sky.webp",
+  "alt": "Generated sky",
+  "caption": "Generated sky, behind floating cards"
+ },
+ {
+  "src": "../../apps/desktop/src/brand/img/painting-andes.webp",
+  "alt": "Heart of the Andes, duotoned",
+  "caption": "Church, Heart of the Andes (1859), CC0, The Met"
+ },
+ {
+  "src": "../../apps/desktop/src/brand/img/painting-oxbow.webp",
+  "alt": "The Oxbow, duotoned",
+  "caption": "Cole, The Oxbow (1836), CC0, The Met"
+ },
+ {
+  "src": "../../apps/desktop/src/brand/img/painting-harvesters.webp",
+  "alt": "The Harvesters, duotoned",
+  "caption": "Bruegel, The Harvesters (1565), CC0, The Met"
+ }
+]

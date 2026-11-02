@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heed open core views</title>
+<!-- The app's own stylesheets: every class below is the one the desktop app ships. -->
+<link rel="stylesheet" href="../../apps/desktop/src/tokens.css">
+<link rel="stylesheet" href="../../apps/desktop/src/styles.css">
+<link rel="stylesheet" href="../../apps/desktop/src/onboarding/onboarding.css">
+<style>
+  body { margin: 0; padding: 40px 24px 80px; background: var(--bg); color: var(--text); font-family: var(--font); }
+  .spec { max-width: 1200px; margin: 0 auto 56px; }
+  .spec > h1 { font-family: var(--font-display); font-variation-settings: var(--heed-display-settings); font-weight: 340; font-size: 40px; letter-spacing: -.02em; margin: 0 0 8px; }
+  .spec > p { color: var(--text-2); max-width: 70ch; margin: 0 0 20px; }
+  /* A window frame; the transform makes the backdrop's fixed layers fill the frame, not the page. */
+  .frame { position: relative; transform: translateZ(0); height: 760px; overflow: hidden; border-radius: 16px; background: var(--bg); box-shadow: var(--shadow-3), inset 0 0 0 1px var(--hairline); }
+  .frame .onboarding { padding-block-start: 56px; }
+  .frame .ob-main h1 { margin-block-end: var(--space-2); }
+  .settings-body { padding: 40px 48px; max-width: 760px; }
+  .settings-body h1 { font-family: var(--font-display); font-variation-settings: var(--heed-display-settings); font-weight: 360; font-size: 28px; letter-spacing: -.02em; margin: 0 0 6px; }
+  .notes { color: var(--text-2); font-size: 14px; margin: 16px 0 0; padding-inline-start: 20px; }
+</style>
+</head>
+<body>
+
+<section class="spec">
+  <h1>The first-run fork</h1>
+  <p>The first question on first run, on the welcome backdrop: two equal, calm cards. Choosing one moves on. Nothing is preselected, and the fork never comes back as a nag.</p>
+  <div class="frame"><div class="onboarding"><main class="ob-main">
+    <h1>How do you want to run Heed?</h1>
+    <p class="ob-lead">You can switch later in Settings. Your files and settings come with you.</p>
+    <div class="ob-fork">
+      <button type="button" class="ob-fork-card">
+        <span class="ob-fork-kicker">Heed Cloud</span>
+        <h2>Let Heed run it for you</h2>
+        <p>Sign in and connect your apps. Heed keeps them in sync and writes your morning brief.</p>
+        <ul class="ob-fork-points">
+          <li>Gmail, Calendar, Slack, Notion and more</li>
+          <li>Needs you and the brief, fresh every few minutes</li>
+          <li>Replies and invites sent only when you approve</li>
+        </ul>
+        <span class="ob-fork-foot">14 days free, then from £39 a month</span>
+      </button>
+      <button type="button" class="ob-fork-card">
+        <span class="ob-fork-kicker">Open source</span>
+        <h2>Run it yourself</h2>
+        <p>Your data stays on this computer. Only the passages a question needs go to the AI you choose, or nothing at all with a local model.</p>
+        <ul class="ob-fork-points">
+          <li>Folders, mail and notes on this computer</li>
+          <li>Sign in with ChatGPT, paste an API key, or run a local model</li>
+          <li>Apache-2.0, on GitHub</li>
+        </ul>
+        <span class="ob-fork-foot">Free</span>
+      </button>
+    </div>
+  </main></div></div>
+  <ul class="notes">
+    <li><code>.ob-fork</code> holds two <code>button.ob-fork-card</code>s. Set <code>aria-pressed="true"</code> (or <code>.is-selected</code>) for the outline if the choice is kept on screen.</li>
+    <li>Card heading: Fraunces at 28px. The kicker is a 12px label, the ticks are ultramarine, and the price line sits at the bottom so both cards end together. Never hard-code the price: read it from the plans list, and show "14-day free trial" with no price when that fails (offline on first run).</li>
+    <li>Under 640px the cards stack. Reduced motion drops the 2px hover lift.</li>
+  </ul>
+</section>
+
+<section class="spec">
+  <h1>Choose your AI</h1>
+  <p>One row per way in. The chosen row opens to show its one step. The API key checks as you paste it and says what it found.</p>
+  <div class="frame"><div class="onboarding"><main class="ob-main">
+    <h1>Choose your AI</h1>
+    <p class="ob-lead">Heed sends it only the passages a question needs.</p>
+    <div class="ai-choices" role="radiogroup" aria-label="AI">
+      <label class="ai-choice">
+        <input type="radio" name="ai">
+        <span class="ai-choice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg></span>
+        <span><span class="ai-choice-title">Sign in with ChatGPT</span><span class="ai-choice-blurb">Use your ChatGPT plan. Nothing to copy.</span></span>
+        <span class="ai-choice-status">Opens your browser</span>
+      </label>
+      <label class="ai-choice is-selected">
+        <input type="radio" name="ai" checked>
+        <span class="ai-choice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg></span>
+        <span><span class="ai-choice-title">Paste an API key</span><span class="ai-choice-blurb">OpenAI, Anthropic, or any OpenAI-compatible endpoint.</span></span>
+        <span class="ai-choice-status"></span>
+        <span class="ai-choice-body">
+          <span class="key-field" data-state="valid">
+            <label class="small" for="k">API key</label>
+            <input id="k" class="input" value="sk-proj-••••••••••••••••••••7Qf2" readonly>
+            <span class="key-field-status">✓ Works: OpenAI, 14 models available</span>
+          </span>
+        </span>
+      </label>
+      <label class="ai-choice">
+        <input type="radio" name="ai">
+        <span class="ai-choice-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+        <span><span class="ai-choice-title">Run a model on this computer</span><span class="ai-choice-blurb">Ollama found, with llama3.2:3b ready. Nothing leaves this computer.</span></span>
+        <span class="ai-choice-status">Private</span>
+      </label>
+    </div>
+    <div class="ob-actions" style="max-inline-size:36rem;margin:var(--space-4) auto 0"><span style="flex:1"></span><button type="button" class="btn btn-primary">Continue</button></div>
+  </main></div></div>
+  <ul class="notes">
+    <li><code>.ai-choices</code> holds <code>label.ai-choice</code>s, each with a visually hidden radio, <code>.ai-choice-icon</code>, a title and blurb, and a right-hand <code>.ai-choice-status</code>. The checked row gets a 2px ultramarine outline; <code>.ai-choice-body</code> opens under it.</li>
+    <li>For the key, set <code>.key-field[data-state]</code> to <code>checking</code> (muted, "Checking…"), <code>valid</code> (green, says what it found) or <code>invalid</code> (red, says why and what to try next). The key is shown masked in mono.</li>
+    <li>ChatGPT sign-in: while the browser is open, the status reads "Waiting for your browser…" with a spinner. A device code, if one is used, goes in the body in Geist Mono at 20px.</li>
+  </ul>
+</section>
+
+<section class="spec">
+  <h1>Provider status in Settings</h1>
+  <p>One quiet list: what Heed can use, whether it works, and the one action for each row. Green appears here only to mean healthy.</p>
+  <div class="frame" style="height:440px"><div class="settings-body">
+    <h1>AI</h1>
+    <p class="muted" style="margin:0 0 20px">Heed uses the first healthy one, top to bottom.</p>
+    <ul class="provider-status">
+      <li><span class="provider-dot" data-health="ok"></span><span><span class="provider-name">ChatGPT</span><span class="provider-detail">Signed in as sam@okafor.studio</span></span><span class="provider-model">gpt-4.1-mini</span><button type="button" class="btn btn-small">Sign out</button></li>
+      <li><span class="provider-dot" data-health="ok"></span><span><span class="provider-name">Ollama</span><span class="provider-detail">Running on this computer</span></span><span class="provider-model">llama3.2:3b</span><button type="button" class="btn btn-small">Manage</button></li>
+      <li><span class="provider-dot" data-health="warn"></span><span><span class="provider-name">OpenAI API key</span><span class="provider-detail">Rate-limited 4 minutes ago; retrying</span></span><span class="provider-model">gpt-4.1</span><button type="button" class="btn btn-small">Replace key</button></li>
+      <li><span class="provider-dot"></span><span><span class="provider-name">Anthropic API key</span><span class="provider-detail">Not set</span></span><span class="provider-model"></span><button type="button" class="btn btn-small">Add key</button></li>
+    </ul>
+  </div></div>
+  <ul class="notes">
+    <li><code>ul.provider-status</code> holds rows of <code>.provider-dot[data-health=ok|warn]</code> (no attribute means off), the name and detail, the model in mono, and one button.</li>
+  </ul>
+</section>
+
+</body>
+</html>

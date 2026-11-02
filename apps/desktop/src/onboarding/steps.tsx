@@ -18,6 +18,7 @@ import { MacPermissionRecovery, missingPanes, useNeedsFullDiskAccess, useRecheck
 import { cloudApi, type SignInProvider } from "../cloud";
 import { ErrorNote, Spinner } from "../components/ui";
 import { ConnectApps, type CloudState } from "./ConnectApps";
+import { ForkStep } from "./Fork";
 
 export interface StepProps {
   state: OnboardingState;
@@ -33,9 +34,20 @@ export function signedIn(cloud: CloudState | undefined): boolean {
   return cloud?.session?.configured === true && cloud.session.signed_in;
 }
 
-/** A Heed account is offered but not signed in to: the first step asks to sign in. */
+/** A Heed account is offered but not signed in to: the cloud path asks to sign in. */
 export function signInOffered(cloud: CloudState | undefined): boolean {
   return cloud?.session?.configured === true && !cloud.session.signed_in;
+}
+
+/** The first step shows the fork (Heed Cloud or run it yourself), not a sign-in or a greeting. */
+export function forkShown(state: OnboardingState, cloud: CloudState | undefined): boolean {
+  if (signedIn(cloud) || cloud?.session === null) return false;
+  return !(state.path === "cloud" && signInOffered(cloud));
+}
+
+/** ChatGPT sign-in is for running Heed yourself: not on the cloud path, nor signed in to Heed Cloud. */
+export function localMode(state: OnboardingState, cloud: CloudState | undefined): boolean {
+  return state.path !== "cloud" && !signedIn(cloud);
 }
 
 export function StepHeading({ headingRef, children }: { headingRef: StepProps["headingRef"]; children: ReactNode }) {
@@ -60,14 +72,15 @@ const STRONG = { strong: (c: ReactNode) => <strong>{c}</strong> };
 // ---- 1. sign in ----
 
 /**
- * The first step. With a Heed account on offer it is the sign-in (Google in the browser or an
- * emailed link, as on the Connections page); the footer then offers "Continue without an
- * account", the local-first way. Without cloud in this build it welcomes and says what stays on
- * this device. Signed in, it greets the account.
+ * The first step: the fork (Heed Cloud or run it yourself). On the cloud path, with a Heed account
+ * on offer, it is the sign-in (Google in the browser or an emailed link, as on the Connections
+ * page); the footer then offers "Continue without an account", the run-it-yourself way. Signed
+ * in, it greets the account.
  */
-export function WelcomeStep({ headingRef, cloud }: StepProps) {
+export function WelcomeStep(props: StepProps) {
+  const { headingRef, cloud, state } = props;
   const t = useT();
-  if (signInOffered(cloud)) return <SignInPanel headingRef={headingRef} failure={cloud?.failure ?? null} />;
+  if (state.path === "cloud" && signInOffered(cloud)) return <SignInPanel headingRef={headingRef} failure={cloud?.failure ?? null} />;
   if (signedIn(cloud)) {
     const email = cloud?.session?.email;
     return (
@@ -88,32 +101,7 @@ export function WelcomeStep({ headingRef, cloud }: StepProps) {
       </>
     );
   }
-  return (
-    <>
-      <StepHeading headingRef={headingRef}>{t("onboarding.welcome.heading")}</StepHeading>
-      <p className="ob-lead">{t("onboarding.welcome.lead")}</p>
-      <div className="ob-columns">
-        <section className="ob-card" aria-labelledby="ob-cloud">
-          <h2 id="ob-cloud">{t("onboarding.welcome.cloudHeading")}</h2>
-          <ul>
-            <li>{t("onboarding.welcome.cloud1")}</li>
-            <li>{t("onboarding.welcome.cloud2")}</li>
-            <li>{t("onboarding.welcome.cloud3")}</li>
-          </ul>
-        </section>
-        <section className="ob-card" aria-labelledby="ob-device">
-          <h2 id="ob-device">{t("onboarding.welcome.deviceHeading")}</h2>
-          <ul>
-            <li>{t("onboarding.welcome.device1")}</li>
-            <li>{t("onboarding.welcome.device2")}</li>
-            <li>{t("onboarding.welcome.device3")}</li>
-          </ul>
-        </section>
-      </div>
-      <p>{t("onboarding.welcome.ledger")}</p>
-      <p className="muted">{t("onboarding.welcome.time")}</p>
-    </>
-  );
+  return <ForkStep {...props} />;
 }
 
 type Waiting = { kind: "browser" } | { kind: "email"; email: string } | null;
@@ -245,7 +233,7 @@ export function SourceStep({ headingRef, connected, dispatch, cloud }: StepProps
       {signInOffered(cloud) && (
         <div className="ob-signin-first">
           <p>{t("onboarding.connect.signInFirst")}</p>
-          <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "goto", step: "welcome" })}>
+          <button type="button" className="btn btn-small" onClick={() => dispatch({ type: "choosePath", path: "cloud" })}>
             {t("sources.signIn")}
           </button>
         </div>
@@ -464,9 +452,10 @@ function PermissionList({ os }: { os: Exclude<Os, "other"> }) {
  * that is off (Full Disk Access only once a Messages source is set up). Looks again when the user
  * comes back from System Settings. Nothing is shown when the shell can't say (a browser preview).
  */
-export function MacPermissionStatus() {
+export function MacPermissionStatus({ onGranted }: { onGranted?: () => void } = {}) {
   const t = useT();
   const [status, setStatus] = useState<DoubleTapStatus>();
+  const wasMissing = useRef(false);
   const [tick, setTick] = useState(0);
   const recheck = useCallback(() => setTick((n) => n + 1), []);
   useEffect(() => {
@@ -484,6 +473,15 @@ export function MacPermissionStatus() {
   const needFda = useNeedsFullDiskAccess();
   const panes = missingPanes(status, needFda);
   useRecheckOnReturn(recheck, panes.length > 0);
+  // The step polls for the grant; once what was missing is on, it moves on by itself.
+  useEffect(() => {
+    if (status?.platform !== "macos") return;
+    if (panes.length > 0) wasMissing.current = true;
+    else if (wasMissing.current) {
+      wasMissing.current = false;
+      onGranted?.();
+    }
+  }, [status, panes.length, onGranted]);
   if (status?.platform !== "macos") return null;
   return (
     <>
@@ -503,7 +501,7 @@ export function MacPermissionStatus() {
   );
 }
 
-export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
+export function PermissionsStep({ headingRef, dispatch }: StepProps & { os?: Os }) {
   const t = useT();
   const detected = detectOs();
   const mine = detected === "other" ? null : detected;
@@ -516,7 +514,7 @@ export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
         <section className="ob-card" aria-labelledby="ob-perm-mine">
           <h2 id="ob-perm-mine">{t("onboarding.perm.yourSystem", { os: t(OS_LABEL[mine]) })}</h2>
           <PermissionList os={mine} />
-          {mine === "macos" && <MacPermissionStatus />}
+          {mine === "macos" && <MacPermissionStatus onGranted={() => dispatch({ type: "next" })} />}
         </section>
       )}
       <details className="ob-details" open={!mine}>
@@ -618,7 +616,7 @@ export function DoneStep({
 }: StepProps & { searchable?: number; onAsk: (question: string) => void }) {
   const t = useT();
   const pending = pendingSteps(state);
-  const withAi = state.ai === "local" || state.ai === "byok";
+  const withAi = state.ai === "local" || state.ai === "byok" || state.ai === "chatgpt";
   const os = detectOs();
   // The shell's trigger is what Double Tap runs with; the local copy is only a first-render cache.
   const [trigger, setTrigger] = useState(() => loadTrigger(os));
@@ -642,7 +640,7 @@ export function DoneStep({
   useEffect(() => {
     if (!connected) return;
     let alive = true;
-    if ((choice === "local" || choice === "byok") && aiSetup?.ai !== choice) {
+    if ((choice === "local" || choice === "byok" || choice === "chatgpt") && aiSetup?.ai !== choice) {
       void detectAiSetup(choice).then((what) => alive && what && dispatch({ type: "aiSetUp", ai: choice, what }));
     }
     if (!knownSources || !indexed) {
@@ -674,7 +672,9 @@ export function DoneStep({
   const ai = aiReady
     ? aiReady.ai === "local"
       ? t("onboarding.done.summary.aiLocal", { model: aiReady.what })
-      : t("onboarding.done.summary.aiByok", { provider: aiReady.what })
+      : aiReady.ai === "chatgpt"
+        ? t("onboarding.done.summary.aiChatgpt")
+        : t("onboarding.done.summary.aiByok", { provider: aiReady.what })
     : aiLegacy
       ? t(state.ai === "local" ? "onboarding.done.summary.aiLocalPlain" : "onboarding.done.summary.aiByokPlain")
       : withAi

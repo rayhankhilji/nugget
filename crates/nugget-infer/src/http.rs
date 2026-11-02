@@ -390,7 +390,8 @@ impl Http {
                     meter.add_received(body.len());
                     drop(meter);
                     let err = http_error(&self.provider, status, &body, delay);
-                    if can_retry && is_retryable_status(status) {
+                    let terminal = matches!(err, Error::Unauthorized(_));
+                    if can_retry && !terminal && is_retryable_status(status) {
                         let wait = delay.unwrap_or_else(|| self.backoff(attempt));
                         if wait <= self.settings.max_retry_delay {
                             tracing::warn!(provider = %self.provider, %status, ?wait, attempt, "retrying");
@@ -759,6 +760,17 @@ fn http_error(
     retry_after: Option<Duration>,
 ) -> Error {
     let detail = error_detail(body).unwrap_or_else(|| truncate(body, 300));
+    // ChatGPT plan usage (crate::chatgpt): the plan's limit, or an account that must sign in
+    // again. Neither is retried nor a reason to route the request to another provider.
+    if let Some(code) = serde_json::from_str::<Value>(body).ok().and_then(|v| {
+        v.pointer("/error/code")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }) && (code == USAGE_LIMIT_CODE || code == INVALID_USER_CODE)
+    {
+        tracing::warn!(%provider, status = status.as_u16(), %code, "chatgpt plan usage refused");
+        return Error::Unauthorized(format!("{provider}: {code}: {detail}"));
+    }
     if is_rate_limit_status(status) {
         tracing::warn!(%provider, status = status.as_u16(), %detail, ?retry_after, "rate limited");
         return Error::RateLimited {
@@ -778,6 +790,11 @@ fn http_error(
         status.as_u16()
     ))
 }
+
+/// OpenAI's ChatGPT plan usage codes (see `crate::chatgpt`): the plan's limit, and an account
+/// that must sign in again. Mapped to `Error::Unauthorized`: never retried, never a fallback.
+pub const USAGE_LIMIT_CODE: &str = "subscription_sharing_usage_limit_exceeded";
+pub const INVALID_USER_CODE: &str = "subscription_sharing_invalid_user";
 
 /// Statuses that mean "back off": 429 and Anthropic's 529 (overloaded).
 pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {

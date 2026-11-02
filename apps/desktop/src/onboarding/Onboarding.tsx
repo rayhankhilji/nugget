@@ -4,10 +4,10 @@ import { requestChatAsk } from "../hooks.nav";
 import { useT, type MessageKey } from "../i18n";
 import { LanguagePicker } from "../i18n/LanguagePicker";
 import { Logo } from "../components/Logo";
-import { loadState, reduce, saveState, stepGoalMet, STEPS, stepIndex, type OnboardingState, type StepId } from "./machine";
+import { loadState, reduce, saveState, stepGoalMet, stepIndex, type OnboardingState, type StepId } from "./machine";
 import { AiStep } from "./AiStep";
 import { TriggerStep } from "./TriggerStep";
-import { DoneStep, PermissionsStep, signInOffered, SourceStep, WelcomeStep } from "./steps";
+import { DoneStep, forkShown, PermissionsStep, signInOffered, SourceStep, WelcomeStep } from "./steps";
 import { useCloudSession } from "./ConnectApps";
 import "./onboarding.css";
 
@@ -52,10 +52,12 @@ export function Onboarding({
   const stuck = useContentUnder(mainRef, footRef);
   const stepRef = useRef(state.step);
   stepRef.current = state.step;
-  // A sign-in that finishes while the sign-in step is open moves on to connecting apps.
+  // A sign-in that finishes while the first step is open takes the cloud path, on to connecting apps.
   const cloud = useCloudSession(
     useCallback(() => {
-      if (stepRef.current === "welcome") dispatch({ type: "next" });
+      if (stepRef.current !== "welcome") return;
+      dispatch({ type: "choosePath", path: "cloud" });
+      dispatch({ type: "next" });
     }, []),
   );
 
@@ -73,15 +75,17 @@ export function Onboarding({
     headingRef.current?.focus();
   }, [state.step]);
 
-  const i = stepIndex(state.step);
+  const i = stepIndex(state.step, state);
   const isLast = state.step === "done";
+  // The fork answers itself: choosing a card moves on, so the footer offers no Continue.
+  const fork = state.step === "welcome" && forkShown(state, cloud);
   const stepProps = { state, dispatch, connected, headingRef, cloud };
   // Finishing with something indexed goes straight to Search: the first useful thing to do.
   const toSearch = isLast && searchable > 0;
   // Continue on a step that set nothing up counts as skipping it; say so next to the button.
   const unmet = !isLast && !stepGoalMet(state);
   // One primary action per step: the step's own (sign in, add a folder, ask) until it is done.
-  const withoutAccount = state.step === "welcome" && signInOffered(cloud);
+  const withoutAccount = state.step === "welcome" && state.path === "cloud" && signInOffered(cloud);
   const primary = !withoutAccount && !isLast && !(state.step === "source" && unmet);
   const seg = SEGMENTS.findIndex((g) => g.steps.includes(state.step));
   const ask = (question: string) => {
@@ -130,7 +134,7 @@ export function Onboarding({
       </nav>
 
       <main className="ob-main" aria-labelledby="ob-heading" ref={mainRef}>
-        <p className="muted small ob-count">{t("onboarding.stepOf", { n: i + 1, total: STEPS.length })}</p>
+        <p className="muted small ob-count">{t("onboarding.stepOf", { n: seg + 1, total: SEGMENTS.length })}</p>
         <div className="ob-panel" key={state.step}>
           {state.step === "welcome" && <WelcomeStep {...stepProps} />}
           {state.step === "ai" && <AiStep {...stepProps} />}
@@ -147,6 +151,12 @@ export function Onboarding({
             {t("onboarding.back")}
           </button>
         )}
+        {/* The cloud sign-in goes back to the fork. */}
+        {withoutAccount && (
+          <button type="button" className="btn" onClick={() => dispatch({ type: "choosePath", path: null })}>
+            {t("onboarding.back")}
+          </button>
+        )}
         <span className="ob-spacer" />
         {unmet && (
           <span className="muted small ob-hint" id="ob-continue-hint">
@@ -158,23 +168,26 @@ export function Onboarding({
             {t("onboarding.skipStep")}
           </button>
         )}
-        <button
-          type="button"
-          className={primary ? "btn btn-primary" : "btn"}
-          aria-describedby={unmet ? "ob-continue-hint" : undefined}
-          onClick={() => {
-            exitTo.current = toSearch ? "search" : undefined;
-            dispatch({ type: "continue" });
-          }}
-        >
-          {toSearch
-            ? t("onboarding.done.search")
-            : isLast
-              ? t("onboarding.done.start")
-              : withoutAccount
-                ? t("onboarding.signin.withoutAccount")
-                : t("onboarding.continue")}
-        </button>
+        {!fork && (
+          <button
+            type="button"
+            className={primary ? "btn btn-primary" : "btn"}
+            aria-describedby={unmet ? "ob-continue-hint" : undefined}
+            onClick={() => {
+              exitTo.current = toSearch ? "search" : undefined;
+              // Without an account is running it yourself: on to choosing the AI.
+              dispatch(withoutAccount ? { type: "choosePath", path: "local" } : { type: "continue" });
+            }}
+          >
+            {toSearch
+              ? t("onboarding.done.search")
+              : isLast
+                ? t("onboarding.done.start")
+                : withoutAccount
+                  ? t("onboarding.signin.withoutAccount")
+                  : t("onboarding.continue")}
+          </button>
+        )}
       </footer>
     </div>
   );

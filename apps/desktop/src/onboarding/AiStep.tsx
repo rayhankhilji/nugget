@@ -1,73 +1,154 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { api, errorMessage, events, modelsCancel, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
 import { Badge, ErrorNote, Spinner } from "../components/ui";
-import type { AiChoice } from "./machine";
+import { defaultOption, type AiOption } from "./machine";
 import type { ModelFit } from "../api";
-import { ByokForm } from "./ByokForm";
+import { ByokForm, type ByokGuideKind } from "./ByokForm";
+import { ChatgptPanel } from "./Chatgpt";
 import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { DownloadFailureNote, isCancelled, useInstallFocus } from "./DownloadFailure";
 import { detectOs, type Os } from "./platform";
-import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
+import { CommandSnippet, localMode, OfflineNote, StepHeading, type StepProps } from "./steps";
 
-const CHOICES: { id: AiChoice; label: MessageKey; blurb: MessageKey }[] = [
-  { id: "local", label: "onboarding.ai.local", blurb: "onboarding.ai.localBlurb" },
-  { id: "byok", label: "onboarding.ai.byok", blurb: "onboarding.ai.byokBlurb" },
-  { id: "later", label: "onboarding.ai.later", blurb: "onboarding.ai.laterBlurb" },
+const ICON_PROPS = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+const ICONS: Record<"chatgpt" | "computer" | "key" | "server" | "later", ReactNode> = {
+  chatgpt: (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12h8M12 8v8" />
+    </svg>
+  ),
+  computer: (
+    <svg {...ICON_PROPS}>
+      <rect x="3" y="5" width="18" height="12" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+    </svg>
+  ),
+  key: (
+    <svg {...ICON_PROPS}>
+      <circle cx="8" cy="15" r="4" />
+      <path d="M11 12l9-9M16 7l3 3" />
+    </svg>
+  ),
+  server: (
+    <svg {...ICON_PROPS}>
+      <rect x="4" y="4" width="16" height="7" rx="2" />
+      <rect x="4" y="13" width="16" height="7" rx="2" />
+      <path d="M8 7.5h.01M8 16.5h.01" />
+    </svg>
+  ),
+  later: (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  ),
+};
+
+interface OptionInfo {
+  id: AiOption;
+  title: MessageKey;
+  blurb: MessageKey;
+  /** The quiet right-hand line ("Opens your browser", "Private"). */
+  status?: MessageKey;
+  icon: keyof typeof ICONS;
+}
+
+/** Every way in, one row each. ChatGPT is left out when Heed Cloud is the path. */
+const OPTIONS: OptionInfo[] = [
+  { id: "chatgpt", title: "onboarding.ai.chatgpt", blurb: "onboarding.ai.chatgptBlurb", status: "onboarding.ai.chatgptStatus", icon: "chatgpt" },
+  { id: "local", title: "onboarding.ai.local", blurb: "onboarding.ai.localBlurb", status: "onboarding.ai.private", icon: "computer" },
+  { id: "ollama", title: "onboarding.ai.ollama", blurb: "onboarding.ai.ollamaBlurb", status: "onboarding.ai.private", icon: "computer" },
+  { id: "anthropic", title: "onboarding.ai.anthropic", blurb: "onboarding.ai.anthropicBlurb", icon: "key" },
+  { id: "openai", title: "onboarding.ai.openai", blurb: "onboarding.ai.openaiBlurb", icon: "key" },
+  { id: "openrouter", title: "onboarding.ai.openrouter", blurb: "onboarding.ai.openrouterBlurb", icon: "key" },
+  { id: "compatible", title: "onboarding.ai.compatible", blurb: "onboarding.ai.compatibleBlurb", icon: "server" },
+  { id: "later", title: "onboarding.ai.later", blurb: "onboarding.ai.laterBlurb", icon: "later" },
 ];
 
-export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
+/** The rows that set up a provider through `ai.key.*`. */
+function isKeyOption(o: AiOption): o is ByokGuideKind {
+  return o === "ollama" || o === "anthropic" || o === "openai" || o === "openrouter" || o === "compatible";
+}
+
+/**
+ * "Choose your AI": one row per way in (`.ai-choices` of `.ai-choice` rows, docs/brand/open-core.html);
+ * the chosen row opens beneath it to show its one step. Sign in with ChatGPT is offered only when
+ * running Heed yourself.
+ */
+export function AiStep({ headingRef, state, dispatch, connected, cloud }: StepProps) {
   const t = useT();
   const name = useId();
-  const choice = state.ai;
+  const local = localMode(state, cloud);
+  const options = OPTIONS.filter((o) => o.id !== "chatgpt" || local);
+  const saved = state.aiOption ?? defaultOption(state.ai);
+  const option = saved === "chatgpt" && !local ? null : saved;
+  const group = useRef<HTMLDivElement>(null);
   // The option badged "Recommended" starts selected; the user can still pick another.
   useEffect(() => {
-    if (state.ai === null) dispatch({ type: "chooseAi", ai: "local" });
+    if (state.ai === null || option === null) dispatch({ type: "chooseAiOption", option: "local" });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Picking a choice reveals its section below the cards: bring that section's heading into view.
+  // Picking a row opens its body: bring that into view.
   const picked = useRef(false);
   useEffect(() => {
     if (!picked.current) return;
-    const h = document.getElementById(choice === "local" ? "ob-models" : choice === "byok" ? "ob-byok" : "");
+    const body = group.current?.querySelector(".ai-choice-body");
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    h?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
-  }, [choice]);
+    body?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+  }, [option]);
+  const choose = (o: AiOption) => {
+    picked.current = true;
+    dispatch({ type: "chooseAiOption", option: o });
+  };
+  // "Use another AI": back to the rows, with nothing switched for the user.
+  const toChoices = () => group.current?.querySelector<HTMLInputElement>("input:checked")?.focus();
+
+  const body = (o: AiOption) => {
+    if (o === "chatgpt")
+      return (
+        <ChatgptPanel
+          onReady={(what) => dispatch({ type: "aiSetUp", ai: "chatgpt", what })}
+          onUseKey={() => choose("openai")}
+          onOtherAi={toChoices}
+        />
+      );
+    if (o === "local")
+      return connected ? <LocalModels onReady={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} /> : <OfflineNote />;
+    if (isKeyOption(o)) return <ByokGuide kind={o} onSaved={(what) => dispatch({ type: "aiSetUp", ai: "byok", what })} />;
+    return <p className="muted">{t("onboarding.ai.laterDetail")}</p>;
+  };
+
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.ai.heading")}</StepHeading>
       <p className="ob-lead">{t("onboarding.ai.lead")}</p>
-      <fieldset className="ob-fieldset">
-        <legend className="visually-hidden">{t("onboarding.ai.legend")}</legend>
-        <div className="kind-picker ob-choices">
-          {CHOICES.map((c) => (
-            <label key={c.id} className="kind-option">
-              <input
-                type="radio"
-                name={name}
-                value={c.id}
-                checked={choice === c.id}
-                onChange={() => {
-                  picked.current = true;
-                  dispatch({ type: "chooseAi", ai: c.id });
-                }}
-              />
-              <span>
-                <span className="kind-label">
-                  {t(c.label)} {c.id === "local" && <Badge tone="accent">{t("onboarding.ai.localBadge")}</Badge>}
+      <div className="ai-choices" role="radiogroup" aria-label={t("onboarding.ai.legend")} ref={group}>
+        {options.map((o) => {
+          const checked = option === o.id;
+          return (
+            <div key={o.id} className={checked ? "ai-choice is-selected" : "ai-choice"} data-option={o.id}>
+              <label className="ai-choice-label">
+                <input type="radio" name={name} value={o.id} checked={checked} onChange={() => choose(o.id)} />
+                <span className="ai-choice-icon" aria-hidden="true">
+                  {ICONS[o.icon]}
                 </span>
-                <span className="muted small">{t(c.blurb)}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      {choice === "local" &&
-        (connected ? <LocalModels onReady={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} /> : <OfflineNote />)}
-      {choice === "byok" && <ByokGuide onSaved={(what) => dispatch({ type: "aiSetUp", ai: "byok", what })} />}
-      {choice === "later" && <p className="muted">{t("onboarding.ai.laterDetail")}</p>}
+                <span>
+                  <span className="ai-choice-title">{t(o.title)}</span>
+                  {o.id === "local" && <Badge tone="accent">{t("onboarding.ai.localBadge")}</Badge>}
+                  <span className="ai-choice-blurb">{t(o.blurb)}</span>
+                </span>
+                <span className="ai-choice-status">{o.status ? t(o.status) : ""}</span>
+              </label>
+              {checked && <div className="ai-choice-body">{body(o.id)}</div>}
+            </div>
+          );
+        })}
+      </div>
     </>
   );
 }
@@ -355,10 +436,9 @@ export function estimateLeft(samples: readonly { at: number; bytes: number }[], 
 
 // ---- bring your own key ----
 
-type ProviderKind = "anthropic" | "openai" | "compatible";
+type ProviderKind = ByokGuideKind;
 
 interface ProviderGuide {
-  label: MessageKey;
   /** Keychain entry name (`keychain:NAME`) and the env var alternative; `null` when no key is needed. */
   key: { name: string; env: string } | null;
   config: string;
@@ -367,7 +447,6 @@ interface ProviderGuide {
 // i18n-ignore-block: config snippets and shell commands are code, not prose.
 export const PROVIDER_GUIDES: Record<ProviderKind, ProviderGuide> = {
   anthropic: {
-    label: "onboarding.byok.provider.anthropic",
     key: { name: "anthropic", env: "ANTHROPIC_API_KEY" },
     config: `[[providers]]
 id = "anthropic"
@@ -377,7 +456,6 @@ api_key = "keychain:anthropic"
 tiers = ["light", "synthesis", "agentic"]`,
   },
   openai: {
-    label: "onboarding.byok.provider.openai",
     key: { name: "openai", env: "OPENAI_API_KEY" },
     config: `[[providers]]
 id = "openai"
@@ -386,18 +464,37 @@ model = "MODEL-ID"   # a model id from your OpenAI account
 api_key = "keychain:openai"
 tiers = ["light", "synthesis", "agentic"]`,
   },
-  compatible: {
-    label: "onboarding.byok.provider.compatible",
+  openrouter: {
+    key: { name: "openrouter", env: "OPENROUTER_API_KEY" },
+    config: `[[providers]]
+id = "openrouter"
+kind = "openai_compatible"
+base_url = "https://openrouter.ai/api/v1"
+model = "MODEL-ID"   # a model id from openrouter.ai/models
+api_key = "keychain:openrouter"
+tiers = ["light", "synthesis", "agentic"]`,
+  },
+  ollama: {
     key: null,
     config: `[[providers]]
 id = "ollama"
 kind = "openai_compatible"
-base_url = "http://localhost:11434/v1"   # your server's address, with /v1
-model = "qwen3:4b"
+base_url = "http://127.0.0.1:11434/v1"
+model = "llama3.2:3b"   # a model you pulled with ollama pull
+tiers = ["light", "synthesis"]`,
+  },
+  compatible: {
+    key: null,
+    config: `[[providers]]
+id = "custom"
+kind = "openai_compatible"
+base_url = "http://localhost:8080/v1"   # your server's address, with /v1
+model = "MODEL-ID"
 tiers = ["light", "synthesis"]
-# api_key = "env:OPENROUTER_API_KEY"   # only for hosted services`,
+# api_key = "env:NUGGET_CUSTOM_KEY"   # only if the server needs a key`,
   },
 };
+// i18n-ignore-end
 
 /** Where `config.toml` lives (`directories::ProjectDirs` for dev/Nugget/Nugget), unless NUGGET_HOME is set. */
 export function configPath(os: Os): string {
@@ -428,11 +525,9 @@ export function envCommand(os: Os, env: string): string {
 }
 // i18n-ignore-end
 
-function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
+function ByokGuide({ kind, onSaved }: { kind: ProviderKind; onSaved: (provider: string) => void }) {
   const t = useT();
   const os = detectOs();
-  const selectId = useId();
-  const [kind, setKind] = useState<ProviderKind>("anthropic");
   const guide = PROVIDER_GUIDES[kind];
   // A key saved before (running setup again) sets up this path too.
   useEffect(() => {
@@ -445,18 +540,10 @@ function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
 
   return (
     <section className="ob-section" aria-labelledby="ob-byok">
-      <h2 id="ob-byok">{t("onboarding.byok.heading")}</h2>
-      <p className="note">{t("onboarding.byok.never")}</p>
-      <div className="field ob-field">
-        <label htmlFor={selectId}>{t("onboarding.byok.provider")}</label>
-        <select id={selectId} value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
-          {(Object.keys(PROVIDER_GUIDES) as ProviderKind[]).map((k) => (
-            <option key={k} value={k}>
-              {t(PROVIDER_GUIDES[k].label)}
-            </option>
-          ))}
-        </select>
-      </div>
+      <h2 id="ob-byok" className="visually-hidden">
+        {t("onboarding.byok.heading")}
+      </h2>
+      <p className="note">{t(kind === "ollama" ? "onboarding.byok.ollamaNever" : "onboarding.byok.never")}</p>
       <ByokForm kind={kind} onSaved={onSaved} />
       <details className="ob-manual">
         <summary>{t("onboarding.byok.manual")}</summary>

@@ -53,6 +53,7 @@ function SignedInAccount({ email, onChanged }: { email: string | null; onChanged
   const [busy, setBusy] = useState<"signout" | "delete" | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
 
   const run = async (what: "signout" | "delete", fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -90,7 +91,14 @@ function SignedInAccount({ email, onChanged }: { email: string | null; onChanged
       <section aria-labelledby="account-delete">
         <h2 id="account-delete">{t("account.delete.title")}</h2>
         <p className="muted">{t("account.delete.body")}</p>
-        <button type="button" className="btn btn-danger-ghost" onClick={() => setConfirming(true)}>
+        <button
+          type="button"
+          className="btn btn-danger-ghost"
+          onClick={() => {
+            setTyped("");
+            setConfirming(true);
+          }}
+        >
           {t("account.delete.button")}
         </button>
       </section>
@@ -103,12 +111,33 @@ function SignedInAccount({ email, onChanged }: { email: string | null; onChanged
           }}
         >
           <ErrorNote error={error} />
+          {email && (
+            <div className="field delete-confirm">
+              <label htmlFor="delete-email">{t("account.delete.typeEmail", { email })}</label>
+              <input
+                id="delete-email"
+                className="input"
+                type="email"
+                autoComplete="off"
+                spellCheck={false}
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                disabled={busy !== null}
+                data-autofocus
+              />
+            </div>
+          )}
           <div className="dialog-actions">
-            <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setConfirming(false)} data-autofocus>
-              {t("common.cancel")}
-            </button>
-            <button type="button" className="btn btn-danger" disabled={busy !== null} onClick={() => void run("delete", cloudApi.deleteAccount)}>
+            <button
+              type="button"
+              className="btn btn-danger-ghost"
+              disabled={busy !== null || (email != null && typed.trim().toLowerCase() !== email.toLowerCase())}
+              onClick={() => void run("delete", cloudApi.deleteAccount)}
+            >
               {busy === "delete" ? <Spinner /> : t("account.delete.confirm")}
+            </button>
+            <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => setConfirming(false)} data-autofocus={email ? undefined : true}>
+              {t("account.delete.keep")}
             </button>
           </div>
         </Dialog>

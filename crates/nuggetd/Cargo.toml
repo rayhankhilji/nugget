@@ -37,9 +37,12 @@ doc = false
 fake-runtime = []
 
 [dependencies]
+# Sign in with ChatGPT: OpenAI's token, JWKS and model-list requests (features::chatgpt).
+reqwest = { workspace = true }
+url = "2"
 nugget-core.workspace = true
 nugget-store.workspace = true
-nugget-infer.workspace = true
+nugget-infer = { workspace = true, features = ["chatgpt-plan"] }
 nugget-models.workspace = true
 nugget-ipc.workspace = true
 nugget-connector.workspace = true
@@ -90,6 +93,8 @@ zeroize = { version = "1", features = ["serde"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# Signs the fake authorization server's ID tokens in tests/chatgpt.rs.
+aws-lc-rs = "1"
 nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }
 base64 = "0.22"
 tempfile = "3"

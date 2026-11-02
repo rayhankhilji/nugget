@@ -720,7 +720,10 @@ fn editable<'a>(
 /// Whether `ai.key.save` must not take `name` (not in config.toml): Heed's own `local-*`
 /// names, or one the daemon already routes (`known`).
 fn reserved(name: &str, known: impl Fn(&str) -> bool) -> bool {
-    name.starts_with("local-") || known(name)
+    name.starts_with("local-")
+        || name.starts_with("chatgpt-")
+        || name.starts_with("heed-cloud-")
+        || known(name)
 }
 
 fn validate_name(n: &str) -> std::result::Result<(), String> {

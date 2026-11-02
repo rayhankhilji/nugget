@@ -33,31 +33,18 @@ describe("Onboarding", () => {
     });
     const onExit = vi.fn();
     const { container } = await render(<Onboarding connected onExit={onExit} />);
-    expect(heading(container)).toBe("Welcome to Heed");
-    // No account on offer in this build: the local-first welcome, and three stages of progress.
+    // The fork first: no account on offer in this build, three stages of progress, no Continue.
+    expect(heading(container)).toBe("How do you want to run Heed?");
     expect(container.querySelectorAll(".ob-progress li").length).toBe(3);
     expect(container.querySelector('.ob-progress [aria-current="step"]')?.closest("li")?.className).toContain("ob-seg-current");
+    expect(button(container, "Continue")).toBeUndefined();
+    await click(container.querySelector('button.ob-fork-card[data-path="local"]'));
+    expect(loadState()).toMatchObject({ path: "local", step: "ai" });
 
-    await click(button(container, "Continue"));
-    expect(heading(container)).toBe("Add your first source");
-    expect(document.activeElement).toBe(container.querySelector("h1"));
-    expect(loadState().step).toBe("source");
-    // The sources the daemon already has are listed with their progress (GG6-12), so the folder
-    // button offers another one; it opens the folder form directly, skipping the kind picker.
-    await flush();
-    expect(container.querySelectorAll(".ob-index li").length).toBeGreaterThan(0);
-    await click(button(container, "Add another source"));
-    expect(document.querySelector("dialog")).not.toBeNull();
-    expect(byText(document.body, "dialog button", "Choose folders…")).toBeDefined();
-    await click(document.querySelector<HTMLElement>('dialog button[aria-label="Close"]'));
-    expect(document.querySelector("dialog")).toBeNull();
-    // The sources the daemon already has count: wait until the step knows about them.
-    await flush();
-    const hint = () => container.querySelector("#ob-continue-hint");
-    expect(hint()).toBeNull();
-
-    await click(button(container, "Continue"));
+    // Running it yourself: the AI choice comes next.
     expect(heading(container)).toBe("Choose your AI");
+    expect(document.activeElement).toBe(container.querySelector("h1"));
+    const hint = () => container.querySelector("#ob-continue-hint");
     // Local: recommended models with sizes, install with progress.
     const local = container.querySelector<HTMLInputElement>('input[type="radio"][value="local"]')!;
     await click(local);
@@ -82,6 +69,22 @@ describe("Onboarding", () => {
 
     await click(button(container, "Continue"));
     expect(loadState().ai).toBe("local");
+    expect(heading(container)).toBe("Add your first source");
+    expect(loadState().step).toBe("source");
+    // The sources the daemon already has are listed with their progress (GG6-12), so the folder
+    // button offers another one; it opens the folder form directly, skipping the kind picker.
+    await flush();
+    expect(container.querySelectorAll(".ob-index li").length).toBeGreaterThan(0);
+    await click(button(container, "Add another source"));
+    expect(document.querySelector("dialog")).not.toBeNull();
+    expect(byText(document.body, "dialog button", "Choose folders…")).toBeDefined();
+    await click(document.querySelector<HTMLElement>('dialog button[aria-label="Close"]'));
+    expect(document.querySelector("dialog")).toBeNull();
+    // The sources the daemon already has count: wait until the step knows about them.
+    await flush();
+    expect(hint()).toBeNull();
+
+    await click(button(container, "Continue"));
     expect(heading(container)).toBe("What Double Tap needs");
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Choose your Double Tap trigger");
@@ -220,11 +223,13 @@ describe("Onboarding", () => {
   it("GG6-12: the source step remembers a folder across Back and setup again", async () => {
     const folder: SourceInfo = { id: "files-7", kind: "files", name: "back-small", enabled: true, state: "watching", items: 1, chunks: 1 };
     mockDaemon({ sources_list: () => [folder] });
-    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "source", ai: "later", completed: ["welcome"] }} />);
+    const { container } = await render(
+      <Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "source", path: "local", ai: "later", completed: ["welcome", "ai"] }} />,
+    );
     await flush();
     expect(container.querySelector(".ob-index li")?.textContent).toContain("back-small: 1 item indexed. Search works now.");
     await click(button(container, "Back"));
-    expect(heading(container)).toBe("Welcome to Heed");
+    expect(heading(container)).toBe("Choose your AI");
     await click(button(container, "Continue"));
     await flush();
     expect(heading(container)).toBe("Add your first source");
@@ -257,7 +262,7 @@ describe("Onboarding", () => {
   it("takes a key in a masked field only, and still shows the manual setup", async () => {
     mockDaemon();
     const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "ai", completed: ["welcome", "source"] }} />);
-    await click(container.querySelector<HTMLInputElement>('input[value="byok"]'));
+    await click(container.querySelector<HTMLInputElement>('input[value="anthropic"]'));
     // The key goes in a password field that the browser won't remember.
     const key = container.querySelectorAll<HTMLInputElement>('input[type="password"]');
     expect(key).toHaveLength(1);
@@ -315,6 +320,8 @@ describe("Onboarding with a Heed account", () => {
       cloud_sign_in: () => null,
     });
     const { container } = await render(<Onboarding connected onExit={() => {}} />);
+    expect(heading(container)).toBe("How do you want to run Heed?");
+    await click(container.querySelector('button.ob-fork-card[data-path="cloud"]'));
     expect(heading(container)).toBe("Sign in to Heed Cloud");
     // One primary action: Google. The footer's way on is the local-first one, not a primary.
     const google = button(container, "Continue with Google")!;
@@ -328,9 +335,13 @@ describe("Onboarding with a Heed account", () => {
     const without = footer.querySelector<HTMLButtonElement>("button:last-child")!;
     expect(without.classList.contains("btn-primary")).toBe(false);
     await click(without);
-    // Without an account: the local sources, and a way back to sign in for one-click apps.
-    expect(heading(container)).toBe("Add your first source");
+    // Without an account is running it yourself: the AI choice, then the local sources with a
+    // way back to sign in for one-click apps.
+    expect(heading(container)).toBe("Choose your AI");
+    expect(loadState()).toMatchObject({ path: "local" });
     expect(loadState().completed).toContain("welcome");
+    await click(button(container, "Continue"));
+    expect(heading(container)).toBe("Add your first source");
     expect(container.querySelector(".ob-signin-first")).not.toBeNull();
     await click(button(container, "Sign in"));
     expect(heading(container)).toBe("Sign in to Heed Cloud");
@@ -342,7 +353,7 @@ describe("Onboarding with a Heed account", () => {
       cloud_session: () => session,
       cloud_connections_list: () => catalogue,
     });
-    const { container } = await render(<Onboarding connected onExit={() => {}} />);
+    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, path: "cloud" }} />);
     expect(heading(container)).toBe("Sign in to Heed Cloud");
     session = signedIn;
     await act(() => emit("nugget:cloud-session", { signed_in: true, error: null }));

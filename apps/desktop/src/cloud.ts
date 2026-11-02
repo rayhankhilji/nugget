@@ -220,6 +220,21 @@ export function deviceTimeZone(): string | undefined {
   }
 }
 
+/** Display names for the cloud's app catalogue (crates/nugget-cloud/src/apps); anything else is title-cased. */
+const APP_NAMES: Record<string, string> = {
+  gmail: "Gmail",
+  googlecalendar: "Google Calendar",
+  outlook: "Outlook",
+  slack: "Slack",
+  microsoft_teams: "Microsoft Teams",
+  notion: "Notion",
+  googledrive: "Google Drive",
+};
+
+export function appName(slug: string): string {
+  return APP_NAMES[slug] ?? slug.charAt(0).toUpperCase() + slug.slice(1);
+}
+
 export type CloudAppCategory = "mail" | "calendar" | "chat" | "docs" | "files";
 
 /** An app in the catalogue (`cloud_apps`): what it syncs, which actions it can take. */

@@ -245,9 +245,11 @@ body.overlay-body.ghost-body {
   overflow-wrap: break-word;
   word-break: normal;
   background: transparent;
+  /* Ghost text fades in over 80ms and never slides. */
+  animation: fade-in 80ms var(--ease-out);
 }
 
-/* The streaming tail: the newest words fade from ghost grey into the brand coral and out. */
+/* The streaming tail: the newest words fade from ghost grey into ultramarine and out. */
 .ghost-tail {
   background: linear-gradient(90deg, currentColor 0%, var(--brand) 55%, transparent 100%);
   background-size: 200% 100%;

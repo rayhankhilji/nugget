@@ -31,6 +31,7 @@ body.quickask-body {
   block-size: calc(var(--control-h) + 8px);
   padding-inline: 12px;
   font-size: var(--fs-lg);
+  caret-color: var(--heed-signal);
 }
 
 .quickask-hint {

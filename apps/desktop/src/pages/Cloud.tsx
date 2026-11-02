@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { splitCitations } from "../citations";
-import { CloudError, cloudApi, type BillingInterval, type CloudAnswer, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
+import { useEffect, useState } from "react";
+import { CloudError, appName, cloudApi, type BillingInterval, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
 import { formatRelative, formatTime } from "../format";
-import { useAsync, useEvent, useNow, useOpener } from "../hooks";
+import { useAsync, useEvent, useNow } from "../hooks";
 import { AppLogo } from "../components/AppLogo";
 import { requestPage } from "../hooks.nav";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
@@ -26,7 +25,7 @@ export function CloudPage() {
   if (!s) {
     return (
       <div className="page">
-        <PageHeader title={t("cloud.title")} />
+        <PageHeader title={t("app.nav.connections")} />
         {session.error ? <ErrorNote error={session.error} onRetry={session.reload} /> : <Loading label={t("cloud.loading")} lines={1} />}
       </div>
     );
@@ -34,7 +33,7 @@ export function CloudPage() {
   if (!s.configured) {
     return (
       <div className="page">
-        <PageHeader title={t("cloud.title")} />
+        <PageHeader title={t("app.nav.connections")} />
         <EmptyState title={t("cloud.notConfigured.title")}>{t("cloud.notConfigured.body")}</EmptyState>
       </div>
     );
@@ -47,9 +46,8 @@ function SignedIn({ email }: { email: string | null }) {
   const t = useT();
   return (
     <div className="page">
-      <PageHeader title={t("cloud.title")} description={email ? t("cloud.signedInAs", { email }) : t("cloud.signedIn")} />
+      <PageHeader title={t("app.nav.connections")} description={email ? t("cloud.signedInAs", { email }) : t("cloud.signedIn")} />
       <Connections />
-      <CloudAsk />
     </div>
   );
 }
@@ -68,9 +66,12 @@ function Connections() {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [synced, setSynced] = useState<CloudSyncResult[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [show, setShow] = useState<"all" | "connected" | "available">("all");
+  const matches = (name: string) => name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 
   const data = list.data;
-  const nameOf = (slug: string) => data?.available.find((a) => a.slug === slug)?.name ?? slug;
+  const nameOf = (slug: string) => data?.available.find((a) => a.slug === slug)?.name ?? appName(slug);
 
   const act = async (key: string, fn: () => Promise<void>) => {
     setBusy(key);
@@ -117,7 +118,26 @@ function Connections() {
 
   return (
     <>
-      <section aria-labelledby="cloud-connections">
+      {data && (
+        <div className="cloud-filter">
+          <input
+            type="search"
+            className="input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("cloud.filter.search")}
+            aria-label={t("cloud.filter.search")}
+          />
+          <div className="segmented" role="group" aria-label={t("cloud.filter.label")}>
+            {(["all", "connected", "available"] as const).map((v) => (
+              <button key={v} type="button" aria-pressed={show === v} onClick={() => setShow(v)}>
+                {t(`cloud.filter.${v}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <section aria-labelledby="cloud-connections" hidden={show === "available"}>
         <h2 id="cloud-connections">{t("cloud.connections.title")}</h2>
         <CloudErrorNote error={list.error} onRetry={list.reload} />
         <CloudErrorNote error={error} />
@@ -132,7 +152,9 @@ function Connections() {
           <ul className="cloud-conns">
             {data.connections.map((c) => {
               const active = isActive(c.status);
-              const app = data.available.find((a) => a.slug === c.toolkit) ?? { name: c.toolkit, logo: null };
+              const app = data.available.find((a) => a.slug === c.toolkit) ?? { slug: c.toolkit, name: appName(c.toolkit), logo: null, connectable: true };
+              if (!matches(app.name)) return null;
+              const broken = !c.syncing && ((!active && c.status.toLowerCase() !== "initiated") || c.last_error != null);
               return (
                 <li key={c.id} className="card cloud-conn">
                   <div className="cloud-conn-head">
@@ -155,9 +177,16 @@ function Connections() {
                       {c.last_error}
                     </p>
                   )}
-                  <button type="button" className="btn btn-small btn-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: app.name })}>
-                    {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
-                  </button>
+                  <div className="cloud-conn-actions">
+                    {broken && (
+                      <button type="button" className="btn btn-small btn-primary" disabled={busy !== null} onClick={() => void connect(app)}>
+                        {busy === `connect:${app.slug}` ? <Spinner /> : t("cloud.reconnect", { name: app.name })}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-small btn-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: app.name })}>
+                      {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
+                    </button>
+                  </div>
                 </li>
               );
             })}
@@ -185,10 +214,10 @@ function Connections() {
         )}
       </section>
       {data && (
-        <section aria-labelledby="cloud-available">
+        <section aria-labelledby="cloud-available" hidden={show === "connected"}>
           <h2 id="cloud-available">{t("cloud.available.title")}</h2>
           <ul className="cloud-apps">
-            {data.available.map((a) => (
+            {data.available.filter((a) => !connected.has(a.slug) && matches(a.name)).map((a) => (
               <li key={a.slug} className="cloud-app">
                 <AppLogo app={a} />
                 <span className="cloud-app-name">{a.name}</span>
@@ -207,106 +236,6 @@ function Connections() {
         </section>
       )}
     </>
-  );
-}
-
-function CloudAsk() {
-  const t = useT();
-  const [question, setQuestion] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const [answer, setAnswer] = useState<CloudAnswer | null>(null);
-  const [focused, setFocused] = useState<number | null>(null);
-  const opener = useOpener();
-  const valid = useMemo(() => new Set(answer?.citations.map((c) => c.n) ?? []), [answer]);
-
-  const ask = async (e: FormEvent) => {
-    e.preventDefault();
-    const q = question.trim();
-    if (!q) return;
-    setBusy(true);
-    setError(null);
-    try {
-      setAnswer(await cloudApi.ask(q, answer?.conversation_id));
-      setFocused(null);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const cite = (n: number) => {
-    setFocused(n);
-    document.getElementById(`cloud-cite-${n}`)?.focus();
-  };
-
-  return (
-    <section aria-labelledby="cloud-ask">
-      <h2 id="cloud-ask">{t("cloud.ask.title")}</h2>
-      <form onSubmit={(e) => void ask(e)}>
-        <label htmlFor="cloud-question">{t("cloud.ask.label")}</label>
-        <input id="cloud-question" value={question} onChange={(e) => setQuestion(e.target.value)} disabled={busy} />
-        <button type="submit" className="btn btn-primary" disabled={busy || !question.trim()}>
-          {busy ? <Spinner label={t("cloud.ask.thinking")} /> : t("cloud.ask.submit")}
-        </button>
-        {answer && (
-          <button type="button" className="btn" disabled={busy} onClick={() => setAnswer(null)}>
-            {t("cloud.ask.new")}
-          </button>
-        )}
-      </form>
-      <CloudErrorNote error={error} />
-      {answer && (
-        <div className="cloud-answer">
-          {answer.downgraded && (
-            <p className="note" role="status">
-              {t("cloud.ask.downgraded")}
-            </p>
-          )}
-          <p dir="auto">
-            {splitCitations(answer.answer, valid).map((p, i) =>
-              p.kind === "text" ? (
-                <span key={i}>{p.text}</span>
-              ) : (
-                <button key={i} type="button" className="cite" onClick={() => cite(p.n)} aria-label={t("cloud.ask.citationLabel", { n: p.n })}>
-                  {p.raw}
-                </button>
-              ),
-            )}
-          </p>
-          {answer.citations.length > 0 && (
-            <>
-              <h3>{t("cloud.ask.sources")}</h3>
-              <ol className="cloud-citations">
-                {answer.citations.map((c) => {
-                  const title = c.title || t("cloud.ask.untitled");
-                  return (
-                    <li key={c.n} id={`cloud-cite-${c.n}`} tabIndex={-1} aria-current={focused === c.n ? "true" : undefined}>
-                      <span>[{c.n}]</span> <strong dir="auto">{title}</strong> <Badge>{c.source}</Badge>
-                      {c.occurred_at && <span className="muted small"> {formatTime(c.occurred_at)}</span>}
-                      {c.url && (
-                        <button type="button" className="btn btn-small" onClick={() => void opener.open(c.url!, title)} aria-label={t("cloud.ask.openLabel", { title })}>
-                          {t("cloud.ask.open")}
-                        </button>
-                      )}
-                      <div className="small muted" dir="auto">
-                        {c.snippet}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-              {opener.status && (
-                <p className={opener.status.error ? "note note-error" : "small muted"} role="status">
-                  {opener.status.text}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -350,10 +279,8 @@ const ENDED = ["canceled", "incomplete_expired", "unpaid"];
 function statusText(s: CloudSubscription, t: TFunction): string {
   const end = day(s.current_period_end);
   if (s.cancel_at_period_end && end) return t("cloud.billing.status.cancels", { date: end });
-  if (s.status === "trialing") {
-    const until = day(s.trial_end);
-    return until ? t("cloud.billing.status.trialUntil", { date: until }) : t("cloud.billing.status.trialing");
-  }
+  // The strip's "Trial ends" column carries the date; the pill just says Trial.
+  if (s.status === "trialing") return t("cloud.billing.status.trialing");
   if (s.status === "active") return t("cloud.billing.status.active");
   if (s.status === "past_due") return t("cloud.billing.status.pastDue");
   return s.status;
@@ -392,6 +319,14 @@ export function Billing() {
   const ent = me.data?.entitlements;
   const offers = plans.data?.plans ?? [];
   const maxPlan = offers.find((p) => p.id === "heed_max");
+  const current = sub ? offers.find((p) => p.id === sub.plan) : undefined;
+  const price = current ? (sub?.interval === "year" ? current.annual_gbp : current.monthly_gbp) : null;
+  const upgradeTo = sub && sub.plan !== "heed_max" && me.data?.billing !== false ? maxPlan : undefined;
+  const preview = useAsync(
+    () => (upgradeTo && sub ? cloudApi.billingPreview(upgradeTo.id, sub.interval === "year" ? "year" : "month").catch(() => null) : Promise.resolve(null)),
+    [upgradeTo?.id, sub?.interval],
+  );
+  const endsOn = sub ? day(sub.status === "trialing" ? (sub.trial_end ?? sub.current_period_end) : sub.current_period_end) : null;
 
   return (
     <section aria-labelledby={BILLING_HEADING}>
@@ -407,17 +342,53 @@ export function Billing() {
       )}
       {me.loading && !me.data && <Loading lines={2} />}
       {me.data?.billing === false && (
-        <p className="note" role="status">
-          {t("cloud.billing.selfHosted", { plan: ent?.name ?? me.data.plan ?? "" })}
-        </p>
+        <div className="cloud-subscription">
+          <dl className="plan-strip">
+            <div>
+              <dt>{t("cloud.billing.strip.plan")}</dt>
+              <dd>
+                <strong>{t("cloud.billing.selfHostedTitle")}</strong>
+              </dd>
+            </div>
+          </dl>
+          <p className="muted" role="status">
+            {t("cloud.billing.selfHosted", { plan: ent?.name ?? me.data.plan ?? "" })}
+          </p>
+        </div>
       )}
       {me.data && me.data.billing !== false && subscribed && sub && (
         <div className="cloud-subscription">
-          <p>
-            <strong>{ent?.name ?? offers.find((p) => p.id === sub.plan)?.name ?? sub.plan}</strong>{" "}
-            <Badge tone={sub.status === "past_due" ? "bad" : sub.cancel_at_period_end ? "warn" : "good"}>{statusText(sub, t)}</Badge>
-          </p>
-          {ent && <p>{t("cloud.billing.smartAsks", { used: me.data.usage.smart_asks_used, limit: ent.smart_asks_per_month })}</p>}
+          <dl className="plan-strip">
+            <div>
+              <dt>{t("cloud.billing.strip.plan")}</dt>
+              <dd>
+                <strong>{ent?.name ?? offers.find((p) => p.id === sub.plan)?.name ?? sub.plan}</strong>{" "}
+                <Badge tone={sub.status === "past_due" ? "bad" : sub.cancel_at_period_end ? "warn" : "good"}>{statusText(sub, t)}</Badge>
+              </dd>
+            </div>
+            {price != null && (
+              <div>
+                <dt>{t("cloud.billing.strip.price")}</dt>
+                <dd>{t(sub.interval === "year" ? "cloud.billing.strip.perYear" : "cloud.billing.strip.perMonth", { price: gbp(price) })}</dd>
+              </div>
+            )}
+            {endsOn && (
+              <div>
+                <dt>{t(sub.cancel_at_period_end ? "cloud.billing.strip.ends" : sub.status === "trialing" ? "cloud.billing.strip.trialEnds" : "cloud.billing.strip.renews")}</dt>
+                <dd>{endsOn}</dd>
+              </div>
+            )}
+          </dl>
+          {ent && (
+            <div className="usage">
+              <span className="usage-label">
+                {t("cloud.billing.usage.label")} <span className="usage-numbers">{t("cloud.billing.usage.count", { used: formatNumber(me.data.usage.smart_asks_used), limit: formatNumber(ent.smart_asks_per_month) })}</span>
+              </span>
+              <span className="meter" aria-hidden="true">
+                <b style={{ width: `${Math.min(100, (100 * me.data.usage.smart_asks_used) / Math.max(1, ent.smart_asks_per_month))}%` }} />
+              </span>
+            </div>
+          )}
           <p>
             <button type="button" className="btn" disabled={busy !== null} onClick={() => void portal("portal")}>
               {busy === "portal" ? <Spinner /> : t("cloud.billing.manage")}
@@ -427,6 +398,14 @@ export function Billing() {
                 {/* i18n-ignore: the plan's brand name, when the plans list hasn't loaded */}
                 {busy === "upgrade" ? <Spinner /> : t("cloud.billing.upgrade", { name: maxPlan?.name ?? "Heed Max" })}
               </button>
+            )}
+            {preview.data && upgradeTo && (
+              <span className="upgrade-preview">
+                {t(preview.data.interval === "year" ? "cloud.billing.preview.year" : "cloud.billing.preview.month", {
+                  today: formatNumber(preview.data.amount_due / 100, { style: "currency", currency: preview.data.currency.toUpperCase() }),
+                  price: gbp(preview.data.interval === "year" ? upgradeTo.annual_gbp : upgradeTo.monthly_gbp),
+                })}
+              </span>
             )}
           </p>
         </div>
@@ -440,7 +419,10 @@ export function Billing() {
             {offers.map((p) => (
               <li key={p.id}>
                 <h3>{p.name}</h3>
-                <p>{t("cloud.billing.prices", { monthly: gbp(p.monthly_gbp), annual: gbp(p.annual_gbp) })}</p>
+                <p className="plan-price" aria-hidden="true">
+                  {gbp(p.monthly_gbp)}
+                </p>
+                <p className="small">{t("cloud.billing.prices", { monthly: gbp(p.monthly_gbp), annual: gbp(p.annual_gbp) })}</p>
                 {p.trial_days > 0 && <p className="small muted">{t("cloud.billing.trial", { days: p.trial_days })}</p>}
                 <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void checkout(p, "month")} aria-label={t("cloud.billing.startMonthlyLabel", { name: p.name })}>
                   {busy === `checkout:${p.id}:month` ? <Spinner /> : t("cloud.billing.startMonthly")}

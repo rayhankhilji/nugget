@@ -4500,11 +4500,13 @@ version = "0.0.1"
 dependencies = [
  "async-stream",
  "async-trait",
+ "aws-lc-rs",
  "base64 0.22.1",
  "bytes",
  "futures",
  "keyring",
  "nugget-core",
+ "nugget-infer",
  "png 0.18.1",
  "reqwest",
  "serde",
@@ -4837,6 +4839,7 @@ name = "nuggetd"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "aws-lc-rs",
  "base64 0.22.1",
  "clap",
  "futures",
@@ -4886,6 +4889,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "unicode-normalization",
+ "url",
  "uuid",
  "wiremock",
  "zeroize",

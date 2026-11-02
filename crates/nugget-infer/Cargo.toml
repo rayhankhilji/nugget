@@ -7,6 +7,12 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Sign in with ChatGPT (`chatgpt` module): ChatGPT plan usage for LOCAL mode only. Only nuggetd
+# enables it; the hosted service (`nugget-cloud`, built alone with `-p nugget-cloud`) never
+# compiles it in (OpenAI's open-source programme covers locally run apps, not hosted ones).
+chatgpt-plan = ["dep:aws-lc-rs"]
+
 [dependencies]
 nugget-core.workspace = true
 serde.workspace = true
@@ -18,6 +24,8 @@ futures.workspace = true
 time.workspace = true
 async-stream = "0.3"
 base64 = "0.22"
+# RS256 ID-token checks, PKCE and random state for Sign in with ChatGPT: the workspace provider.
+aws-lc-rs = { version = "1", optional = true }
 bytes = "1"
 png = "0.18"
 toml = "1"
@@ -40,6 +48,8 @@ keyring = { workspace = true, features = ["windows-native"] }
 keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
 
 [dev-dependencies]
+# The crate's own tests cover the optional Sign in with ChatGPT module too.
+nugget-infer = { path = ".", features = ["chatgpt-plan"] }
 wiremock = "0.6"
 tokio = { workspace = true }
 

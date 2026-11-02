@@ -80,4 +80,21 @@ describe("ghost text rendering", () => {
     await flush(5);
     expect(el.textContent).toBe("");
   });
+
+  it("teaches the keys on the first 3 suggestions only, then shows the dot alone", async () => {
+    localStorage.removeItem("heed.ghost.hintsShown");
+    mockDaemon({});
+    await render(<Ghost />);
+    await flush(5);
+    const chip = () => document.querySelector(".ghost-chip");
+    for (const [i, text] of [" one.", " two.", " three.", " four."].entries()) {
+      await act(async () => {
+        await emit(GHOST_EVENT, { ...paint, text, streaming: false });
+      });
+      await flush(5);
+      expect(chip()).not.toBeNull();
+      expect(chip()!.textContent?.includes("Tab")).toBe(i < 3);
+    }
+    localStorage.removeItem("heed.ghost.hintsShown");
+  });
 });

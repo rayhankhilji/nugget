@@ -228,10 +228,20 @@ export function formatNumber(n: number, opts?: Intl.NumberFormatOptions): string
   return numberFormat(state.locale, opts).format(n);
 }
 
+/**
+ * The locale for dates and times: the computer's regional variant of the UI language when it has
+ * one (English on a UK Mac gives en-GB: "Tue 3 Nov", 24-hour), else the UI language itself.
+ */
+export function regionalLocale(): string {
+  if (state.locale.includes("-")) return state.locale;
+  const system = typeof navigator === "undefined" ? [] : navigator.languages?.length ? navigator.languages : [navigator.language];
+  return system.find((l) => l?.split("-")[0]?.toLowerCase() === state.locale) ?? state.locale;
+}
+
 export function formatDate(d: Date | string | number, opts: Intl.DateTimeFormatOptions = { dateStyle: "medium" }): string {
   const date = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(date.getTime())) return String(d);
-  return dateFormat(state.locale, opts).format(date);
+  return dateFormat(regionalLocale(), opts).format(date);
 }
 
 /** "a, b and c" in the current locale. */

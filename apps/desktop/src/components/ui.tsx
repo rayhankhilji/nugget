@@ -3,11 +3,14 @@ import { ApiError } from "../api";
 import { useT } from "../i18n";
 import "../styles-pages.css";
 
-export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
+export function PageHeader({ title, description, actions, count }: { title: string; description?: ReactNode; actions?: ReactNode; count?: string }) {
   return (
     <header className="page-header">
       <div>
-        <h1>{title}</h1>
+        <h1>
+          {title}
+          {count && <span className="page-count">{count}</span>}
+        </h1>
         {description && <p className="muted">{description}</p>}
       </div>
       {actions && <div className="page-actions">{actions}</div>}

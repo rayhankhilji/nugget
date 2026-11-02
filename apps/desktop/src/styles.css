@@ -445,7 +445,7 @@ main {
 }
 
 .btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
-  background: var(--accent-strong);
+  background: var(--accent-hover);
   filter: none;
 }
 
@@ -876,23 +876,23 @@ textarea:focus-visible {
 
 progress {
   width: 100%;
-  height: 8px;
+  height: 6px;
   appearance: none;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--accent-soft);
   overflow: hidden;
 }
 
 progress::-webkit-progress-bar {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--accent-soft);
   border-radius: 999px;
 }
 
 progress::-webkit-progress-value {
   background: var(--accent);
   border-radius: 999px;
-  transition: width 0.2s ease;
+  transition: width var(--dur-3) var(--ease-in);
 }
 
 progress::-moz-progress-bar {
@@ -3194,28 +3194,22 @@ tr[aria-current="true"] {
 }
 
 .mark-halo {
-  fill: var(--brand);
+  fill: var(--heed-warn);
+  stroke: var(--bg);
+  stroke-width: 3;
   opacity: 0;
 }
 
-.mark-line {
-  fill: var(--mark-line);
-}
-
+/* Something needs you: a small warm dot on the mark's corner breathes slowly. */
 .mark-pulse .mark-halo {
-  transform-origin: 32px 25px;
-  animation: mark-pulse 2.4s var(--ease-out) infinite;
+  opacity: 1;
+  transform-origin: 54px 10px;
+  animation: mark-pulse 2.4s var(--ease-in) infinite;
 }
 
 @keyframes mark-pulse {
-  0% {
-    opacity: 0.45;
-    transform: scale(0.6);
-  }
-  70%,
-  100% {
-    opacity: 0;
-    transform: scale(1.25);
+  50% {
+    transform: scale(0.8);
   }
 }
 
@@ -3432,13 +3426,18 @@ tr[aria-current="true"] {
   padding: 0;
 }
 
+.home-suggestions > li {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .home-suggestion {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 28px;
   max-width: 100%;
-  padding: 0 10px;
+  padding: 4px 10px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -3453,9 +3452,7 @@ tr[aria-current="true"] {
 }
 
 .home-suggestion bdi {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .home-suggestion .icon {
@@ -3636,7 +3633,12 @@ tr[aria-current="true"] {
 }
 
 /* The content's toolbar: the page name, small and centred-start, like a unified title bar. */
-.mac-window main {
+.mac-window main:not(.ob-main) {
+  background: var(--bg);
+}
+
+/* First run fills the window itself: an opaque canvas under its sky, not the vibrancy. */
+.mac-window body:has(.onboarding) {
   background: var(--bg);
 }
 
@@ -3737,7 +3739,7 @@ tr[aria-current="true"] {
 .cloud-conns {
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
   gap: var(--space-3);
   margin: 0 0 var(--space-4);
   padding: 0;
@@ -3759,7 +3761,9 @@ tr[aria-current="true"] {
   flex: 1;
   min-width: 0;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cloud-conn-sync {
@@ -3789,4 +3793,1162 @@ tr[aria-current="true"] {
   .cloud-conn-meter {
     animation: none;
   }
+}
+
+/* ======================================================================================
+   Heed v4 surfaces: Fraunces for display, Geist for the UI, Geist Mono for numbers; calm
+   white cards over cream; ultramarine as a field, not a hairline. Colours, type and motion
+   come from brand/tokens.css.
+   ====================================================================================== */
+
+/* Display type: Fraunces, soft and a little wonky, light and tight. 28px and up only. */
+.page-header h1,
+.empty-title,
+.home-empty-title,
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: var(--heed-display-weight);
+  letter-spacing: var(--heed-display-tracking);
+}
+
+.page-header h1 {
+  font-size: var(--fs-2xl);
+  line-height: 1.08;
+}
+
+.page-home .page-header h1 {
+  font-size: 44px;
+  font-weight: 320;
+  letter-spacing: -0.025em;
+}
+
+/* Inline citations: a small grey pill after the sentence, not a footnote mark. */
+.cite {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--heed-ink) 7%, transparent);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 20px;
+  vertical-align: 1px;
+}
+
+.cite:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* Numbers, times, counts and shortcuts in Geist Mono with tabular figures. */
+kbd,
+.nav-count,
+.mono,
+.num,
+.stat-value,
+.usage-numbers {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meta lines mix words and numbers: Geist, with tabular figures so the numbers still line up. */
+.result-meta,
+.needs-item-kind,
+.cloud-conn-sync,
+.action-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+kbd {
+  font-size: 11px;
+}
+
+/* Buttons: flat and calm. Filled ultramarine for the one primary action. */
+.btn {
+  border-radius: var(--radius-small);
+  border: 1px solid var(--heed-line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  box-shadow: 0 1px 2px rgb(7 7 152 / 0.25);
+}
+
+.btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--accent-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Cards: white, soft and low, 16px radius. */
+.card,
+.source,
+.home-composer,
+.composer,
+.citation,
+.cloud-conn {
+  border-radius: var(--radius-large);
+}
+
+/* The sidebar: cream (light) or ink-blue night (dark), hairline edge. */
+.sidebar {
+  border-inline-end: 1px solid var(--hairline);
+}
+
+.nav-item[aria-current="page"] {
+  background: color-mix(in srgb, var(--heed-signal) 10%, transparent);
+}
+
+.nav-item[aria-current="page"] .icon {
+  color: var(--accent-text);
+}
+
+/* Home: a sky band behind the greeting and the ask box, which float on it like cards. */
+.page-home {
+  position: relative;
+  isolation: isolate;
+  padding-block-start: var(--space-7);
+}
+
+.page-home::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block-start: 0;
+  inset-inline: calc(50% - 50vw);
+  height: 360px;
+  background:
+    linear-gradient(to bottom, transparent 40%, var(--bg)),
+    url("./brand/img/sky.webp") center 30% / cover no-repeat;
+  opacity: 0.9;
+  animation: sky-drift 40s var(--ease-in) infinite alternate;
+}
+
+@media (prefers-color-scheme: dark) {
+  .page-home::before {
+    background:
+      linear-gradient(to bottom, rgb(11 11 26 / 0.55), var(--bg) 92%),
+      url("./brand/img/sky.webp") center 30% / cover no-repeat;
+    opacity: 0.75;
+  }
+}
+
+/* The brand moment: a slow drift of at most 12px. */
+@keyframes sky-drift {
+  to {
+    background-position:
+      0 0,
+      calc(50% + 12px) 32%;
+  }
+}
+
+.page-home .page-header p,
+.page-home .page-header .btn {
+  color: var(--text-2);
+}
+
+.home-composer {
+  box-shadow: var(--heed-shadow-3);
+}
+
+.brief-prose .cited-text {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 100, "WONK" 0;
+  font-weight: 350;
+  font-size: 19px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+/* Empty states: a dot-grid field, a Fraunces line, one action. */
+.empty {
+  border-radius: var(--radius-large);
+  background:
+    radial-gradient(color-mix(in srgb, var(--heed-signal) 22%, transparent) 1px, transparent 1.4px) 0 0 / 14px 14px,
+    var(--surface-2);
+  mask-image: none;
+}
+
+.empty-title {
+  font-size: var(--fs-2xl);
+  margin-block-end: var(--space-2);
+}
+
+.home-empty-title {
+  font-size: var(--fs-2xl);
+}
+
+/* Agent-progress card: the approval queue's steps, meter and counts. */
+.action-steps {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.action-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-steps li[data-state="todo"] {
+  color: var(--muted);
+}
+
+.step-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.step-dot.done {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.step-dot.done path {
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+  animation: step-draw 180ms var(--ease-out) forwards;
+}
+
+@keyframes step-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Waiting on the person, not on Heed: a still ring with a dot, breathing softly at most. */
+.step-dot.now {
+  border: 2px solid var(--accent-text);
+  background: radial-gradient(circle, var(--accent-text) 0 3px, transparent 3.5px);
+  animation: step-wait 2.4s var(--ease-in) infinite;
+}
+
+@keyframes step-wait {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--heed-signal) 14%, transparent);
+  }
+}
+
+.step-dot.todo {
+  border: 1.5px solid var(--control-border);
+}
+
+.action-steps li[data-state="now"] {
+  font-weight: 500;
+  color: var(--accent-text);
+}
+
+.meter {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.meter > b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--heed-signal);
+  transition: width var(--dur-3) var(--ease-in);
+}
+
+.action-meta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* Plan & billing: plan cards with a Fraunces price and a mono usage meter. */
+.cloud-plans {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.cloud-plans > li {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.cloud-plans > li:last-child {
+  background: var(--heed-signal-deep);
+  color: #fff;
+}
+
+.cloud-plans > li:last-child .muted,
+.cloud-plans > li:last-child .small {
+  color: rgb(255 255 255 / 0.78);
+}
+
+.cloud-plans > li:last-child .btn:not(.btn-primary) {
+  background: transparent;
+  color: #fff;
+  border-color: rgb(255 255 255 / 0.4);
+}
+
+.cloud-plans h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: 380;
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
+}
+
+.plan-price {
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: 340;
+  font-size: var(--fs-3xl);
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.cloud-subscription {
+  display: grid;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.usage {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.usage-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* Plan · Price · Renews: a quiet strip of facts, labels small above their values. */
+.plan-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.plan-strip > div {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.plan-strip dt {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.plan-strip dd {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.cloud-subscription > p:last-child {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.usage-numbers {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* Lists stagger by 30ms, at most 8 items. */
+.needs-list > li:nth-child(4),
+.results > li:nth-child(4),
+.source-list > li:nth-child(4) {
+  animation-delay: 90ms;
+}
+
+.needs-list > li:nth-child(5),
+.results > li:nth-child(5) {
+  animation-delay: 120ms;
+}
+
+.needs-list > li:nth-child(6),
+.results > li:nth-child(6) {
+  animation-delay: 150ms;
+}
+
+.needs-list > li:nth-child(n + 7),
+.results > li:nth-child(n + 7) {
+  animation-delay: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-home::before,
+  .action-steps li[data-state="now"],
+  .step-dot.now {
+    animation: none;
+  }
+
+  .step-dot.done path {
+    stroke-dashoffset: 0;
+    animation: none;
+  }
+}
+
+/* App logo tiles: the app's logo, or its initial, on a white tile in both themes. */
+.app-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line), var(--shadow);
+  color: var(--logo-ink);
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  overflow: hidden;
+}
+
+.app-logo img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* Available apps: a three-column gallery of tiles, connect on the right. */
+.cloud-apps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+}
+
+.cloud-app {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.cloud-app-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cloud-conn {
+  padding: var(--space-4);
+}
+
+.cloud-conn .btn-ghost {
+  margin-inline-start: -8px;
+}
+
+/* Ask your cloud: one line, the field takes the room. */
+section[aria-labelledby="cloud-ask"] form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 720px;
+}
+
+section[aria-labelledby="cloud-ask"] form input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* What an approval will send reads like the message it is, not like a code diff. */
+.action-item .today-diff {
+  border: 0;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  padding: var(--space-3) var(--space-4);
+}
+
+.action-item .today-diff-add {
+  background: none;
+  color: var(--text);
+  text-decoration: none;
+  white-space: pre-wrap;
+}
+
+.action-item .today-diff li {
+  display: block;
+  padding: 0;
+}
+
+.action-item .action-diff-field {
+  display: block;
+  margin-block-end: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* Provider status (Settings): one row per AI the app can use; health is the only green here. */
+.provider-status {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.provider-status > li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.provider-status > li + li {
+  border-block-start: 1px solid var(--hairline);
+}
+
+.provider-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--heed-ink-3);
+}
+
+.provider-dot[data-health="ok"] {
+  background: var(--heed-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-ok) 18%, transparent);
+}
+
+.provider-dot[data-health="warn"] {
+  background: var(--heed-warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-warn) 18%, transparent);
+}
+
+.provider-name {
+  font-weight: 600;
+}
+
+.provider-detail {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.provider-model {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.provider-status .provider-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Settings: the Advanced group is a disclosure, collapsed unless one of its pages is open. */
+.nav-advanced > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: var(--radius-small);
+}
+
+.nav-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-advanced > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-inline-end: 1.5px solid currentColor;
+  border-block-end: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--dur-1) var(--ease-out);
+}
+
+[dir="rtl"] .nav-advanced > summary::after {
+  transform: rotate(135deg);
+}
+
+.nav-advanced[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+.nav-advanced > summary:hover {
+  color: var(--text);
+}
+
+.nav-advanced > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* Toasts: one ink pill, bottom centre, rising in; ⌘Z runs its Undo. */
+.toaster {
+  position: fixed;
+  z-index: 50;
+  inset-block-end: var(--space-5);
+  inset-inline: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: var(--heed-ink);
+  color: var(--heed-canvas);
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+  animation: toast-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.toast-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast-action,
+.toast-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action {
+  padding: 4px 10px;
+  color: color-mix(in srgb, var(--heed-signal) 45%, var(--heed-canvas));
+}
+
+.toast-action kbd {
+  background: rgb(255 255 255 / 0.12);
+  border-color: transparent;
+  color: inherit;
+}
+
+.toast-close {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  opacity: 0.7;
+}
+
+.toast-action:hover,
+.toast-close:hover {
+  background: rgb(255 255 255 / 0.1);
+  opacity: 1;
+}
+
+.toast-action:focus-visible,
+.toast-close:focus-visible {
+  outline: 2px solid var(--heed-signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toast {
+    background: var(--heed-ink);
+    color: #0b0b1a;
+  }
+
+  .toast-action {
+    color: var(--heed-signal-deep);
+  }
+
+  .toast-action kbd,
+  .toast-action:hover,
+  .toast-close:hover {
+    background: rgb(0 0 0 / 0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: fade-in var(--dur-1) linear;
+  }
+}
+
+/* The approval queue as a split: one line per action, the full preview beside it. */
+.action-split {
+  margin-block-end: var(--space-5);
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-2);
+  align-items: center;
+}
+
+.action-row .app-logo {
+  grid-row: span 2;
+}
+
+.action-footer {
+  position: sticky;
+  inset-block-end: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: var(--space-3) 0;
+  border-block-start: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.action-footer .keycap + .btn {
+  margin-inline-start: var(--space-3);
+}
+
+/* The trial: a quiet sidebar row, then a Home card in the last 3 days. */
+.trial-row {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.trial-dot {
+  width: 7px;
+  height: 7px;
+  margin-inline: 4px 2px;
+  border-radius: 50%;
+  background: var(--heed-signal);
+}
+
+.trial-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block-end: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-large);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--heed-signal) 18%, transparent);
+}
+
+.trial-card h2 {
+  margin: 0 0 2px;
+  font-size: var(--fs-lg);
+}
+
+.trial-card p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* Connections: find an app, and show all, connected or available. */
+.cloud-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.cloud-filter input {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.cloud-conn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The sidebar sync pill: what is importing, with a thin sweep. */
+.sync-pill {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin-block-end: var(--space-2);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.sync-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.sync-pill-text {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sync-pill-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.sync-pill-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--heed-signal), transparent) 0 0 / 40% 100% no-repeat, color-mix(in srgb, var(--heed-signal) 14%, transparent);
+  animation: meter-sweep 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-pill-bar {
+    animation: none;
+    background: color-mix(in srgb, var(--heed-signal) 30%, transparent);
+  }
+}
+
+/* Citation chips name the source app; the "N sources" stack opens the list. */
+.cite.cite-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 3px;
+  font-family: var(--font);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.cite-glyph,
+.sources-stack-glyphs > span {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line);
+  color: var(--logo-ink);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.sources-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block: var(--space-3) var(--space-2);
+  padding: 4px 12px 4px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--heed-ink) 6%, transparent);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.sources-stack:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.sources-stack:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sources-stack-glyphs {
+  display: inline-flex;
+}
+
+.sources-stack-glyphs > span {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 1px var(--heed-line);
+}
+
+.sources-stack-glyphs > span + span {
+  margin-inline-start: -6px;
+}
+
+/* ⌘K: sections with a small heading, the active row says "Open ↵", filters as chips. */
+.palette-section-head {
+  padding: 16px 14px 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.palette-source {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.palette-open {
+  font-size: var(--fs-xs);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.palette-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px 0;
+}
+
+.palette-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* `hidden` wins over the display these lists set for themselves. */
+.citations[hidden],
+section[hidden] {
+  display: none;
+}
+
+/* Needs you: one queue (approvals, then cards) beside one pane; the header carries the count. */
+.page-count {
+  margin-inline-start: 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  vertical-align: 0.35em;
+}
+
+.needs-queue {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.needs-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 12px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.needs-section:first-child {
+  margin-block-start: 0;
+}
+
+.palette-section:first-child .palette-section-head {
+  padding-block-start: 10px;
+}
+
+.palette-option .palette-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.palette-detail {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.palette-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.palette-count {
+  margin-inline-start: auto;
+  font-family: var(--mono);
+}
+
+.palette-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Approval pane: Edit and Snooze sit right of Approve / Reject; the editor and menu stay inline. */
+.action-footer-gap {
+  flex: 1;
+}
+
+.action-editor {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.action-editor textarea {
+  resize: vertical;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.snooze-menu {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  animation: rise-in var(--dur-2) var(--ease-out);
+}
+
+.snooze-menu-title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.snooze-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.snooze-time {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.snooze-custom {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.snooze-custom input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* "£60.00 today, then £99 a month" beside Upgrade. */
+.upgrade-preview {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .snooze-menu {
+    animation: fade-in var(--dur-1) linear;
+  }
+}
+
+/* App glyphs: the Connections logos, small and round, in chips, the sources stack and search. */
+.app-glyph,
+.cite-glyph,
+.sources-stack-glyphs > span {
+  overflow: hidden;
+}
+
+.app-glyph img,
+.cite-glyph img,
+.sources-stack-glyphs > span img {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+}
+
+.app-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-inline-end: 6px;
+  border-radius: 50%;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line);
+  color: var(--logo-ink);
+  font-size: 9px;
+  font-weight: 700;
+  vertical-align: -3px;
 }

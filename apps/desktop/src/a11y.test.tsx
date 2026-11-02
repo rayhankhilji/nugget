@@ -58,7 +58,9 @@ describe("axe", () => {
     expect(document.documentElement.lang).toBe("ar");
     const state: OnboardingState = { version: 1, step: "welcome", completed: [], skipped: [], ai: null, finished: false };
     const { container } = await render(<Onboarding connected initial={state} onExit={() => {}} />);
-    expect(container.querySelector("h1")?.textContent).toBe("مرحبًا بك في Heed");
+    // The first-run fork.
+    expect(container.querySelector("h1")?.textContent).toBe("كيف تريد تشغيل Heed؟");
+    expect(container.querySelectorAll(".ob-fork button.ob-fork-card")).toHaveLength(2);
     expect(await violations()).toEqual([]);
   });
 });

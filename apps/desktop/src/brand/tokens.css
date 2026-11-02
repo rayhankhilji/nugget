@@ -1,0 +1,133 @@
+/* Heed brand tokens v4: the one source of colour, type, space, radius, depth and motion for the
+   desktop app and the website (copy this file verbatim; see docs/brand/index.html).
+   Light is warm cream and ink; dark is a deep ink-blue night. Every text pair meets WCAG AA:
+   --heed-ink-3 is for icons, rules and disabled states only (not text), and signal-coloured text
+   on the canvas is for 18px and up or UI chrome. Status colours have a fill (dots, meters) and an
+   -ink variant for text. */
+
+:root {
+  /* Canvas and surfaces */
+  --heed-canvas: #f6f3ec;
+  --heed-surface: #ffffff;
+  --heed-surface-2: #fbf9f4;
+  --heed-line: rgb(20 17 15 / 0.08);
+  --heed-line-strong: rgb(20 17 15 / 0.14);
+
+  /* Ink */
+  --heed-ink: #14110f;
+  --heed-ink-2: #4a4540;
+  --heed-ink-3: #8a847c;
+  /* Quiet text that still meets AA on canvas and surfaces. */
+  --heed-ink-quiet: #5f5951;
+
+  /* Signal: ultramarine */
+  --heed-signal: #1f3bff;
+  --heed-signal-hover: #1830d6;
+  --heed-signal-deep: #070798;
+  --heed-signal-wash: #e9ecff;
+  --heed-signal-ink: #1f3bff;
+  /* Filled buttons and big fields with white text on them. */
+  --heed-signal-fill: #1f3bff;
+  --heed-on-signal: #ffffff;
+  --heed-lilac: #e8e3ff;
+
+  /* Meaning only */
+  --heed-ok: #1e8e5a;
+  --heed-warn: #c77700;
+  --heed-danger: #d93a2b;
+  --heed-ok-ink: #17744b;
+  --heed-warn-ink: #995b00;
+  --heed-danger-ink: #b83224;
+
+  /* Type */
+  --heed-font-display: "Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, "Noto Serif", serif;
+  --heed-font-ui: "Geist", system-ui, -apple-system, "Segoe UI", "Noto Sans", "Noto Sans Arabic", "Noto Sans Devanagari",
+    "Hiragino Sans", "PingFang SC", "Microsoft YaHei", "Yu Gothic UI", sans-serif;
+  --heed-font-mono: "Geist Mono", ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  /* Fraunces at 28px and up: soft, a little wonky, light. */
+  --heed-display-settings: "SOFT" 100, "WONK" 1;
+  --heed-display-weight: 360;
+  --heed-display-tracking: -0.02em;
+  --heed-size-12: 12px;
+  --heed-size-13: 13px;
+  --heed-size-14: 14px;
+  --heed-size-16: 16px;
+  --heed-size-20: 20px;
+  --heed-size-28: 28px;
+  --heed-size-40: 40px;
+  --heed-size-56: 56px;
+  --heed-size-80: 80px;
+  --heed-size-96: 96px;
+
+  /* Space (4-pt) and radius */
+  --heed-space-1: 4px;
+  --heed-space-2: 8px;
+  --heed-space-3: 12px;
+  --heed-space-4: 16px;
+  --heed-space-5: 24px;
+  --heed-space-6: 32px;
+  --heed-space-7: 48px;
+  --heed-space-8: 64px;
+  --heed-radius-s: 8px;
+  --heed-radius-m: 12px;
+  --heed-radius-l: 16px;
+  --heed-radius-xl: 24px;
+  --heed-radius-pill: 999px;
+
+  /* Depth: soft, low, warm */
+  --heed-shadow-1: 0 1px 2px rgb(20 17 15 / 0.06);
+  --heed-shadow-2: 0 1px 2px rgb(20 17 15 / 0.04), 0 8px 24px rgb(20 17 15 / 0.06);
+  --heed-shadow-3: 0 2px 6px rgb(20 17 15 / 0.06), 0 24px 60px rgb(20 17 15 / 0.14);
+
+  /* Motion */
+  --heed-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --heed-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --heed-dur-micro: 120ms;
+  --heed-dur-ui: 200ms;
+  --heed-dur-panel: 320ms;
+  --heed-dur-brand: 760ms;
+  --heed-rise: 8px;
+  --heed-stagger: 30ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --heed-canvas: #0b0b1a;
+    --heed-surface: #131327;
+    --heed-surface-2: #1a1a33;
+    --heed-line: rgb(233 236 255 / 0.09);
+    --heed-line-strong: rgb(233 236 255 / 0.16);
+    --heed-ink: #f3f1ec;
+    --heed-ink-2: #b9b6c8;
+    --heed-ink-3: #7d7a92;
+    --heed-ink-quiet: #9a97ad;
+    --heed-signal: #5a6cff;
+    --heed-signal-hover: #7383ff;
+    --heed-signal-deep: #070798;
+    --heed-signal-wash: #1d2050;
+    --heed-signal-ink: #8a97ff;
+    --heed-signal-fill: #4a5cff;
+    --heed-on-signal: #ffffff;
+    --heed-lilac: #2a2550;
+    --heed-ok: #3fb67f;
+    --heed-warn: #e59a2a;
+    --heed-danger: #f0604f;
+    --heed-ok-ink: #6fd3a0;
+    --heed-warn-ink: #ffb547;
+    --heed-danger-ink: #ff8b7e;
+    --heed-shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --heed-shadow-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 10px 28px rgb(0 0 0 / 0.35);
+    --heed-shadow-3: 0 2px 8px rgb(0 0 0 / 0.35), 0 28px 70px rgb(0 0 0 / 0.55);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --heed-dur-micro: 0ms;
+    --heed-dur-ui: 0ms;
+    --heed-dur-panel: 0ms;
+    --heed-dur-brand: 0ms;
+    --heed-rise: 0px;
+    --heed-stagger: 0ms;
+  }
+}

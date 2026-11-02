@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { act } from "react";
-import { CloudError, cloudApi, type CloudAnswer, type CloudConnections, type CloudMe, type CloudPlan, type CloudSession } from "../cloud";
+import { CloudError, cloudApi, type CloudConnections, type CloudMe, type CloudPlan, type CloudSession } from "../cloud";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { CloudPage } from "./Cloud";
 import { AccountPage } from "./Account";
@@ -46,13 +46,6 @@ const trialing: CloudMe = {
 };
 /** The account and plans every signed-in page loads. */
 const billing = { cloud_me: trialing, cloud_billing_plans: plans };
-
-const answer: CloudAnswer = {
-  conversation_id: "c1",
-  answer: "Your flight is on Tuesday [1]. Not a cite [9].",
-  citations: [{ n: 1, item_id: "i1", title: "Booking confirmed", source: "gmail", url: "https://mail.example/i1", occurred_at: "2026-10-30T09:00:00Z", snippet: "Flight BA1 departs", author: null }],
-  usage: { input_tokens: 10, output_tokens: 5 },
-};
 
 async function type(input: HTMLInputElement, value: string) {
   await act(async () => {
@@ -154,47 +147,6 @@ describe("CloudPage", () => {
     ]);
   });
 
-  it("asks with citations, keeps the conversation and shows quota errors", async () => {
-    const asks: unknown[] = [];
-    let quota = false;
-    const opened: unknown[] = [];
-    mockDaemon({
-      ...billing,
-      cloud_session: signedIn,
-      cloud_connections_list: lists,
-      cloud_ask: (args: unknown) => {
-        asks.push(args);
-        if (quota) throw { kind: "rpc", message: "You've used this month's AI allowance.", code: null, cloud: "quota_exceeded" };
-        return answer;
-      },
-      open_url: (args: unknown) => {
-        opened.push(args);
-        return "opened";
-      },
-    });
-    const { container } = await render(<CloudPage />);
-    const input = container.querySelector<HTMLInputElement>("#cloud-question")!;
-    const form = input.closest("form")!;
-    await type(input, "When is my flight?");
-    await submit(form);
-    const text = container.querySelector(".cloud-answer p")!;
-    expect(text.textContent).toBe("Your flight is on Tuesday [1]. Not a cite [9].");
-    // Only real citations become buttons.
-    expect(text.querySelectorAll("button.cite")).toHaveLength(1);
-    await click(text.querySelector("button.cite"));
-    const item = container.querySelector<HTMLElement>("#cloud-cite-1")!;
-    expect(document.activeElement).toBe(item);
-    expect(item.textContent).toContain("Booking confirmed");
-    expect(item.textContent).toContain("gmail");
-    await click(byText(item, "button", "Open"));
-    expect(opened).toEqual([{ url: "https://mail.example/i1" }]);
-
-    quota = true;
-    await type(input, "And the return?");
-    await submit(form);
-    expect(asks).toEqual([{ question: "When is my flight?" }, { question: "And the return?", conversationId: "c1" }]);
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain("You've used this month's AI allowance.");
-  });
 });
 
 describe("Plan & billing", () => {
@@ -255,8 +207,8 @@ describe("Plan & billing", () => {
     });
     const { container } = await render(<AccountPage />);
     let s = section(container);
-    expect(s.textContent).toMatch(/Trial until .*2026/);
-    expect(s.textContent).toContain("Smart asks this month: 7 of 300");
+    expect(s.textContent).toMatch(/Trial ends.*2026/);
+    expect(s.textContent).toContain("Smart asks this month 7 of 300");
     await click(byText(s, "button", "Manage billing"));
     await click(byText(s, "button", "Upgrade to Heed Max"));
     expect(portals).toBe(2);
@@ -287,7 +239,6 @@ describe("Plan & billing", () => {
       cloud_billing_plans: plans,
       cloud_sync: fail("subscription_required"),
       cloud_connect: fail("connection_limit_reached"),
-      cloud_ask: fail("device_limit_reached"),
     });
     const { container } = await render(
       <>
@@ -303,21 +254,8 @@ describe("Plan & billing", () => {
 
     await click(byText(container.querySelector(".cloud-apps")!, "button", "Connect"));
     expect(container.textContent).toContain("Your plan's limit of connected apps is reached");
-
-    const input = container.querySelector<HTMLInputElement>("#cloud-question")!;
-    await type(input, "q");
-    await submit(input.closest("form")!);
-    expect(container.querySelector('section[aria-labelledby="cloud-ask"] [role="alert"]')?.textContent).toContain("Your plan's device limit is reached");
   });
 
-  it("says when a smart ask fell back to the fast model", async () => {
-    mockDaemon({ ...billing, cloud_session: signedIn, cloud_connections_list: lists, cloud_ask: { ...answer, model_tier: "fast", downgraded: true } });
-    const { container } = await render(<CloudPage />);
-    const input = container.querySelector<HTMLInputElement>("#cloud-question")!;
-    await type(input, "q");
-    await submit(input.closest("form")!);
-    expect(container.querySelector(".cloud-answer")?.textContent).toContain("this month's smart asks are used up");
-  });
 });
 
 describe("CloudPage background import", () => {

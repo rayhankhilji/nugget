@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
-import { api, chatHistory, events, errorMessage, proactiveApi, proactiveEvents, type ConnectionInfo, type PageId, type StoredConversation } from "./api";
+import { api, chatHistory, events, errorMessage, isOpenableUrl, proactiveApi, proactiveEvents, type ConnectionInfo, type PageId, type StoredConversation } from "./api";
 import { useEvent } from "./hooks";
-import { requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
+import { requestChatAsk, requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
-import { useT, type MessageKey } from "./i18n";
-import { Logo } from "./components/Logo";
+import { formatList, useT, type MessageKey } from "./i18n";
+import { Wordmark } from "./components/Logo";
+import { Toaster } from "./components/Toast";
+import { APPROVALS_CHANGED, needsTotal, useHeldApprovals } from "./pages/today/approvals";
+import { TrialModal, TrialRow } from "./components/Trial";
+import { SyncPill } from "./components/SyncPill";
 import { Icon, type IconName } from "./components/Icon";
-import { cloudApi } from "./cloud";
+import { appName, cloudApi } from "./cloud";
 import { useCloudSignedIn } from "./cloudSignedIn";
 import { Offline } from "./components/Offline";
 import { RecoveryBanner } from "./components/BackupSettings";
@@ -81,10 +85,29 @@ export const PAGES: readonly PageDef[] = [
 
 const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
 
-/** The Settings list: Account first, then the rest in page order. */
-const SETTINGS_NAV = [...PAGES.filter((p) => p.id === "account"), ...PAGES.filter((p) => p.place === "settings" && p.id !== "account")];
+/**
+ * The Settings sidebar, in groups: Account on its own, then General, AI & models, Privacy &
+ * safety, and the rest under Advanced (collapsed unless one of its pages is open).
+ */
+const SETTINGS_GROUPS: readonly { id: string; label: MessageKey | null; pages: readonly PageId[] }[] = [
+  { id: "account", label: null, pages: ["account"] },
+  { id: "general", label: "app.navGroup.general", pages: ["sources", "apps", "doubletap"] },
+  { id: "ai", label: "app.navGroup.ai", pages: ["models", "agent"] },
+  { id: "privacy", label: "app.navGroup.privacy", pages: ["privacy", "safety"] },
+  { id: "advanced", label: "app.navGroup.advanced", pages: ["knowledge", "plugins", "status"] },
+];
 
 const PAGE_KEY = "nugget.page";
+
+/** ⌘K sections for cloud search results, by item kind. */
+const PALETTE_KIND: Record<string, MessageKey> = {
+  mail: "palette.group.mail",
+  event: "palette.group.events",
+  message: "palette.group.messages",
+  doc: "palette.group.docs",
+  page: "palette.group.docs",
+  file: "palette.group.docs",
+};
 const RECENT_CHATS = 5;
 const PALETTE: Combo = { mod: true, key: "K" };
 
@@ -288,6 +311,62 @@ export function App() {
     return [...pages, ...actions, ...searches];
   }, [t, go, jump, saved, runSaved]);
 
+  const cloudSignedIn = useCloudSignedIn();
+  /** ⌘K live results: the cloud's search when signed in, else this computer's index. */
+  const liveSearch = useCallback(
+    async (q: string): Promise<PaletteItem[]> => {
+      const open = (url: string | null | undefined) => () => {
+        if (url && isOpenableUrl(url)) void api.openUrl(url).catch(() => {});
+        else {
+          requestSearch(q);
+          go("search");
+        }
+      };
+      if (cloudSignedIn) {
+        const r = await cloudApi.search({ q, limit: 20 });
+        const people: PaletteItem[] = r.facets.people.slice(0, 3).map((p) => ({
+          id: `person:${p.value}`,
+          label: p.value,
+          avatar: true,
+          // Where they appear in these results, and how often.
+          detail: [
+            formatList([...new Set(r.results.filter((x) => x.author === p.value).map((x) => appName(x.source)))]),
+            t("palette.person.items", { count: p.count }),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          group: t("palette.group.people"),
+          run: () => {
+            requestSearch(`${q} ${p.value}`);
+            go("search");
+          },
+        }));
+        const items = r.results.map<PaletteItem>((x) => ({
+          id: `r:${x.item_id}`,
+          label: x.title || x.snippet.slice(0, 80),
+          group: t(PALETTE_KIND[x.kind] ?? "palette.group.results"),
+          source: x.source,
+          sourceName: appName(x.source),
+          author: x.author,
+          run: open(x.url),
+        }));
+        // People first, then results in the order of their sections' first appearance.
+        const order = [...new Set(items.map((i) => i.group))];
+        return [...people, ...order.flatMap((g) => items.filter((i) => i.group === g))];
+      }
+      const hits = await api.search(q, 12);
+      return hits.map((h, i) => ({
+        id: `h:${h.item.source}:${h.item.key}:${i}`,
+        label: h.title || h.snippet.slice(0, 80),
+        group: t("palette.group.results"),
+        source: h.item.source,
+        sourceName: h.item.source,
+        run: open(h.url),
+      }));
+    },
+    [cloudSignedIn, t, go],
+  );
+
   const searchItem = useCallback(
     (q: string): PaletteItem => ({
       id: "action:search",
@@ -324,6 +403,7 @@ export function App() {
     next?.focus();
   };
 
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const navItem = (p: PageDef) => {
     const i = PAGES.indexOf(p);
     const combo = pageCombo(p, i);
@@ -366,8 +446,8 @@ export function App() {
       <aside className="sidebar" aria-label={t("app.sidebarLabel")}>
         <div className="titlebar" data-tauri-drag-region aria-hidden="true" />
         <div className="brand">
-          <Logo pulse={needsCount > 0} />
-          <span className="wordmark">{t("app.name").toLowerCase()}</span>
+          <Wordmark height={22} />
+          <span className="visually-hidden">{t("app.name")}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
           <Icon name="search" size={14} />
@@ -384,10 +464,26 @@ export function App() {
               </span>
               {t("app.backToApp")}
             </button>
-            <p className="nav-group-label" id="nav-group-settings">
-              {t("app.navGroup.settings")}
-            </p>
-            <ul aria-labelledby="nav-group-settings">{SETTINGS_NAV.map(navItem)}</ul>
+            {SETTINGS_GROUPS.map((g) => {
+              const items = g.pages.map((id) => PAGES.find((p) => p.id === id)!).map(navItem);
+              if (!g.label) return <ul key={g.id}>{items}</ul>;
+              if (g.id === "advanced") {
+                return (
+                  <details key={g.id} className="nav-advanced" open={advancedOpen || g.pages.includes(page)} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+                    <summary className="nav-group-label">{t(g.label)}</summary>
+                    <ul>{items}</ul>
+                  </details>
+                );
+              }
+              return (
+                <div key={g.id}>
+                  <p className="nav-group-label" id={`nav-group-${g.id}`}>
+                    {t(g.label)}
+                  </p>
+                  <ul aria-labelledby={`nav-group-${g.id}`}>{items}</ul>
+                </div>
+              );
+            })}
             <SidebarSettings onSetup={() => setOnboarding(true)} />
           </nav>
         ) : (
@@ -438,6 +534,8 @@ export function App() {
           </nav>
         )}
         <div className="sidebar-foot">
+          <SyncPill />
+          <TrialRow />
           <AccountButton active={inSettings} onOpen={() => go(inSettings ? page : "account")} />
           <ConnectionPill conn={conn} />
         </div>
@@ -463,8 +561,21 @@ export function App() {
       </main>
       <DeepLinks pages={PAGE_IDS} go={jump} />
       <QuitPrompt />
-      {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
+      {palette && (
+        <CommandPalette
+          items={paletteItems}
+          queryItem={searchItem}
+          search={liveSearch}
+          onAsk={(q) => {
+            requestChatAsk(q);
+            go("chat");
+          }}
+          onClose={() => setPalette(false)}
+        />
+      )}
       {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
+      <Toaster />
+      <TrialModal />
     </div>
   );
 }
@@ -507,22 +618,31 @@ function useRecentChats(page: PageId): StoredConversation[] {
   return list;
 }
 
-/** How many cards wait in Needs you (0 while unknown or offline). */
+/** How many things wait in Needs you: cards plus pending approvals (0 while unknown or offline). */
 function useNeedsCount(connected: boolean, page: PageId): number {
   const cloud = useCloudSignedIn();
   const [n, setN] = useState(0);
+  const [pending, setPending] = useState<readonly { id: string }[]>([]);
+  const held = useHeldApprovals();
   const [tick, setTick] = useState(0);
   useEvent(proactiveEvents.onCardsChanged, () => setTick((x) => x + 1));
+  useEffect(() => {
+    const bump = () => setTick((x) => x + 1);
+    window.addEventListener(APPROVALS_CHANGED, bump);
+    return () => window.removeEventListener(APPROVALS_CHANGED, bump);
+  }, []);
   useEffect(() => {
     if (!cloud && !connected) return;
     let alive = true;
     const count = cloud ? cloudApi.cards().then((c) => c.cards.length) : proactiveApi.cardsList({}).then((l) => (l.enabled ? l.cards.length : 0));
     count.then((c) => alive && setN(c)).catch(() => {});
+    // Approvals are the most urgent items: they count too (the same total as the page header).
+    (cloud ? cloudApi.actions("pending").catch(() => []) : Promise.resolve([])).then((a) => alive && setPending(a));
     return () => {
       alive = false;
     };
   }, [cloud, connected, page, tick]);
-  return n;
+  return needsTotal(n, pending, held);
 }
 
 /** The account and settings entry at the foot of the sidebar (⌘,). */

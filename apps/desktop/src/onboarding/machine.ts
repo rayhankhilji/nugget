@@ -2,17 +2,41 @@
  * First-run onboarding as a pure state machine, persisted after every change so quitting
  * mid-way resumes where the user left off. Every step can be skipped, and so can the whole flow.
  *
- * The flow reads as sign in → connect apps → first answer: `welcome` is the sign-in step (with a
- * local-first way on without an account), `source` connects cloud apps or adds a local folder,
- * then the AI, permissions and Double Tap steps, and `done` asks the first question. The ids are
- * kept from the earlier order so saved progress stays valid.
+ * The first step is the fork: Heed Cloud or run it yourself (`path`). On the cloud path the flow
+ * reads sign in → connect apps → AI → …; running it yourself goes to the AI choice first, then a
+ * local source. `done` asks the first question. The ids are kept from the earlier order so saved
+ * progress stays valid.
  */
 
 export const STEPS = ["welcome", "source", "ai", "permissions", "trigger", "done"] as const;
 export type StepId = (typeof STEPS)[number];
 
-/** How the user wants Heed to think: on this device, with their own API key, or not decided. */
-export type AiChoice = "local" | "byok" | "later";
+/** Running it yourself: the AI choice comes straight after the fork, then a local source. */
+export const LOCAL_STEPS: readonly StepId[] = ["welcome", "ai", "source", "permissions", "trigger", "done"];
+
+/** The first-run fork: Heed Cloud (sign in) or run it yourself (open source, your own AI). */
+export type RunPath = "cloud" | "local";
+
+/**
+ * How the user wants Heed to think: on this device, with their own API key (or server), with
+ * their ChatGPT plan, or not decided.
+ */
+export type AiChoice = "local" | "byok" | "chatgpt" | "later";
+
+/** One row of "Choose your AI": every way in, each its own option. */
+export const AI_OPTIONS = ["chatgpt", "local", "ollama", "anthropic", "openai", "openrouter", "compatible", "later"] as const;
+export type AiOption = (typeof AI_OPTIONS)[number];
+
+/** The AI path a row sets up. */
+export function aiChoiceOf(option: AiOption): AiChoice {
+  return option === "chatgpt" || option === "local" || option === "later" ? option : "byok";
+}
+
+/** The row to show for a choice saved before rows were recorded. */
+export function defaultOption(ai: AiChoice | null): AiOption | null {
+  if (ai === null) return null;
+  return ai === "byok" ? "anthropic" : ai;
+}
 
 export interface OnboardingState {
   version: 1;
@@ -22,6 +46,10 @@ export interface OnboardingState {
   /** Steps the user skipped. A step later completed is removed from here. */
   skipped: StepId[];
   ai: AiChoice | null;
+  /** The fork's answer. Absent until chosen (and on progress saved before the fork). */
+  path?: RunPath;
+  /** The "Choose your AI" row picked (which provider, for a key). Absent: follows `ai`. */
+  aiOption?: AiOption;
   /**
    * What the AI step actually set up, and on which path: a local model installed (or installing),
    * or a provider whose key was saved. Absent until something is set up.
@@ -54,6 +82,13 @@ export type Action =
   | { type: "skip" }
   | { type: "goto"; step: StepId }
   | { type: "chooseAi"; ai: AiChoice }
+  /** A "Choose your AI" row: sets `ai` to its path. */
+  | { type: "chooseAiOption"; option: AiOption }
+  /**
+   * The fork. `cloud` stays on the first step (the sign-in); `local` moves on to the AI choice;
+   * `null` shows the fork again.
+   */
+  | { type: "choosePath"; path: RunPath | null }
   | { type: "skipAll" }
   | { type: "finish" }
   | { type: "restart" };
@@ -67,8 +102,13 @@ export const INITIAL: OnboardingState = {
   finished: false,
 };
 
-export function stepIndex(step: StepId): number {
-  return STEPS.indexOf(step);
+/** The order of the steps on the path chosen at the fork. */
+export function stepOrder(state?: Pick<OnboardingState, "path">): readonly StepId[] {
+  return state?.path === "local" ? LOCAL_STEPS : STEPS;
+}
+
+export function stepIndex(step: StepId, state?: Pick<OnboardingState, "path">): number {
+  return stepOrder(state).indexOf(step);
 }
 
 function without(list: StepId[], step: StepId): StepId[] {
@@ -79,8 +119,9 @@ function withStep(list: StepId[], step: StepId): StepId[] {
   return list.includes(step) ? list : [...list, step];
 }
 
-function advance(step: StepId): StepId {
-  return STEPS[Math.min(stepIndex(step) + 1, STEPS.length - 1)]!;
+function advance(state: OnboardingState): StepId {
+  const order = stepOrder(state);
+  return order[Math.min(order.indexOf(state.step) + 1, order.length - 1)]!;
 }
 
 /**
@@ -93,7 +134,7 @@ function advance(step: StepId): StepId {
 export function stepGoalMet(state: OnboardingState, step: StepId = state.step): boolean {
   if (step === "ai") {
     if (state.ai === "later") return true;
-    return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
+    return (state.ai === "local" || state.ai === "byok" || state.ai === "chatgpt") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
   }
   if (step === "source") return state.indexed === true || (state.cloudApps?.length ?? 0) > 0 || legacyDone(state, "source");
   return true;
@@ -132,25 +173,45 @@ export function reduce(state: OnboardingState, action: Action): OnboardingState 
         ...state,
         completed: withStep(state.completed, state.step),
         skipped: without(state.skipped, state.step),
-        step: advance(state.step),
+        step: advance(state),
       };
     }
     case "back": {
-      const i = stepIndex(state.step);
-      return i > 0 ? { ...state, step: STEPS[i - 1]! } : state;
+      const order = stepOrder(state);
+      const i = order.indexOf(state.step);
+      return i > 0 ? { ...state, step: order[i - 1]! } : state;
     }
     case "skip": {
       if (state.step === "done") return { ...state, finished: true };
       return {
         ...state,
         skipped: state.completed.includes(state.step) ? state.skipped : withStep(state.skipped, state.step),
-        step: advance(state.step),
+        step: advance(state),
       };
     }
     case "goto":
       return { ...state, step: action.step };
-    case "chooseAi":
-      return { ...state, ai: action.ai };
+    case "chooseAi": {
+      const { aiOption: _, ...rest } = state;
+      return { ...rest, ai: action.ai };
+    }
+    case "chooseAiOption":
+      return { ...state, ai: aiChoiceOf(action.option), aiOption: action.option };
+    case "choosePath": {
+      if (action.path === null) {
+        const { path: _, ...rest } = state;
+        return { ...rest, step: "welcome" };
+      }
+      if (action.path === "cloud") return { ...state, path: "cloud", step: "welcome" };
+      // Running it yourself: the fork is answered, and the AI choice comes next.
+      return {
+        ...state,
+        path: "local",
+        completed: withStep(state.completed, "welcome"),
+        skipped: without(state.skipped, "welcome"),
+        step: "ai",
+      };
+    }
     case "skipAll": {
       // Everything not yet completed counts as skipped, so a later "set up again" knows what's left.
       const rest = STEPS.filter((s) => s !== "done" && !state.completed.includes(s));
@@ -189,7 +250,7 @@ export function parseState(raw: string | null): OnboardingState | null {
   const o = v as Record<string, unknown>;
   if (o.version !== 1 || !isStep(o.step)) return null;
   const steps = (x: unknown) => (Array.isArray(x) ? x.filter(isStep) : []);
-  const isAi = (x: unknown): x is AiChoice => x === "local" || x === "byok" || x === "later";
+  const isAi = (x: unknown): x is AiChoice => x === "local" || x === "byok" || x === "chatgpt" || x === "later";
   const ai = isAi(o.ai) ? o.ai : null;
   const out: OnboardingState = {
     version: 1,
@@ -208,6 +269,12 @@ export function parseState(raw: string | null): OnboardingState | null {
     if (names.length) out.sources = names;
   }
   if (o.indexed === true) out.indexed = true;
+  if (o.path === "cloud" || o.path === "local") out.path = o.path;
+  if (typeof o.aiOption === "string" && (AI_OPTIONS as readonly string[]).includes(o.aiOption)) {
+    const option = o.aiOption as AiOption;
+    // Only kept when it still matches the saved choice.
+    if (ai !== null && aiChoiceOf(option) === ai) out.aiOption = option;
+  }
   if (Array.isArray(o.cloudApps)) {
     const names = o.cloudApps.filter((x): x is string => typeof x === "string");
     if (names.length) out.cloudApps = names;
