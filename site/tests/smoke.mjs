@@ -131,6 +131,40 @@ for (const scheme of ["light", "dark"]) {
   await page.close();
 }
 
+// 1h. Waitlist: 202 shows the calm confirmation, 429 asks to wait, a network error falls back to email.
+{
+  const ctx = await browser.newContext();
+  const page = await ctx.newPage();
+  let mode = 202;
+  const bodies = [];
+  await ctx.route(`${CLOUD}/v1/waitlist`, async (route) => {
+    bodies.push(route.request().postDataJSON());
+    if (mode === 0) return route.abort("failed");
+    return route.fulfill({ status: mode, body: "" });
+  });
+  // The test build has release URLs set, so /download shows downloads; the landing form is the one here.
+  await page.goto(base + "/");
+  const form = page.locator('form[data-waitlist="landing"]');
+  await form.locator("input").fill("ada@example");
+  await form.locator("button").click();
+  check((await form.locator("[data-msg]").textContent())?.includes("doesn’t look quite right") === true && bodies.length === 0, "waitlist catches a typo locally");
+  await form.locator("input").fill("ada@example.com");
+  await form.locator("button").click();
+  await form.locator("[data-msg]", { hasText: "on the list" }).waitFor();
+  check(JSON.stringify(bodies.at(-1)) === JSON.stringify({ email: "ada@example.com", source: "landing" }), `waitlist 202 → confirmation (${JSON.stringify(bodies.at(-1))})`);
+  mode = 429;
+  await form.locator("input").fill("ada@example.com");
+  await form.locator("button").click();
+  await form.locator("[data-msg]", { hasText: "Too many tries" }).waitFor();
+  check(true, "waitlist 429 → please wait");
+  mode = 0;
+  await form.locator("input").fill("ada@example.com");
+  await form.locator("button").click();
+  await form.locator("[data-msg] a[href^='mailto:']").waitFor();
+  check(bodies.at(-1)?.source === "landing", "waitlist network error → email fallback");
+  await ctx.close();
+}
+
 // 2. Pricing toggle switches prices and checkout links.
 {
   const page = await browser.newPage();

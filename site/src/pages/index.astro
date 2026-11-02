@@ -5,6 +5,7 @@ import AppMark from "../components/AppMark.astro";
 import ApprovalCard from "../components/cards/ApprovalCard.astro";
 import GhostCard from "../components/cards/GhostCard.astro";
 import StepCard from "../components/cards/StepCard.astro";
+import WaitlistForm from "../components/WaitlistForm.astro";
 import { APPS, label } from "../lib/apps";
 import { FAQ } from "../lib/faq";
 import { smart } from "../lib/smartquotes.mjs";
@@ -204,6 +205,10 @@ const faqLd = {
         <div class="cta left">
           <a class="btn btn-lg btn-primary" href="/download">Download for Mac</a>
           <a class="btn btn-lg btn-secondary" href={GITHUB_URL} rel="noopener">View on GitHub</a>
+        </div>
+        <div class="cloud-wl">
+          <p>Heed Cloud is opening soon. Get one email when it does.</p>
+          <WaitlistForm source="landing" label="Email me when Heed Cloud opens" button="Notify me" />
         </div>
         <pre class="install" aria-label="Get the source"><code><span class="c"># or get the source</span>
 git clone https://github.com/rayhankhilji/nugget</code></pre>
@@ -794,6 +799,14 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
   .get h2 {
     font-size: clamp(44px, 6.4vw, 88px);
     margin-bottom: 28px;
+  }
+  .cloud-wl {
+    display: grid;
+    gap: 10px;
+    margin-top: 28px;
+  }
+  .cloud-wl p {
+    color: var(--text-2);
   }
   .get-in > * {
     min-width: 0;

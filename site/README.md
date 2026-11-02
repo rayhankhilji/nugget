@@ -62,6 +62,15 @@ The "Connects to" strip and the FAQ list exactly the apps in `crates/nugget-clou
 `node scripts/sync-apps.mjs --check` checks it's up to date. The smoke test fails if the JSON, the
 strip or the FAQ drift from the catalogue. Add an app to the cloud first, then run `npm run apps`.
 
+### Waitlist
+
+`WaitlistForm` (on /download, the landing's get-it block, and the "Heed Cloud isn’t open yet" pages)
+posts `{email, source}` to `POST {CLOUD_URL}/v1/waitlist`. The cloud answers 202 to any well-formed
+request and never says whether an address is new, so the form only confirms "You’re on the list".
+A 429 asks the user to wait a bit. A 404 or a network error, which includes a CORS rejection before
+the site's origin is in `NUGGET_SITE_ORIGINS`, falls back to an email link. Without
+`NEXT_PUBLIC_CLOUD_URL` the form is just that email link. There are no third-party scripts.
+
 ### Prices come from the API
 
 `src/lib/plans.ts` fetches the public `GET /v1/billing/plans` **at build time**. It writes the
