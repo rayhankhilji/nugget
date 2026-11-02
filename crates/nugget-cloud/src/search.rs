@@ -343,6 +343,7 @@ pub async fn search(
         Some(mut v) if !v.is_empty() => {
             let emb = crate::db::vector_literal(&v.remove(0));
             db.scoped(Some(user), async |tx| {
+                crate::db::widen_vector_scan(tx, CANDIDATES).await?;
                 let mut params = f.params(&user);
                 params.push(&emb);
                 let sql = format!(
@@ -410,6 +411,90 @@ pub async fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn vlit(x0: f32, x1: f32, jitter: f32) -> String {
+        let mut v = vec![0f32; 1536];
+        v[0] = x0;
+        v[1] = x1;
+        v[2] = jitter;
+        crate::db::vector_literal(&v)
+    }
+
+    /// SEC1 finding 31: the scan is widened per query, and another user's nearer chunks never
+    /// crowd out this user's. (At this size the planner does not pick HNSW, so the crowding itself
+    /// shows only on a large table; the settings are what change it there.)
+    #[tokio::test]
+    async fn hnsw_scan_still_finds_the_users_own_chunks() {
+        let Some((db, pool)) = crate::testkit::test_db().await else {
+            return;
+        };
+        let (a, b) = (
+            crate::testkit::add_user(&pool).await,
+            crate::testkit::add_user(&pool).await,
+        );
+        for (user, n, x0, x1) in [(b, 200, 1.0f32, 0.0f32), (a, 3, 0.5, 0.5)] {
+            let item: Uuid = pool
+                .query_one(
+                    "insert into public.items (user_id, source, external_id, kind, body, content_hash)
+                     values ($1, 'gmail', 'x', 'email', '', 'h') returning id",
+                    &[&user],
+                )
+                .await
+                .unwrap()
+                .get(0);
+            for ord in 0..n {
+                let v = vlit(x0, x1, ord as f32 / 1000.0);
+                pool.execute(
+                    "insert into public.chunks (user_id, item_id, ord, text, embedding)
+                     values ($1, $2, $3, 'c', $4::text::extensions.vector)",
+                    &[&user, &item, &ord, &v],
+                )
+                .await
+                .unwrap();
+            }
+        }
+        let q = {
+            let mut v = vec![0f32; 1536];
+            v[0] = 1.0;
+            v
+        };
+        // The scan settings apply to the query's transaction only.
+        let (ef, iterative): (String, Option<String>) = db
+            .scoped(Some(a), async |tx| {
+                crate::db::widen_vector_scan(tx, 40).await?;
+                let r = tx
+                    .query_one(
+                        "select current_setting('hnsw.ef_search'), current_setting('hnsw.iterative_scan', true)",
+                        &[],
+                    )
+                    .await?;
+                Ok((r.get(0), r.get(1)))
+            })
+            .await
+            .unwrap();
+        assert_eq!(ef, "400");
+        let pgvector: String = pool
+            .query_one(
+                "select extversion from pg_extension where extname = 'vector'",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        if iterative.is_some() {
+            assert_eq!(
+                iterative.as_deref(),
+                Some("relaxed_order"),
+                "pgvector {pgvector}"
+            );
+        }
+        let hits = db.search_vector(a, &q, 40).await.unwrap();
+        assert_eq!(
+            hits.len(),
+            3,
+            "all of the user's own chunks, none of the other's"
+        );
+    }
 
     #[test]
     fn like_patterns_are_escaped() {

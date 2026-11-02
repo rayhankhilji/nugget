@@ -102,13 +102,31 @@ async fn save(
                        data = excluded.data, updated_at = excluded.updated_at",
                 )
                 .await?;
+            // `item_ids` has no foreign key: keep only ids of this user's own items.
+            let cited: Vec<Uuid> = state
+                .cards
+                .values()
+                .flat_map(|c| &c.evidence)
+                .filter_map(|e| e.item.key.as_str().parse().ok())
+                .collect();
+            let owned: std::collections::HashSet<Uuid> = tx
+                .query(
+                    "select id from public.items where user_id = $1 and id = any($2)",
+                    &[&user, &cited],
+                )
+                .await?
+                .iter()
+                .map(|r| r.get(0))
+                .collect();
             let mut keys = Vec::new();
             for c in state.cards.values() {
-                let items: Vec<Uuid> = c
+                let mut items: Vec<Uuid> = c
                     .evidence
                     .iter()
                     .filter_map(|e| e.item.key.as_str().parse().ok())
+                    .filter(|id| owned.contains(id))
                     .collect();
+                items.dedup();
                 let data = serde_json::to_value(c).unwrap_or(Value::Null);
                 let score = c.rank as f32;
                 tx.execute(

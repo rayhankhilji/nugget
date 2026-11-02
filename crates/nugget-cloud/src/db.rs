@@ -134,6 +134,40 @@ impl ItemMeta {
 #[derive(Clone)]
 pub struct Db {
     pool: Pool,
+    statement_timeout_ms: u64,
+}
+
+/// Pool limits (`DATABASE_POOL_MAX`, `DATABASE_POOL_TIMEOUT_SECS`,
+/// `DATABASE_STATEMENT_TIMEOUT_MS`). Keep `max_size` × machines under the pooler's limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolOptions {
+    pub max_size: usize,
+    /// How long a request waits for a connection (or to open one) before failing with 503.
+    pub timeout_secs: u64,
+    /// Per-transaction `statement_timeout`; 0 leaves the server default.
+    pub statement_timeout_ms: u64,
+}
+
+impl Default for PoolOptions {
+    fn default() -> Self {
+        Self {
+            max_size: 8,
+            timeout_secs: 5,
+            statement_timeout_ms: 15_000,
+        }
+    }
+}
+
+impl DbError {
+    /// The pool had no connection to give in time (overload, or the database is down).
+    pub fn is_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::Pool(
+                deadpool_postgres::PoolError::Timeout(_) | deadpool_postgres::PoolError::Backend(_)
+            )
+        )
+    }
 }
 
 /// TLS for the database: verify against `DATABASE_CA_CERT` (a PEM file; Supabase's own CA)
@@ -160,6 +194,26 @@ fn tls(ca_pem: Option<&str>) -> Result<tokio_postgres_rustls::MakeRustlsConnect,
         }
     };
     Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
+/// Makes an HNSW scan find `limit` of *this user's* chunks (SEC1 finding 31). The index orders all
+/// users' chunks by distance and the `user_id` filter applies afterwards, so with the default
+/// `hnsw.ef_search` (40) a user among many can get few or no candidates. Per transaction:
+/// - over-fetch: `hnsw.ef_search` = 10 × `limit`, capped at pgvector's maximum (1000);
+/// - pgvector ≥ 0.8: `hnsw.iterative_scan = relaxed_order`, which keeps scanning until enough
+///   rows pass the filter (skipped where the server's pgvector does not have the setting).
+pub(crate) async fn widen_vector_scan(tx: &Transaction<'_>, limit: i64) -> Result<(), DbError> {
+    let ef = (limit.saturating_mul(10)).clamp(40, 1000).to_string();
+    // pgvector's library loads on first use; only then are its settings known.
+    tx.batch_execute("select '[1]'::extensions.vector").await?;
+    tx.execute("select set_config('hnsw.ef_search', $1, true)", &[&ef])
+        .await?;
+    tx.batch_execute(
+        "select set_config('hnsw.iterative_scan', 'relaxed_order', true)
+         where current_setting('hnsw.iterative_scan', true) is not null",
+    )
+    .await?;
+    Ok(())
 }
 
 /// `[0.1,0.2,…]`, pgvector's text form.
@@ -200,6 +254,15 @@ pub fn tsquery(question: &str) -> Option<String> {
 impl Db {
     /// Connects with TLS unless the URL says `sslmode=disable` (local development only).
     pub fn connect(url: &str, ca_pem: Option<&str>) -> Result<Self, DbError> {
+        Self::connect_with(url, ca_pem, PoolOptions::default())
+    }
+
+    /// [`Db::connect`] with explicit pool limits.
+    pub fn connect_with(
+        url: &str,
+        ca_pem: Option<&str>,
+        opts: PoolOptions,
+    ) -> Result<Self, DbError> {
         let pg: tokio_postgres::Config = url.parse()?;
         let mgr_cfg = ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
@@ -209,11 +272,32 @@ impl Db {
         } else {
             Manager::from_config(pg, tls(ca_pem)?, mgr_cfg)
         };
+        let wait = Some(std::time::Duration::from_secs(opts.timeout_secs));
         let pool = Pool::builder(mgr)
-            .max_size(8)
+            .max_size(opts.max_size)
+            .runtime(deadpool_postgres::Runtime::Tokio1)
+            .wait_timeout(wait)
+            .create_timeout(wait)
+            .recycle_timeout(wait)
             .build()
             .map_err(|e| DbError::Setup(e.to_string()))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            statement_timeout_ms: opts.statement_timeout_ms,
+        })
+    }
+
+    /// (size, available) of the pool, for metrics.
+    pub fn pool_status(&self) -> (usize, usize) {
+        let s = self.pool.status();
+        (s.size, s.available)
+    }
+
+    /// Readiness: a connection and a trivial query.
+    pub async fn ping(&self) -> Result<(), DbError> {
+        let client = self.pool.get().await?;
+        client.simple_query("select 1").await?;
+        Ok(())
     }
 
     /// Runs `f` in a transaction that RLS confines to `user`, and commits if it succeeds.
@@ -224,7 +308,11 @@ impl Db {
     ) -> Result<T, DbError> {
         let mut client = self.pool.get().await?;
         let tx = client.transaction().await?;
-        tx.batch_execute("set local role nugget_service").await?;
+        tx.batch_execute(&format!(
+            "set local role nugget_service; set local statement_timeout = {}",
+            self.statement_timeout_ms
+        ))
+        .await?;
         if let Some(u) = user {
             tx.execute(
                 "select set_config('nugget.user_id', $1, true)",
@@ -392,6 +480,13 @@ impl Db {
     ) -> Result<bool, DbError> {
         let limit = i64::from(limit);
         self.scoped(Some(user), async |tx| {
+            // One device registration per user at a time: concurrent first requests from a new
+            // device used to race (a duplicate-key 500), and could slip past the limit.
+            tx.execute(
+                "select pg_advisory_xact_lock(hashtextextended('heed.devices:' || $1::uuid::text, 0))",
+                &[&user],
+            )
+            .await?;
             let known = tx
                 .execute(
                     "update public.devices set last_seen_at = now() where user_id = $1 and device_id = $2",
@@ -411,7 +506,11 @@ impl Db {
             if n >= limit {
                 return Ok(false);
             }
-            tx.execute("insert into public.devices (user_id, device_id) values ($1, $2)", &[&user, &device])
+            tx.execute(
+                "insert into public.devices (user_id, device_id) values ($1, $2)
+                 on conflict (user_id, device_id) do update set last_seen_at = now()",
+                &[&user, &device],
+            )
                 .await?;
             Ok(true)
         })
@@ -621,6 +720,21 @@ impl Db {
         .await
     }
 
+    /// Claims up to `max` due connections across users with a lease of `lease_secs`, so no
+    /// other machine or overlapping pass syncs them meanwhile.
+    pub async fn claim_due(&self, max: i32, lease_secs: i32) -> Result<Vec<(Uuid, Uuid)>, DbError> {
+        self.scoped(None, async |tx| {
+            let rows = tx
+                .query(
+                    "select user_id, connection_id from nugget_private.claim_due_connections($1, $2)",
+                    &[&max, &lease_secs],
+                )
+                .await?;
+            Ok(rows.iter().map(|r| (r.get(0), r.get(1))).collect())
+        })
+        .await
+    }
+
     /// Whether the user used Heed in the last 12 hours (sync at the plan's cadence then).
     pub async fn recently_active(&self, user: Uuid) -> Result<bool, DbError> {
         self.scoped(Some(user), async |tx| {
@@ -798,6 +912,7 @@ impl Db {
     ) -> Result<Vec<Hit>, DbError> {
         let v = vector_literal(embedding);
         self.scoped(Some(user), async |tx| {
+            widen_vector_scan(tx, limit).await?;
             let rows = tx
                 .query(
                     "select c.id, c.item_id, c.text, i.source, i.title,
@@ -930,6 +1045,18 @@ impl Db {
             (
                 "briefs",
                 "select day, timezone, prose, citations, data, created_at from public.briefs",
+            ),
+            (
+                "proactive_state",
+                "select state, updated_at from public.proactive_state",
+            ),
+            (
+                "intel_runs",
+                "select items_through, ran_at, stats, last_error from public.intel_runs",
+            ),
+            (
+                "llm_cache",
+                "select key, response, input_tokens, output_tokens, created_at from public.llm_cache",
             ),
             (
                 "messages",

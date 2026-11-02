@@ -160,6 +160,11 @@ pub(super) async fn refresh(
     Query(q): Query<TzQuery>,
 ) -> ApiResult<Json<Value>> {
     let u = inbox_user(&s, &h).await?;
+    // A run spends model tokens (extraction): limited like asks.
+    s.limits
+        .ask
+        .check(&u)
+        .map_err(|w| ApiError::rate_limited("cards_refresh", w))?;
     let tz = timezone(&s, u, q.tz.as_deref()).await?;
     let (report, _) = s.intel().run(u, OffsetDateTime::now_utc()).await?;
     let mut out = inbox(&s, u, tz).await?;
@@ -220,6 +225,11 @@ pub(super) async fn act(
     if action == "accept" {
         let card = cards::card(&s.db, u, &cfg, &id).await?;
         if let Some(i) = card_actions::chosen(&card, b.action, &apps) {
+            // Proposing is limited with `POST /v1/actions`.
+            s.limits
+                .action
+                .check(&u)
+                .map_err(|w| ApiError::rate_limited("action", w))?;
             let inputs = card_actions::Inputs {
                 connected: &apps,
                 allowance,

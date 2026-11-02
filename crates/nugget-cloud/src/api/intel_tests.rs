@@ -553,6 +553,25 @@ async fn knowledge_cards_brief_and_search() {
     // Export carries the brief and cards.
     let (_, v) = call(&app, "GET", "/v1/export", a, None).await;
     assert_eq!(v["briefs"].as_array().unwrap().len(), 1);
+    for k in [
+        "proactive_state",
+        "intel_runs",
+        "llm_cache",
+        "entities",
+        "claims",
+    ] {
+        assert!(!v[k].as_array().unwrap().is_empty(), "export has {k}");
+    }
+    let foreign: i64 = pool
+        .query_one(
+            "select count(*) from public.cards c, unnest(c.item_ids) as x(id)
+             where c.user_id = $1 and not exists (select 1 from public.items i where i.id = x.id and i.user_id = $1)",
+            &[&a],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(foreign, 0, "cards cite only the user's own items");
     assert!(!v["cards"].as_array().unwrap().is_empty());
 }
 

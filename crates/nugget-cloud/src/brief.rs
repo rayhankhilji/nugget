@@ -97,7 +97,7 @@ pub fn prompt(entries: &[Entry], day: Date) -> String {
         s.push_str(&format!(
             "<entry n=\"{}\">{}</entry>\n",
             i + 1,
-            e.text.replace("</entry>", "</ entry>")
+            crate::ask::neutralise_tags(&e.text).replace("</entry>", "</ entry>")
         ));
     }
     s.push_str("\nWrite the brief.");

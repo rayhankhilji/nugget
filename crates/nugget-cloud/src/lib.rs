@@ -10,6 +10,9 @@
 //! - [`gateway`]: LLM and embedding calls with our keys, metering and quotas.
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
+//! - [`webhook`]: Composio webhook signature check and replay guard.
+//! - [`ratelimit`]: per-IP and per-user token buckets.
+//! - [`ops`]: request ids, request logs, metrics, error reports, shutdown.
 //! - [`webhook`]: Composio webhook signature check.
 //! - [`snapshot`]: a user's items as an in-memory local store, for the reused crates below.
 //! - [`knowledge`]: `nugget-knowledge` extraction into `entities` and `claims`.
@@ -37,7 +40,9 @@ pub mod ingest;
 pub mod intel;
 pub mod knowledge;
 pub mod llm_bridge;
+pub mod ops;
 pub mod plans;
+pub mod ratelimit;
 pub mod search;
 pub mod snapshot;
 pub mod stripe;

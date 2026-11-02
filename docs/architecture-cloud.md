@@ -77,6 +77,13 @@ The jobs (`intel.rs`), per user:
 2. **Cards.** `nugget-proactive` runs on the same snapshot and graph: unanswered mail, commitments and follow-ups, meeting prep, renewals; its scoring model and the learned per-sender, per-domain and per-kind feedback with decay; the multilingual text rules and `LocalText` keys. The state lives in `proactive_state` as JSON, saved with a compare-and-swap on `updated_at` (a refresh never loses a dismissal made while it ran), and every save projects the cards into `cards`. Cards go to the desktop as the daemon's `CardView` (`nugget_proactive::view`), with quotes withheld on sensitive cards.
 3. **Brief.** From 07:00 in the user's time zone (`profiles.timezone`, sent by the desktop as `tz`), `nugget-proactive`'s morning brief plus two to five sentences of prose with `[n]` citations from the fast model. Sensitive cards stay in the structured brief but never go to the model. It is generated once per local day and kept in `briefs`; without a model or quota the brief has no prose.
 
+**Hardening** (SEC1):
+- Vector queries widen the HNSW scan per transaction (`hnsw.ef_search`, and `hnsw.iterative_scan` on pgvector ≥ 0.8; threat model finding 31).
+- `cards.item_ids` holds only ids of the user's own items (checked on every save).
+- Every prompt built here (extraction, the brief, reply drafts) passes item text through `ask::neutralise_tags`.
+- `/v1/export` includes `briefs`, `proactive_state`, `intel_runs` and `llm_cache`.
+- Card refreshes share the ask rate limit, and card-accept proposals share the actions limit.
+
 **Plans.** Every endpoint below needs a live subscription (`plans::entitlement`; 402 `subscription_required` otherwise), cards need the plan's `needs_you_inbox` and the brief its `daily_brief` (403 `not_in_plan`). Model calls go through the plan's `Allowance` (`Gateway::choose`, fast tier): past the hard cap, extraction and the brief's prose are skipped and search drops to full text. The snapshot also honours the plan's `history_days`.
 
 **Scheduling.** Every 5 minutes, `nugget_private.intel_due` lists subscribed users whose items changed since their last run, or whose last run is more than 6 hours old (cards depend on the clock), and `nugget_private.brief_due` lists subscribed users past 07:00 local with no brief for today. Both are `security definer` and callable only by `nugget_service`.
@@ -109,7 +116,12 @@ Not done yet: the local LLM judge that enriches cards is not used; snapshots are
 
 The desktop CSP is `img-src 'self' data:`, so the desktop cannot load remote images. `logo` is therefore always a `data:` URI:
 - The service fetches it from Composio's `GET /toolkits` (`meta.logo`). When that call fails, it uses `https://logos.composio.dev/api/<slug>`, which serves every slug but is not documented.
-- It is capped at 32 KB and cached (24 hours, or 1 hour after a failure).
+- The fetch is SSRF-guarded:
+  - https only, with no proxy;
+  - at most 3 redirects, each re-checked;
+  - a DNS resolver that refuses loopback, private, link-local and metadata (169.254.169.254, `fd00:ec2::254`), CGNAT and other non-public addresses, so the check applies to the address actually connected to;
+  - IP-literal hosts are checked the same way.
+- It is capped at 32 KB and 5 seconds, and cached (24 hours, or 1 hour after a failure).
 - Rasters are accepted only when their magic bytes match.
 - SVG is rebuilt from an allowlist: no scripts, styles, `foreignObject`, images, event handlers, DTDs, or references outside the document.
 - Anything else gets a generated monogram.
@@ -191,6 +203,10 @@ The call has some explicit settings:
 - The digest is SHA-256 over the account, the tool and the canonical arguments. An approval must echo it, or it is refused (`412 digest_mismatch`).
 - `pending` becomes `executing` under a row lock. Approving twice, approving concurrently, or proposing again with the same idempotency key never sends twice. The same key with a different call is a `409`.
 - A failed send is not retried. Actions expire after 24 hours.
+- Proposing and approving need a live subscription (`402`), and share a per-user rate limit (`NUGGET_RATE_ACTION_PER_MIN`, default 10, `429 rate_limited`). Listing, status, preview and cancel stay open.
+- Approval is scoped to the owner: another user gets `404`, even with the digest. Only the stored call runs; fields in the approval body other than `digest` are ignored. A stored call that no longer matches its digest is refused (`412`) and audited.
+- Tool slugs come only from a fixed table (`actions::tool_for`, and each adapter's declared read tools). No tool name or URL is ever taken from synced content, model output or a request.
+- Same-user foreign keys (`20261102120002`): an action can only point at its own user's connection, and an audit entry only at its own user's action.
 
 **Audit.** Every step is appended to `action_audit`, a per-user SHA-256 hash chain (`prev_hash`, `hash`) without message bodies:
 - `proposed`, `denied`, `approval_rejected`, `approved`, `succeeded`, `failed`, `cancelled`, `expired`.

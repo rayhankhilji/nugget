@@ -118,13 +118,17 @@ async fn proposed_id(db: &Db, user: Uuid, key: &str) -> Result<Option<Uuid>, DbE
 
 /// The thread's quotes as the drafting prompt.
 pub fn draft_prompt(card: &Card, subject: &str, intent: &str) -> String {
-    let mut p = format!("Subject: {subject}\nWhat the reply should do: {intent}\n\n");
+    let mut p = format!(
+        "Subject: {}\nWhat the reply should do: {}\n\n",
+        crate::ask::neutralise_tags(subject),
+        crate::ask::neutralise_tags(intent)
+    );
     for e in card.evidence.iter().take(MAX_QUOTES) {
         if let Some(q) = &e.quote {
             let who = if e.from_user { "the user" } else { "them" };
             p.push_str(&format!(
                 "<quote from=\"{who}\">{}</quote>\n",
-                q.replace("</quote>", "</ quote>")
+                crate::ask::neutralise_tags(q).replace("</quote>", "</ quote>")
             ));
         }
     }

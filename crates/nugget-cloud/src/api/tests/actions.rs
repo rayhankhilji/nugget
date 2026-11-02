@@ -663,14 +663,16 @@ async fn trigger_apps_enable_triggers_and_webhooks_must_name_the_owner() {
             .await.unwrap().get::<_, bool>(0)
     };
     let send = |user_id: Uuid| {
-        let body = json!({"id": "msg_2", "type": "composio.trigger.message",
+        // A fresh id each time: the replay guard drops a repeated webhook-id.
+        let msg = format!("msg_{}", user_id.simple());
+        let body = json!({"id": msg, "type": "composio.trigger.message",
                           "metadata": {"trigger_slug": "NOTION_PAGE_CONTENT_UPDATED", "connected_account_id": account,
                                        "user_id": user_id.to_string()},
                           "data": {}}).to_string();
         let ts = time::OffsetDateTime::now_utc().unix_timestamp().to_string();
-        let sig = crate::webhook::sign("whsec", "msg_2", &ts, body.as_bytes());
+        let sig = crate::webhook::sign("whsec", &msg, &ts, body.as_bytes());
         let req = Request::post("/v1/webhooks/composio")
-            .header("webhook-id", "msg_2")
+            .header("webhook-id", msg.clone())
             .header("webhook-timestamp", ts)
             .header("webhook-signature", sig)
             .body(Body::from(body))
@@ -684,4 +686,112 @@ async fn trigger_apps_enable_triggers_and_webhooks_must_name_the_owner() {
         due().await,
         "the owner's trigger event makes the connection due"
     );
+}
+
+/// SEC1: proposing and approving share a per-user rate limit (each approval sends as the user).
+#[tokio::test]
+async fn proposals_and_approvals_are_rate_limited() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    let other = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail"]).await;
+    connect(&h, other, &["gmail"]).await;
+    let gateway = Gateway::new(None, None, String::new(), String::new());
+    let plans = Catalog::parse(crate::plans::DEFAULT_TOML, crate::testkit::test_prices).unwrap();
+    let mut state = AppState::new(h.db.clone(), h.auth.clone(), gateway, Arc::new(plans));
+    state.composio = Some(h.composio.clone() as Arc<dyn Composio>);
+    let app = router(Arc::new(state.with_limits(crate::ratelimit::Limits {
+        action_per_min: 2,
+        ..crate::ratelimit::Limits::unlimited()
+    })));
+    let (s, a) = call(&app, "POST", "/v1/actions", Some(u), Some(mail("r1"))).await;
+    assert_eq!(s, StatusCode::OK, "{a}");
+    let uri = format!("/v1/actions/{}/approve", a["id"].as_str().unwrap());
+    let (s, _) = call(
+        &app,
+        "POST",
+        &uri,
+        Some(u),
+        Some(json!({"digest": a["digest"]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, e) = call(&app, "POST", "/v1/actions", Some(u), Some(mail("r2"))).await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::TOO_MANY_REQUESTS, Some("rate_limited"))
+    );
+    // Reading is not limited by it, and the limit is per user.
+    let (s, _) = call(&app, "GET", "/v1/actions", Some(u), None).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = call(&app, "POST", "/v1/actions", Some(other), Some(mail("r1"))).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(executions(&h, "GMAIL_SEND_EMAIL").len(), 1);
+}
+
+/// SEC1: the executed call is exactly the stored plan; nothing in the request can change the
+/// tool or its arguments at approval time, and only the owner can approve.
+#[tokio::test]
+async fn approval_runs_exactly_the_previewed_call_for_the_owner_only() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    let intruder = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail"]).await;
+    connect(&h, intruder, &["gmail"]).await;
+    let (_, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("x1"))).await;
+    let uri = format!("/v1/actions/{}/approve", a["id"].as_str().unwrap());
+    // The intruder even knows the digest: still not found.
+    let (s, _) = call(
+        &h.app,
+        "POST",
+        &uri,
+        Some(intruder),
+        Some(json!({"digest": a["digest"]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // Extra fields (a tool, other arguments) in the approval are ignored, not used.
+    let (s, done) = call(&h.app, "POST", &uri, Some(u), Some(json!({
+        "digest": a["digest"], "tool": "GMAIL_DELETE_MESSAGE", "arguments": {"to": "evil@example.com"}
+    }))).await;
+    assert_eq!(
+        (s, done["status"].as_str()),
+        (StatusCode::OK, Some("succeeded"))
+    );
+    let calls = h.composio.calls.lock().unwrap().clone();
+    let sent: Vec<_> = calls
+        .iter()
+        .filter(|c| c.1.contains("GMAIL_SEND") || c.1.contains("DELETE"))
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, u.to_string(), "as the owner");
+    assert_eq!(sent[0].1, "GMAIL_SEND_EMAIL");
+    assert_eq!(sent[0].2["recipient_email"], "bob@example.com");
+    // A tampered stored call (a DB bug) no longer matches its digest and does not run.
+    let (_, b) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("x2"))).await;
+    let bid: Uuid = b["id"].as_str().unwrap().parse().unwrap();
+    h.pool
+        .execute("update public.pending_actions set arguments = jsonb_set(arguments, '{recipient_email}', '\"evil@example.com\"') where id = $1", &[&bid])
+        .await
+        .unwrap();
+    let (s, e) = call(
+        &h.app,
+        "POST",
+        &format!("/v1/actions/{bid}/approve"),
+        Some(u),
+        Some(json!({"digest": b["digest"]})),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::PRECONDITION_FAILED, Some("digest_mismatch")),
+        "{e}"
+    );
+    assert_eq!(executions(&h, "GMAIL_SEND_EMAIL").len(), 1);
+    let last = h.db.audit_chain(u).await.unwrap().pop().unwrap();
+    assert_eq!(last.detail["why"], "stored_call_changed");
 }
