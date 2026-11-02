@@ -82,6 +82,40 @@ impl From<&Plan> for Allowance {
     }
 }
 
+impl Allowance {
+    /// The rule behind [`Gateway::choose`], given this month's cost and smart calls so far:
+    /// refused past the hard cap; the requested tier (or the plan's default); smart falls back
+    /// to fast once the fair-use budget or the smart allowance is used up. Shared with the
+    /// model endpoint (`crate::llm`), which keeps these counts cached.
+    pub fn choose(
+        &self,
+        month_cost_micros: i64,
+        smart_used: i64,
+        requested: Option<ModelTier>,
+    ) -> Result<ModelChoice, GatewayError> {
+        if month_cost_micros >= self.hard_cap_micros {
+            return Err(GatewayError::QuotaExceeded);
+        }
+        let want = requested.unwrap_or(self.default_model);
+        if want == ModelTier::Fast {
+            return Ok(ModelChoice {
+                tier: ModelTier::Fast,
+                downgraded: false,
+            });
+        }
+        let allowed = month_cost_micros < self.budget_micros
+            && smart_used < i64::from(self.smart_asks_per_month);
+        Ok(ModelChoice {
+            tier: if allowed {
+                ModelTier::Smart
+            } else {
+                ModelTier::Fast
+            },
+            downgraded: !allowed,
+        })
+    }
+}
+
 /// The model picked for one request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelChoice {
@@ -197,30 +231,13 @@ impl Gateway {
         requested: Option<ModelTier>,
     ) -> Result<ModelChoice, GatewayError> {
         let cost = db.month_cost_micros(user).await?;
-        if cost >= allowance.hard_cap_micros {
-            return Err(GatewayError::QuotaExceeded);
-        }
         let want = requested.unwrap_or(allowance.default_model);
-        if want == ModelTier::Fast {
-            return Ok(ModelChoice {
-                tier: ModelTier::Fast,
-                downgraded: false,
-            });
-        }
-        let smart_used = db.month_model_calls(user, &self.model_smart).await?;
-        let allowed = cost < allowance.budget_micros
-            && smart_used < i64::from(allowance.smart_asks_per_month);
-        Ok(if allowed {
-            ModelChoice {
-                tier: ModelTier::Smart,
-                downgraded: false,
-            }
+        let smart_used = if cost < allowance.hard_cap_micros && want == ModelTier::Smart {
+            db.month_model_calls(user, &self.model_smart).await?
         } else {
-            ModelChoice {
-                tier: ModelTier::Fast,
-                downgraded: true,
-            }
-        })
+            0
+        };
+        allowance.choose(cost, smart_used, requested)
     }
 
     /// A metered completion on `tier`'s model; `req.model` is overwritten. Quotas are the

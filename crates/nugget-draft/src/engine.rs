@@ -159,6 +159,9 @@ pub trait RetrievalRunner: Send + Sync {
 pub struct DraftConfig {
     /// Tier to route by when neither the request nor the app names a provider.
     pub tier: Tier,
+    /// Tier for continuations (ghost text) when it has a provider, else `tier`: a fast model
+    /// (Heed cloud's fast tier when signed in), since every keystroke pause waits on it.
+    pub continue_tier: Tier,
     /// Retrieval context budget, in tokens (capped at [`MAX_BUDGET_TOKENS`]).
     pub budget_tokens: u32,
     /// The user's provider per app: keys are app ids (`com.tinyspeck.slackmacgap`, `slack.exe`)
@@ -231,6 +234,7 @@ impl Default for DraftConfig {
     fn default() -> Self {
         Self {
             tier: Tier::Synthesis,
+            continue_tier: Tier::Light,
             budget_tokens: 1_500,
             app_providers: HashMap::new(),
             allow_cloud_screenshots: false,
@@ -370,7 +374,14 @@ struct Inner {
     read_ahead: Mutex<ReadAheadState>,
     /// When [`LocalBudget::provider`] last failed a draft.
     local_failed_at: Mutex<Option<Instant>>,
+    /// When a read-ahead last warmed a cloud provider's connection.
+    cloud_warmed_at: Mutex<Option<Instant>>,
 }
+
+/// Least time between two connection warms of a cloud provider from read-ahead. Pooled
+/// connections idle out after minutes and send keep-alive pings, so this only bounds the
+/// (bodiless, authenticated) warm requests a user moving between fields causes.
+pub const CLOUD_WARM_SPACING: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// The read-ahead in flight and the last completed one (no prompt content, only a fingerprint).
 #[derive(Default)]
@@ -465,6 +476,7 @@ impl Drafter {
                 last_full: Mutex::new(HashMap::new()),
                 read_ahead: Mutex::new(ReadAheadState::default()),
                 local_failed_at: Mutex::new(None),
+                cloud_warmed_at: Mutex::new(None),
             }),
         }
     }
@@ -520,7 +532,7 @@ impl Drafter {
             self.inner.config.allow_terminals,
         )
         .ok()?;
-        let (candidates, _) = self.candidates(hint, None).ok()?;
+        let (candidates, _) = self.candidates(hint, None, false).ok()?;
         let provider = candidates.into_iter().next()?;
         let cloud = provider.meta().locality == Locality::Cloud;
         let warmer = self.warmer();
@@ -578,7 +590,9 @@ impl Drafter {
     pub fn prewarm_idle(&self) -> Option<ProviderId> {
         let warmer = self.warmer()?;
         let handle = tokio::runtime::Handle::try_current().ok()?;
-        let (candidates, _) = self.candidates(&DraftContext::default(), None).ok()?;
+        let (candidates, _) = self
+            .candidates(&DraftContext::default(), None, false)
+            .ok()?;
         let provider = candidates.into_iter().next()?;
         if provider.meta().locality == Locality::Cloud {
             return None;
@@ -632,7 +646,8 @@ impl Drafter {
         let ctx = &req.context;
         let config = &self.inner.config;
         let kind = gate_with(ctx, &config.excluded_apps, config.allow_terminals)?;
-        let (candidates, explicit) = self.candidates(ctx, req.provider.as_ref())?;
+        let continuation = req.mode == DraftMode::Continue;
+        let (candidates, explicit) = self.candidates(ctx, req.provider.as_ref(), continuation)?;
         let query = retrieval_query(ctx);
         let mut timings = DraftTimings::default();
         let mut last_err = None;
@@ -642,7 +657,12 @@ impl Drafter {
             let cloud = meta.locality == Locality::Cloud;
             timings.attempts += 1;
 
-            let (context, voice) = self.prepare(ctx, kind, &query, cloud, &mut timings).await;
+            let (mut context, voice) = self.prepare(ctx, kind, &query, cloud, &mut timings).await;
+            if cloud && continuation {
+                // Ghost text: a few words at the caret need little context; a short prompt
+                // reaches the first token sooner (the same passage cap as local providers).
+                keep_best_snippets(&mut context, config.local.max_snippets);
+            }
             // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
             if cloud && context.citations.iter().any(|c| c.sensitive) {
                 return Err(Error::Integrity(
@@ -749,7 +769,8 @@ impl Drafter {
             instruction,
             screenshot,
             band,
-            limits: self.limits_for(cloud),
+            // Continuations use the small prompt caps everywhere (see `begin`).
+            limits: self.limits_for(cloud && !continuation),
             grounding: config.grounding,
             continuation,
         };
@@ -789,13 +810,17 @@ impl Drafter {
         let kind = gate_with(ctx, &config.excluded_apps, config.allow_terminals)
             .map_err(ReadAheadSkip::Refused)?;
         let (candidates, _) = self
-            .candidates(ctx, req.provider.as_ref())
+            .candidates(ctx, req.provider.as_ref(), req.mode == DraftMode::Continue)
             .map_err(|_| ReadAheadSkip::Unavailable)?;
         let provider = candidates
             .into_iter()
             .next()
             .ok_or(ReadAheadSkip::Unavailable)?;
         if provider.meta().locality == Locality::Cloud {
+            // No prompt content leaves before the draft itself, but the connection can be
+            // opened now (bodiless, at most every CLOUD_WARM_SPACING), so the first keystroke
+            // pause in this field does not pay for TCP and TLS.
+            self.warm_cloud_connection(provider);
             return Err(ReadAheadSkip::Cloud);
         }
         if !provider.available() {
@@ -909,6 +934,27 @@ impl Drafter {
             prepare_ms,
             warm_ms,
         })
+    }
+
+    /// Open (or keep open) the connection to a cloud provider, without content, at most once per
+    /// [`CLOUD_WARM_SPACING`].
+    fn warm_cloud_connection(&self, provider: Arc<dyn Provider>) {
+        let Some(warmer) = self.warmer() else {
+            return;
+        };
+        if !provider.available() {
+            return;
+        }
+        {
+            let mut last = lock(&self.inner.cloud_warmed_at);
+            if last.is_some_and(|t| t.elapsed() < CLOUD_WARM_SPACING) {
+                return;
+            }
+            *last = Some(Instant::now());
+        }
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move { warmer.warm(provider).await });
+        }
     }
 
     /// Cancel the read-ahead in progress (focus left the field). Returns whether one was running.
@@ -1052,6 +1098,7 @@ impl Drafter {
         &self,
         ctx: &DraftContext,
         requested: Option<&ProviderId>,
+        continuation: bool,
     ) -> Result<(Vec<Arc<dyn Provider>>, bool)> {
         let router = &self.inner.router;
         let chosen = requested.cloned().or_else(|| self.app_choice(ctx));
@@ -1061,13 +1108,19 @@ impl Drafter {
                 .ok_or_else(|| Error::NotFound(format!("provider {id} is not configured")))?;
             return Ok((vec![p], true));
         }
-        let mut c = router.candidates(self.inner.config.tier, &Capabilities::default());
-        let no_provider = || {
-            Error::NotFound(format!(
-                "no provider is available for the {:?} tier",
-                self.inner.config.tier
-            ))
+        let config = &self.inner.config;
+        let tier = if continuation
+            && !router
+                .candidates(config.continue_tier, &Capabilities::default())
+                .is_empty()
+        {
+            config.continue_tier
+        } else {
+            config.tier
         };
+        let mut c = router.candidates(tier, &Capabilities::default());
+        let no_provider =
+            || Error::NotFound(format!("no provider is available for the {tier:?} tier"));
         let routed_local = c.first().ok_or_else(no_provider)?.meta().locality != Locality::Cloud;
         c.retain(|p| p.available());
         let local = self

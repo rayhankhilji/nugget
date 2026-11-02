@@ -4,12 +4,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
 use nugget_cloud::api::{AppState, metrics_router, router};
 use nugget_cloud::auth::SupabaseAuth;
 use nugget_cloud::composio::{Composio, HttpComposio};
 use nugget_cloud::config::Config;
 use nugget_cloud::db::Db;
 use nugget_cloud::gateway::Gateway;
+use nugget_cloud::llm::{LlmConfig, LlmState, upstream_client};
 use nugget_cloud::ops;
 use nugget_cloud::plans::Catalog;
 use nugget_cloud::stripe::{HttpStripe, Stripe};
@@ -124,13 +126,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             intel.tick().await;
         }
     });
-    let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
+    // The streaming model endpoint for the desktop (`/llm/v1`, see `llm`).
+    let llm = Arc::new(LlmState::new(
+        state.clone(),
+        LlmConfig::from_config(&cfg, |k| std::env::var(k).ok()),
+        upstream_client()?,
+    ));
+    // No Nagle delay: streamed tokens (ghost text) go out as soon as they are written.
+    let listener = tokio::net::TcpListener::bind(&cfg.bind)
+        .await?
+        .tap_io(|tcp| {
+            let _ = tcp.set_nodelay(true);
+        });
     tracing::info!(addr = %cfg.bind, "listening");
     let grace = Duration::from_secs(cfg.shutdown_grace_secs);
     let (drained_tx, drained_rx) = tokio::sync::oneshot::channel::<()>();
     let server = axum::serve(
         listener,
-        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+        router(state)
+            .merge(nugget_cloud::llm::router(llm))
+            .into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
         ops::shutdown_signal().await;

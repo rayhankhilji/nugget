@@ -167,6 +167,40 @@ impl Clock for SystemClock {
     }
 }
 
+/// What nuggetd needs to use Heed cloud's model endpoint for this user: the service, a valid
+/// access token and when it expires. Handed over the owner-only IPC socket (never written to
+/// disk); [`next_handoff_in`] says when to hand over a fresh one. `Debug` hides the token.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Handoff {
+    pub api_base: String,
+    pub access_token: String,
+    /// Unix seconds.
+    pub expires_at: i64,
+}
+
+impl std::fmt::Debug for Handoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handoff")
+            .field("api_base", &self.api_base)
+            .field("expires_at", &self.expires_at)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Most time between two handoffs, even with a long-lived token, so a restarted nuggetd that
+/// missed the reconnect hand-over gets a token soon.
+pub const MAX_HANDOFF_INTERVAL_SECS: i64 = 300;
+/// Least time between two handoffs.
+pub const MIN_HANDOFF_INTERVAL_SECS: i64 = 15;
+
+/// How long until the next handoff of a token expiring at `expires_at`: just inside the refresh
+/// margin, when [`Session::handoff`] returns a fresh token (bounded to 15 s – 5 min).
+pub fn next_handoff_in(expires_at: i64, now: i64) -> std::time::Duration {
+    let secs = (expires_at - REFRESH_MARGIN_SECS - now + 1)
+        .clamp(MIN_HANDOFF_INTERVAL_SECS, MAX_HANDOFF_INTERVAL_SECS);
+    std::time::Duration::from_secs(secs as u64)
+}
+
 /// Who is signed in, for the UI. Never carries a token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SessionStatus {
@@ -350,6 +384,23 @@ impl Session {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// A token for nuggetd ([`Handoff`]), refreshed first when it expires within the margin.
+    pub async fn handoff(&self) -> Result<Handoff> {
+        let token = self.access_token().await?;
+        let inner = self.inner.lock().await;
+        let expires_at = inner
+            .access
+            .as_ref()
+            .filter(|a| a.token == token)
+            .map(|a| a.expires_at)
+            .ok_or(CloudError::NotSignedIn)?;
+        Ok(Handoff {
+            api_base: self.config().api_base.clone(),
+            access_token: token,
+            expires_at,
+        })
     }
 
     /// A random id for this install (32 hex characters), made once and kept in the store. If the
@@ -628,6 +679,51 @@ pub(crate) mod tests {
         clock.set(5_000 - 59);
         assert_eq!(s.access_token().await.unwrap(), "at2");
         assert_eq!(store.get().unwrap().refresh_token, "rt2");
+    }
+
+    /// The handoff carries the current token and its expiry, refreshes inside the margin, is
+    /// due again just inside the margin, and never prints the token.
+    #[tokio::test]
+    async fn handoff_gives_nuggetd_a_fresh_short_lived_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(query_param("grant_type", "refresh_token"))
+            .and(body_json(serde_json::json!({ "refresh_token": "rt0" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(token_body("at1", "rt1", 4_600)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(query_param("grant_type", "refresh_token"))
+            .and(body_json(serde_json::json!({ "refresh_token": "rt1" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(token_body("at2", "rt2", 8_200)))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let store = Arc::new(MemoryStore::with(StoredSession {
+            refresh_token: "rt0".into(),
+            email: None,
+        }));
+        let clock = Arc::new(FakeClock::default());
+        clock.set(1_000);
+        let s = session(&server.uri(), store, clock.clone());
+        let h = s.handoff().await.unwrap();
+        assert_eq!((h.access_token.as_str(), h.expires_at), ("at1", 4_600));
+        assert_eq!(h.api_base, s.config().api_base);
+        assert!(!format!("{h:?}").contains("at1"));
+        // Due again just inside the refresh margin (capped at five minutes).
+        assert_eq!(next_handoff_in(4_600, 1_000).as_secs(), 300);
+        let due = next_handoff_in(4_600, 4_400).as_secs() as i64;
+        assert_eq!(4_400 + due, 4_600 - REFRESH_MARGIN_SECS + 1);
+        assert_eq!(next_handoff_in(4_600, 4_590).as_secs(), 15);
+        clock.set(4_400 + due);
+        let h2 = s.handoff().await.unwrap();
+        assert_eq!((h2.access_token.as_str(), h2.expires_at), ("at2", 8_200));
+        // Signed out: no handoff.
+        s.forget().await;
+        assert!(matches!(s.handoff().await, Err(CloudError::NotSignedIn)));
     }
 
     #[tokio::test]

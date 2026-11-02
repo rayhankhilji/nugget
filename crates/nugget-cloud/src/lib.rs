@@ -8,6 +8,7 @@
 //! - [`ingest`]: runs an app's adapter into `items` and `chunks` (dedup, deletes, cursors).
 //! - [`actions`]: outbound actions behind proposal, preview, approval and an audit chain.
 //! - [`gateway`]: LLM and embedding calls with our keys, metering and quotas.
+//! - [`llm`]: the Anthropic-compatible streaming model endpoint for the desktop (`/llm/v1`).
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
 //! - [`webhook`]: Composio webhook signature check and replay guard.
@@ -40,6 +41,7 @@ pub mod gateway;
 pub mod ingest;
 pub mod intel;
 pub mod knowledge;
+pub mod llm;
 pub mod llm_bridge;
 pub mod ops;
 pub mod plans;

@@ -73,6 +73,17 @@ impl AnthropicProvider {
     }
 }
 
+impl AnthropicProvider {
+    /// Another model on the same endpoint and connection pool (Heed cloud's two tiers).
+    pub(crate) fn sibling(&self, cfg: &ProviderConfig) -> Self {
+        Self {
+            common: self.common.sibling(cfg),
+            api_version: self.api_version.clone(),
+            eager_input_streaming: self.eager_input_streaming,
+        }
+    }
+}
+
 /// The `max_tokens: 0` cache-warming request for `req`'s stable prefix, or `None` when nothing
 /// in it is marked cacheable.
 pub(crate) fn build_prewarm_body(

@@ -159,9 +159,12 @@ pub(crate) struct HttpSettings {
     pub direct: bool,
     /// Connect to this Unix-domain socket instead of the URL's host (Unix only).
     pub unix_socket: Option<std::path::PathBuf>,
+    /// A bearer token read at every request (a signed-in session whose token rotates).
+    pub bearer: Option<Arc<dyn crate::cloud::BearerSource>>,
 }
 
 /// One provider's HTTP endpoint.
+#[derive(Clone)]
 pub(crate) struct Http {
     client: reqwest::Client,
     pub(crate) provider: ProviderId,
@@ -241,6 +244,15 @@ impl Http {
             settings,
             auth,
         })
+    }
+
+    /// The same endpoint and connection pool under another provider id (two providers that
+    /// differ only in the model they ask for share one warm connection).
+    pub(crate) fn sibling(&self, provider: ProviderId) -> Self {
+        Self {
+            provider,
+            ..self.clone()
+        }
     }
 
     /// `base` joined with a relative path (`"v1/messages"`), keeping any base path prefix.
@@ -327,6 +339,16 @@ impl Http {
             for (k, v) in &self.auth {
                 req = req.header(k.clone(), v.clone());
             }
+            if let Some(source) = &self.settings.bearer {
+                // Checked before the ledger row opens: nothing is sent without a token.
+                let token = source
+                    .bearer()
+                    .ok_or_else(|| Error::Provider(format!("{}: not signed in", self.provider)))?;
+                let mut v = HeaderValue::from_str(&format!("Bearer {}", token.expose()))
+                    .map_err(|_| Error::Provider(format!("{}: unusable token", self.provider)))?;
+                v.set_sensitive(true);
+                req = req.header(reqwest::header::AUTHORIZATION, v);
+            }
             let sent = bytes.as_ref().map_or(0, |b| b.len() as u64);
             let mut meter = self.meter(feature, items, sent);
             let can_retry = attempt < self.settings.max_retries;
@@ -358,6 +380,11 @@ impl Http {
                 }
                 Ok(resp) => {
                     let status = resp.status();
+                    if status == StatusCode::UNAUTHORIZED
+                        && let Some(source) = &self.settings.bearer
+                    {
+                        source.rejected();
+                    }
                     let delay = retry_after(resp.headers());
                     let body = read_limited(resp, MAX_ERROR_BODY).await;
                     meter.add_received(body.len());
@@ -477,6 +504,46 @@ fn is_token(e: &ChatEvent) -> bool {
     }
 }
 
+/// The rest of a response whose answer is complete. Read out (bounded in time and size) so the
+/// connection goes back to the pool instead of being closed: inline when the consumer keeps
+/// polling after `Done`, else in the background when the stream is dropped. Only ever armed
+/// after `Done`: a stream dropped mid-answer still closes its connection, which is what cancels
+/// the request upstream.
+struct Tail(Option<std::pin::Pin<Box<dyn futures::Stream<Item = reqwest::Result<Bytes>> + Send>>>);
+
+impl Tail {
+    async fn drain(&mut self) {
+        if let Some(body) = self.0.take() {
+            drain(body).await;
+        }
+    }
+}
+
+impl Drop for Tail {
+    fn drop(&mut self) {
+        if let Some(body) = self.0.take()
+            && let Ok(rt) = tokio::runtime::Handle::try_current()
+        {
+            rt.spawn(drain(body));
+        }
+    }
+}
+
+async fn drain(
+    mut body: std::pin::Pin<Box<dyn futures::Stream<Item = reqwest::Result<Bytes>> + Send>>,
+) {
+    let _ = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut n = 0usize;
+        while let Some(Ok(c)) = body.next().await {
+            n += c.len();
+            if n > MAX_ERROR_BODY {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
 /// Turn a successful streaming response into a [`ChatStream`]. The stream ends after the first
 /// `Done` or error; `Done` is preceded by a [`ChatEvent::Stats`] with cache usage and timings.
 /// The egress meter records when the stream finishes or is dropped.
@@ -554,7 +621,15 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
                 }
                 let done = matches!(e, ChatEvent::Done { .. });
                 if done {
+                    // The answer is complete, but the body may not be (the end of the chunked
+                    // encoding, a trailing `message_stop`). Read it out in the background so the
+                    // connection goes back to the pool: dropping it here would close it, and the
+                    // next request (the next keystroke) would pay for a new connection.
+                    let mut tail = Tail(Some(Box::pin(body)));
                     yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
+                    yield Ok(e);
+                    tail.drain().await;
+                    return;
                 }
                 yield Ok(e);
                 if done {

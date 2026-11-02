@@ -193,6 +193,16 @@ impl RpcHandler {
                 let p = router.provider(&cfg.id)?;
                 Some(self.info(p.as_ref(), router.tiers_of(p.id()), None))
             })
+            // Heed cloud's providers while signed in (`features::cloud_llm`); not in config.
+            .chain(
+                [
+                    nugget_infer::cloud::CLOUD_FAST,
+                    nugget_infer::cloud::CLOUD_SMART,
+                ]
+                .into_iter()
+                .filter_map(|id| router.provider(&ProviderId::new(id)))
+                .map(|p| self.info(p.as_ref(), router.tiers_of(p.id()), None)),
+            )
             .chain(self.runtime_infos())
             .collect()
     }
