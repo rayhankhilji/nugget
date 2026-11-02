@@ -28,6 +28,7 @@ mod agent;
 mod ai_keys;
 pub(crate) mod backup;
 mod browser;
+pub(crate) mod chatgpt;
 pub(crate) mod cloud_llm;
 pub(crate) mod draft;
 mod model_fit;
@@ -176,6 +177,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     );
     start(&mut list, "ai_keys", &[], ai_keys::start(cx));
     start(&mut list, "cloud_llm", &[], cloud_llm::start(cx)); // Heed cloud model when signed in
+    start(&mut list, "chatgpt", &[], chatgpt::start(cx)); // Sign in with ChatGPT (local mode)
     start(&mut list, "model_fit", &[], model_fit::start(cx));
     start(&mut list, "backup", &[], backup::start(cx));
     start(&mut list, "search_ui", &[], search_ui::start(cx)); // faceted search, timelines, previews

@@ -198,6 +198,9 @@ impl RpcHandler {
                 [
                     nugget_infer::cloud::CLOUD_FAST,
                     nugget_infer::cloud::CLOUD_SMART,
+                    // Sign in with ChatGPT's providers (`features::chatgpt`); not in config.
+                    nugget_infer::chatgpt::CHATGPT_LIGHT,
+                    nugget_infer::chatgpt::CHATGPT_SMART,
                 ]
                 .into_iter()
                 .filter_map(|id| router.provider(&ProviderId::new(id)))

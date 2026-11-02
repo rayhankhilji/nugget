@@ -55,6 +55,8 @@ pub struct DaemonOptions {
     pub nuggetd_exe: Option<PathBuf>,
     /// Connector registry override (tests). Default: `sources::registry()`.
     pub connectors: Option<Registry>,
+    /// OpenAI's sign-in endpoints for Sign in with ChatGPT (tests point them at a fake).
+    pub chatgpt: Option<nugget_infer::chatgpt::Endpoints>,
 }
 
 /// Test hooks for the local runtime and model manifest.
@@ -80,6 +82,7 @@ impl DaemonOptions {
             home: None,
             nuggetd_exe: None,
             connectors: None,
+            chatgpt: None,
         }
     }
 }
@@ -129,6 +132,8 @@ pub(crate) struct State {
     pub shutdown: CancellationToken,
     /// Wired-in subsystems (`crate::features`); set once, right after `State` is built.
     pub features: OnceLock<crate::features::Features>,
+    /// Sign in with ChatGPT's endpoints (`crate::features::chatgpt`).
+    pub chatgpt_endpoints: nugget_infer::chatgpt::Endpoints,
 }
 
 impl State {
@@ -471,6 +476,7 @@ impl Daemon {
         // Recovery mode (damaged database, empty temporary store): no source kinds and no keychain,
         // so source ids reused in the empty store never touch the real credentials.
         let recovery = crate::features::backup::in_recovery(&paths);
+        let chatgpt_endpoints = opts.chatgpt.clone();
         let secrets: Arc<dyn SecretStore> = match opts.source_secrets {
             _ if recovery => Arc::new(MemorySecrets::new()),
             Some(s) => s,
@@ -637,6 +643,7 @@ impl Daemon {
             tasks,
             shutdown,
             features: OnceLock::new(),
+            chatgpt_endpoints: chatgpt_endpoints.unwrap_or_default(),
         });
 
         // Forward ingest events to every client; start installed local models (not awaited).

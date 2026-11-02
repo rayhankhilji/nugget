@@ -53,3 +53,38 @@ pub mod webhook;
 
 #[cfg(test)]
 pub(crate) mod testkit;
+
+/// Sign in with ChatGPT is for running Heed locally: OpenAI's open-source programme covers
+/// locally run apps, and hosted or paid use needs OpenAI's approval, which Heed has not
+/// requested. The hosted service therefore never builds `nugget_infer::chatgpt` (its
+/// `chatgpt-plan` feature stays off here) and never refers to ChatGPT plan tokens.
+#[cfg(test)]
+mod no_chatgpt_plan_in_the_cloud {
+    #[test]
+    fn the_service_does_not_enable_or_use_chatgpt_plan_usage() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let manifest = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+        assert!(
+            !manifest.contains("chatgpt-plan"),
+            "nugget-cloud must not enable chatgpt-plan"
+        );
+        let mut stack = vec![root.join("src")];
+        while let Some(dir) = stack.pop() {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("lib.rs") {
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    for banned in [
+                        "nugget_infer::chatgpt",
+                        "chatgpt.tokens.use.direct",
+                        "dynamic_agent_client",
+                    ] {
+                        assert!(!text.contains(banned), "{} mentions {banned}", p.display());
+                    }
+                }
+            }
+        }
+    }
+}

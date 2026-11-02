@@ -39,6 +39,8 @@
 //!   context is processed.
 
 pub mod adapters;
+#[cfg(feature = "chatgpt-plan")]
+pub mod chatgpt;
 pub mod cloud;
 pub mod config;
 mod http;
