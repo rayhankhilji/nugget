@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "Die Anmeldung bei ChatGPT hat nicht funktioniert. Versuchen Sie es erneut.",
   "models.ai.title": "Ihre KI",
   "models.ai.hint": "Was Heed zum Antworten und Schreiben nutzen kann, und ob es funktioniert.",
-  "models.ai.working": "{name}: funktioniert",
-  "models.ai.notWorking": "{name}: funktioniert nicht (siehe Ihre Anbieter unten)",
+  "models.ai.working": "Funktioniert",
+  "models.ai.notWorking": "Funktioniert nicht: {reason}.",
   "chatgpt.unavailable.title": "Die Anmeldung mit ChatGPT ist für dieses Konto noch nicht verfügbar",
-  "chatgpt.unavailable.body": "OpenAI erlaubt diesem Konto die Anmeldung mit ChatGPT bei Heed nicht. Verwenden Sie stattdessen einen API-Schlüssel oder versuchen Sie es später erneut."
+  "chatgpt.unavailable.body": "OpenAI erlaubt diesem Konto die Anmeldung mit ChatGPT bei Heed nicht. Verwenden Sie stattdessen einen API-Schlüssel oder versuchen Sie es später erneut.",
+  "models.ai.reason.refused": "der Schlüssel wurde abgelehnt. Ersetze den Schlüssel, um es zu beheben",
+  "models.ai.reason.limited": "der Anbieter begrenzt Anfragen; Heed versucht es selbst erneut",
+  "models.ai.reason.unreachable": "der Anbieter hat nicht geantwortet",
+  "models.ai.reason.other": "der Anbieter hat einen Fehler gemeldet"
 }

@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "ChatGPT 登录未成功。请重试。",
   "models.ai.title": "你的 AI",
   "models.ai.hint": "Heed 可以用来回答和写作的 AI，以及它们是否正常工作。",
-  "models.ai.working": "{name}：正常工作",
-  "models.ai.notWorking": "{name}：无法工作（参见下方的“你的提供商”）",
+  "models.ai.working": "正常工作",
+  "models.ai.notWorking": "无法工作：{reason}。",
   "chatgpt.unavailable.title": "此账户暂时无法使用 ChatGPT 登录",
-  "chatgpt.unavailable.body": "OpenAI 未允许此账户通过 ChatGPT 登录 Heed。请改用 API 密钥，或稍后重试。"
+  "chatgpt.unavailable.body": "OpenAI 未允许此账户通过 ChatGPT 登录 Heed。请改用 API 密钥，或稍后重试。",
+  "models.ai.reason.refused": "密钥被拒绝。请替换密钥来修复",
+  "models.ai.reason.limited": "提供商正在限制请求；Heed 会自动重试",
+  "models.ai.reason.unreachable": "提供商没有响应",
+  "models.ai.reason.other": "提供商返回了错误"
 }

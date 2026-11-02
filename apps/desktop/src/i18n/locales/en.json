@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "The ChatGPT sign-in didn't work. Try again.",
   "models.ai.title": "Your AI",
   "models.ai.hint": "What Heed can use to answer and write, and whether it works.",
-  "models.ai.working": "{name}: working",
-  "models.ai.notWorking": "{name}: not working (see Your providers below)",
+  "models.ai.working": "Working",
+  "models.ai.notWorking": "Not working: {reason}.",
   "chatgpt.unavailable.title": "ChatGPT sign-in isn't available for this account yet",
-  "chatgpt.unavailable.body": "OpenAI didn't let this account use ChatGPT sign-in with Heed. Use an API key instead, or try again later."
+  "chatgpt.unavailable.body": "OpenAI didn't let this account use ChatGPT sign-in with Heed. Use an API key instead, or try again later.",
+  "models.ai.reason.refused": "the key was refused. Replace the key to fix it",
+  "models.ai.reason.limited": "the provider is limiting requests; Heed retries on its own",
+  "models.ai.reason.unreachable": "the provider didn't answer",
+  "models.ai.reason.other": "the provider returned an error"
 }
