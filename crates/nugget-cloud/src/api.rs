@@ -29,8 +29,6 @@ mod billing;
 
 const MAX_QUESTION_CHARS: usize = 2_000;
 const CATALOG_TTL: Duration = Duration::from_secs(3600);
-/// Device id used when a client sends none (counts as one device).
-const UNNAMED_DEVICE: &str = "unnamed-client";
 
 pub struct AppState {
     pub db: Db,
@@ -47,6 +45,8 @@ pub struct AppState {
     /// Public https base of this service (Stripe return pages).
     pub public_url: Option<String>,
     pub app_scheme: String,
+    /// Website origins: CORS and allowed billing return URLs. Empty = CORS off.
+    pub site_origins: Vec<String>,
     toolkits: Mutex<Option<(Instant, Vec<Toolkit>)>>,
 }
 
@@ -66,6 +66,7 @@ impl AppState {
             stripe_webhook_secret: None,
             public_url: None,
             app_scheme: "nugget".into(),
+            site_origins: Vec::new(),
             toolkits: Mutex::new(None),
         }
     }
@@ -228,26 +229,26 @@ async fn caller(s: &AppState, h: &HeaderMap) -> ApiResult<Caller> {
         Some(e) => (Some(e.subscription), Some(e.plan)),
         None => (None, None),
     };
-    if let Some(p) = &plan {
-        let device = h
-            .get("x-heed-device")
-            .and_then(|v| v.to_str().ok())
-            .map(str::trim)
-            .filter(|d| {
-                (8..=64).contains(&d.len())
-                    && d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-            })
-            .unwrap_or(UNNAMED_DEVICE);
-        if !s.db.register_device(user.id, device, p.devices).await? {
-            return Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "device_limit_reached",
-                format!(
-                    "{} allows {} device(s); remove one in account settings or upgrade",
-                    p.name, p.devices
-                ),
-            ));
-        }
+    // Only clients that identify themselves (the desktop app) count as devices; the website
+    // and API tools send no id and never use up a seat. A fair-use limit, not DRM.
+    let device = h
+        .get("x-heed-device")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|d| {
+            (8..=64).contains(&d.len()) && d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        });
+    if let (Some(p), Some(device)) = (&plan, device)
+        && !s.db.register_device(user.id, device, p.devices).await?
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "device_limit_reached",
+            format!(
+                "{} allows {} device(s); remove one in account settings or upgrade",
+                p.name, p.devices
+            ),
+        ));
     }
     Ok(Caller {
         user,
@@ -266,6 +267,31 @@ async fn user(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthUser> {
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
+    let cors = cors_layer(&state.site_origins);
+    let router = routes(state);
+    match cors {
+        Some(c) => router.layer(c),
+        None => router,
+    }
+}
+
+/// CORS for the website: listed origins only, bearer auth (no cookies), preflight handled.
+fn cors_layer(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
+    use axum::http::{HeaderValue, Method, header};
+    let list: Vec<HeaderValue> = origins
+        .iter()
+        .filter_map(|o| HeaderValue::from_str(o).ok())
+        .collect();
+    (!list.is_empty()).then(|| {
+        tower_http::cors::CorsLayer::new()
+            .allow_origin(list)
+            .allow_methods([Method::GET, Method::POST, Method::DELETE])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+            .max_age(Duration::from_secs(3600))
+    })
+}
+
+fn routes(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/me", get(me).delete(delete_me))
