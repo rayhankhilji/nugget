@@ -34,7 +34,7 @@ import { SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
-import { ActionQueue } from "./today/ActionQueue";
+import { ActionPane, ApprovalRows, useApprovals } from "./today/ActionQueue";
 import { BriefProse } from "./today/BriefProse";
 import { cloudApi, type CloudBrief } from "../cloud";
 import { useCloudSignedIn } from "../cloudSignedIn";
@@ -203,8 +203,27 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
   // Cards in the inbox (shown, or just acted on and hidden until the next list): not repeated in the brief.
   const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden, ...acted]), [list, hidden, acted]);
   const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const selected = visible.find((c) => c.id === selectedId) ?? visible[0];
+  const approvals = useApprovals(cloud && view === "needs", actionsTick, setStatus);
+  // One queue: approvals first, then cards. The pane shows whichever row is selected.
+  const queue = useMemo(
+    () => [...approvals.pending.map((a) => ({ kind: "action" as const, id: a.id })), ...visible.map((c) => ({ kind: "card" as const, id: c.id }))],
+    [approvals.pending, visible],
+  );
+  const [pick, setPick] = useState<{ kind: "action" | "card"; id: string } | null>(null);
+  const current = queue.find((q) => pick && q.kind === pick.kind && q.id === pick.id) ?? queue[0] ?? null;
+  const selected = current?.kind === "card" ? visible.find((c) => c.id === current.id) : undefined;
+  const selectedAction = current?.kind === "action" ? approvals.pending.find((a) => a.id === current.id) : undefined;
+  const onQueueKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const k = e.nativeEvent;
+    if (e.defaultPrevented || isComposing(k) || isTypingTarget(e.target) || hasMod(k) || e.altKey) return onNeedsKey(e);
+    const dir = e.key === "ArrowDown" || letterOf(k) === "j" ? 1 : e.key === "ArrowUp" || letterOf(k) === "k" ? -1 : 0;
+    if (!dir || !current || queue.length === 0) return onNeedsKey(e);
+    e.preventDefault();
+    const i = queue.findIndex((q) => q.kind === current.kind && q.id === current.id);
+    const next = queue[(i + dir + queue.length) % queue.length]!;
+    setPick(next);
+    e.currentTarget.querySelector<HTMLButtonElement>(`[data-${next.kind}="${CSS.escape(next.id)}"]`)?.focus();
+  };
   const refreshButton = (
     <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={disabled} aria-disabled={refreshing || undefined}>
       {refreshing ? <Spinner label={t("today.refreshing")} /> : t("today.refresh")}
@@ -249,7 +268,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
   return (
     <SourcesContext.Provider value={sourceMap}>
       <div className="page page-needs">
-        <PageHeader title={t("today.inbox")} description={t("needs.description")} actions={refreshButton} />
+        <PageHeader title={t("today.inbox")} count={queue.length > 0 ? formatNumber(queue.length) : undefined} description={t("needs.description")} actions={refreshButton} />
         <ErrorNote error={refreshError} />
         <p className="visually-hidden" role="status" aria-live="polite">
           {status}
@@ -263,11 +282,11 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
               {t("today.inbox")}
               {list && visible.length > 0 && <span> · {formatNumber(visible.length)}</span>}
             </h2>
-            {cloud && <ActionQueue tick={actionsTick} onDone={setStatus} />}
             <ErrorNote error={cards.error} onRetry={cards.reload} />
+            <ErrorNote error={approvals.error} onRetry={approvals.reload} />
             {cards.loading && !list && <Loading label={t("today.loading")} lines={3} />}
             {list &&
-              visible.length === 0 &&
+              queue.length === 0 &&
               (sources.data?.length === 0 ? (
                 <EmptyState title={t("today.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
                   {t("today.noSourcesBody")}
@@ -275,9 +294,41 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
               ) : (
                 <EmptyState title={t("today.emptyTitle")}>{t("today.emptyBody")}</EmptyState>
               ))}
-            {visible.length > 0 && selected && (
-              <div className="needs-split" onKeyDown={onNeedsKey}>
-                <InboxList cards={visible} selected={selected.id} onSelect={setSelectedId} />
+            {current && (
+              <div className="needs-split" onKeyDown={onQueueKey}>
+                <div className="needs-queue">
+                  {approvals.pending.length > 0 && (
+                    <>
+                      <h3 className="needs-section" id="needs-approvals">
+                        {t("needs.actions.title")} <span className="nav-count">{formatNumber(approvals.pending.length)}</span>
+                      </h3>
+                      <ul className="needs-list" aria-labelledby="needs-approvals">
+                        <ApprovalRows approvals={approvals} selected={current.kind === "action" ? current.id : null} onSelect={(id) => setPick({ kind: "action", id })} />
+                      </ul>
+                    </>
+                  )}
+                  {visible.length > 0 && (
+                    <>
+                      {approvals.pending.length > 0 && (
+                        <h3 className="needs-section" id="needs-cards">
+                          {t("needs.cards.title")} <span className="nav-count">{formatNumber(visible.length)}</span>
+                        </h3>
+                      )}
+                      <InboxList cards={visible} selected={current.kind === "card" ? current.id : ""} onSelect={(id) => setPick({ kind: "card", id })} />
+                    </>
+                  )}
+                </div>
+                {selectedAction && (
+                  <ActionPane
+                    key={selectedAction.id}
+                    a={selectedAction}
+                    appInfo={approvals.appOf(selectedAction.toolkit)}
+                    busy={approvals.busy}
+                    onApprove={() => approvals.approve(selectedAction)}
+                    onReject={() => void approvals.reject(selectedAction)}
+                  />
+                )}
+                {selected && (
                 <ul className="today-cards needs-pane" aria-labelledby="today-inbox">
                   {[selected].map((c) => (
                     <CardItem
@@ -304,6 +355,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
                     />
                   ))}
                 </ul>
+                )}
               </div>
             )}
           {!cloud &&
@@ -392,7 +444,16 @@ function onNeedsKey(e: KeyboardEvent<HTMLDivElement>) {
   const k = e.nativeEvent;
   if (e.defaultPrevented || isComposing(k) || isTypingTarget(e.target)) return;
   const plain = !hasMod(k) && !e.altKey;
-  const which = hasMod(k) && e.key === "Enter" ? "primary" : plain && letterOf(k) === "e" ? "accept" : plain && letterOf(k) === "h" ? "snooze" : null;
+  const which =
+    hasMod(k) && e.key === "Enter"
+      ? "primary"
+      : plain && letterOf(k) === "e"
+        ? "accept"
+        : plain && letterOf(k) === "h"
+          ? "snooze"
+          : plain && (e.key === "Backspace" || e.key === "Delete")
+            ? "reject"
+            : null;
   if (!which) return;
   const button = e.currentTarget.querySelector<HTMLButtonElement>(`.needs-pane [data-shortcut="${which}"]:not([aria-disabled="true"])`);
   if (!button) return;
@@ -402,21 +463,12 @@ function onNeedsKey(e: KeyboardEvent<HTMLDivElement>) {
 
 // ---- inbox list ----
 
-/** The cards as a dense list; the selected one opens in the pane beside it. Arrow keys move. */
+/** The cards as a dense list; the selected one opens in the pane beside it (the queue's keys move). */
 function InboxList({ cards, selected, onSelect }: { cards: CardView[]; selected: string; onSelect: (id: string) => void }) {
   const t = useT();
   const now = useNow();
-  const onKey = (e: KeyboardEvent<HTMLUListElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const i = cards.findIndex((c) => c.id === selected);
-    const next = cards[(i + (e.key === "ArrowDown" ? 1 : cards.length - 1)) % cards.length];
-    if (!next) return;
-    onSelect(next.id);
-    e.currentTarget.querySelector<HTMLButtonElement>(`[data-card="${CSS.escape(next.id)}"]`)?.focus();
-  };
   return (
-    <ul className="needs-list" aria-label={t("needs.listLabel")} onKeyDown={onKey}>
+    <ul className="needs-list" aria-label={t("needs.listLabel")}>
       {cards.map((c) => (
         <li key={c.id}>
           <button type="button" className="needs-item" data-card={c.id} aria-current={c.id === selected ? "true" : undefined} onClick={() => onSelect(c.id)}>

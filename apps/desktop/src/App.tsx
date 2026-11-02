@@ -3,7 +3,7 @@ import { api, chatHistory, events, errorMessage, isOpenableUrl, proactiveApi, pr
 import { useEvent } from "./hooks";
 import { requestChatAsk, requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
-import { useT, type MessageKey } from "./i18n";
+import { formatList, useT, type MessageKey } from "./i18n";
 import { Wordmark } from "./components/Logo";
 import { Toaster } from "./components/Toast";
 import { TrialModal, TrialRow } from "./components/Trial";
@@ -326,6 +326,14 @@ export function App() {
         const people: PaletteItem[] = r.facets.people.slice(0, 3).map((p) => ({
           id: `person:${p.value}`,
           label: p.value,
+          avatar: true,
+          // Where they appear in these results, and how often.
+          detail: [
+            formatList([...new Set(r.results.filter((x) => x.author === p.value).map((x) => appName(x.source)))]),
+            t("palette.person.items", { count: p.count }),
+          ]
+            .filter(Boolean)
+            .join(" · "),
           group: t("palette.group.people"),
           run: () => {
             requestSearch(`${q} ${p.value}`);

@@ -2516,5 +2516,7 @@
   "palette.filter.from": "Von: {value}",
   "palette.filter.in": "In: {value}",
   "palette.filter.remove": "Filter {label} entfernen",
-  "cloud.billing.selfHostedTitle": "Selbst gehostet · Abrechnung aus"
+  "cloud.billing.selfHostedTitle": "Selbst gehostet · Abrechnung aus",
+  "needs.cards.title": "Braucht eine Antwort oder Entscheidung",
+  "palette.person.items": "{count, plural, one {# Eintrag} other {# Einträge}}"
 }

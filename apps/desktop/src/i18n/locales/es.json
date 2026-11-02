@@ -2516,5 +2516,7 @@
   "palette.filter.from": "De: {value}",
   "palette.filter.in": "En: {value}",
   "palette.filter.remove": "Quitar el filtro {label}",
-  "cloud.billing.selfHostedTitle": "Autoalojado · facturación desactivada"
+  "cloud.billing.selfHostedTitle": "Autoalojado · facturación desactivada",
+  "needs.cards.title": "Necesita respuesta o decisión",
+  "palette.person.items": "{count, plural, one {# elemento} other {# elementos}}"
 }

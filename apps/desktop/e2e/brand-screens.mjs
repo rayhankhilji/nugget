@@ -7,7 +7,8 @@
 //   cd apps/desktop
 //   node e2e/brand-screens.mjs      # SHOTS_BUILD=0 to reuse dist/, SHOTS_ONLY=home-light,… for some
 //
-// Each image is a PNG, or a WebP when the PNG would be over 400 KB.
+// Shortcut hints show the Mac labels (⌘↵, ⌘K). Each image is a PNG, or a WebP when the PNG would
+// be over 400 KB.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -44,7 +45,7 @@ const SHOTS = [
     name: "needs-you",
     theme: "light",
     page: "needs",
-    ready: (p) => p.locator(".action-queue .action-item").first().waitFor(),
+    ready: (p) => p.locator(".needs-pane.action-item").first().waitFor(),
   },
   {
     name: "search",
@@ -64,12 +65,10 @@ const SHOTS = [
     page: "today",
     async ready(p) {
       await p.locator(".brief-prose").first().waitFor();
-      await p.keyboard.press("Control+K");
+      await p.keyboard.press("Meta+K");
       const box = p.getByRole("combobox");
       await box.fill("harbourline retainer");
       await p.locator(".palette-section-head", { hasText: "Mail" }).waitFor();
-      await p.keyboard.press("ArrowDown");
-      await p.keyboard.press("ArrowDown");
     },
   },
   { name: "connections", theme: "light", page: "connections", ready: (p) => p.getByText("Slack").first().waitFor() },
@@ -151,6 +150,11 @@ async function main() {
         reducedMotion: "reduce",
       });
       await ctx.addInitScript({ path: path.join(here, "tauri-shim.js") });
+      // The founder and the website are Mac-first: shortcut hints read ⌘↵, ⌘K, ⌘, (isMac()).
+      await ctx.addInitScript(() => {
+        Object.defineProperty(navigator, "platform", { get: () => "MacIntel" });
+        Object.defineProperty(navigator, "userAgentData", { get: () => ({ platform: "macOS", mobile: false, brands: [] }) });
+      });
       const fixture = cloudFixture();
       if (shot.signedOut) fixture.cloud_session = () => ({ configured: true, signed_in: false, email: null });
       await ctx.route("**/invoke", async (route) => {

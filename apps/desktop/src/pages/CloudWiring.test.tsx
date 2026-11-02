@@ -113,7 +113,9 @@ describe("signed in to Heed Cloud", () => {
     await click(Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.startsWith("Draft reply")));
     await flush(5);
     expect(accepted).toEqual([{ id: "cc1", action: "accept", index: 0, body: null }]);
-    const queue = container.querySelector(".action-queue")!;
+    // The new action leads the one Needs you queue, and its preview is in the pane.
+    expect(container.querySelector("[data-action]")?.textContent).toContain("Reply to Margaret");
+    const queue = container.querySelector(".needs-split")!;
     expect(queue.textContent).toContain("Reply to Margaret");
     expect(queue.textContent).toContain("margaret@example.com");
     expect(queue.textContent).toContain("Thursday works.");
@@ -121,7 +123,7 @@ describe("signed in to Heed Cloud", () => {
     await click(byText(queue as HTMLElement, "button", "Approve"));
     await flush(2);
     // Held for Undo: gone from the queue, a "Sent" toast, and nothing has reached the cloud yet.
-    expect(container.querySelector(".action-queue")).toBeNull();
+    expect(container.querySelector("[data-action]")).toBeNull();
     expect(approved).toEqual([]);
     flushApprovals();
     await flush(5);
@@ -147,7 +149,7 @@ describe("signed in to Heed Cloud", () => {
       </>,
     );
     await flush(5);
-    await click(byText(container.querySelector(".action-queue") as HTMLElement, "button", "Approve"));
+    await click(byText(container.querySelector(".needs-pane") as HTMLElement, "button", "Approve"));
     await flush(2);
     const toast = container.querySelector(".toast")!;
     expect(toast.textContent).toContain("Sent: Reply to Margaret");
@@ -157,7 +159,7 @@ describe("signed in to Heed Cloud", () => {
     await flush(3);
     expect(approved).toEqual([]);
     expect(container.querySelector(".toast")?.textContent).toContain("Nothing was sent");
-    expect(container.querySelector(".action-queue")?.textContent).toContain("Reply to Margaret");
+    expect(container.querySelector("[data-action]")?.textContent).toContain("Reply to Margaret");
   });
 
   it("Connections filters apps, offers a one-verb repair, and the sync pill shows imports", async () => {

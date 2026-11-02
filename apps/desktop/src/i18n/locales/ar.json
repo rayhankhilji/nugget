@@ -2516,5 +2516,7 @@
   "palette.filter.from": "من: {value}",
   "palette.filter.in": "في: {value}",
   "palette.filter.remove": "إزالة عامل التصفية {label}",
-  "cloud.billing.selfHostedTitle": "استضافة ذاتية · الفوترة متوقفة"
+  "cloud.billing.selfHostedTitle": "استضافة ذاتية · الفوترة متوقفة",
+  "needs.cards.title": "تحتاج ردًا أو قرارًا",
+  "palette.person.items": "{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}"
 }

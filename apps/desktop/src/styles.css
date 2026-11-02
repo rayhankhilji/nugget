@@ -4735,7 +4735,7 @@ section[aria-labelledby="cloud-ask"] form input {
 
 /* ⌘K: sections with a small heading, the active row says "Open ↵", filters as chips. */
 .palette-section-head {
-  padding: 10px 14px 4px;
+  padding: 16px 14px 6px;
   font-size: var(--fs-xs);
   font-weight: 600;
   color: var(--muted);
@@ -4769,4 +4769,77 @@ section[aria-labelledby="cloud-ask"] form input {
 .citations[hidden],
 section[hidden] {
   display: none;
+}
+
+/* Needs you: one queue (approvals, then cards) beside one pane; the header carries the count. */
+.page-count {
+  margin-inline-start: 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  vertical-align: 0.35em;
+}
+
+.needs-queue {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.needs-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 12px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.needs-section:first-child {
+  margin-block-start: 0;
+}
+
+.palette-section:first-child .palette-section-head {
+  padding-block-start: 10px;
+}
+
+.palette-option .palette-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.palette-detail {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.palette-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-inline-end: 10px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.palette-count {
+  margin-inline-start: auto;
+  font-family: var(--mono);
+}
+
+.palette-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }

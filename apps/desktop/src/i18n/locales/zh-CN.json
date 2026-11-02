@@ -2516,5 +2516,7 @@
   "palette.filter.from": "发件人：{value}",
   "palette.filter.in": "位于：{value}",
   "palette.filter.remove": "移除筛选 {label}",
-  "cloud.billing.selfHostedTitle": "自托管 · 计费已关闭"
+  "cloud.billing.selfHostedTitle": "自托管 · 计费已关闭",
+  "needs.cards.title": "需要回复或决定",
+  "palette.person.items": "{count, plural, other {# 项}}"
 }

@@ -2516,5 +2516,7 @@
   "palette.filter.from": "差出人: {value}",
   "palette.filter.in": "場所: {value}",
   "palette.filter.remove": "フィルター {label} を外す",
-  "cloud.billing.selfHostedTitle": "セルフホスト · 課金オフ"
+  "cloud.billing.selfHostedTitle": "セルフホスト · 課金オフ",
+  "needs.cards.title": "返信または判断が必要",
+  "palette.person.items": "{count, plural, other {# 件}}"
 }

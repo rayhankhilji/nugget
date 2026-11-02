@@ -1,12 +1,12 @@
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useState } from "react";
 import { cloudApi, type CloudAction, type CloudActionKind } from "../../cloud";
 import { errorMessage } from "../../api";
 import { useAsync } from "../../hooks";
-import { comboAria, comboLabel, hasMod, isComposing, isTypingTarget, type Combo } from "../../hooks.shortcuts";
+import { comboAria, comboLabel, type Combo } from "../../hooks.shortcuts";
 import { formatRelative } from "../../format";
 import { AppLogo } from "../../components/AppLogo";
 import { showToast } from "../../components/Toast";
-import { ErrorNote, Spinner } from "../../components/ui";
+import { Spinner } from "../../components/ui";
 import { useT, type MessageKey } from "../../i18n";
 import { holdApproval, undoApproval, useHeldApprovals } from "./approvals";
 
@@ -32,28 +32,34 @@ const DONE: Record<CloudActionKind, MessageKey> = {
 const APPROVE: Combo = { mod: true, key: "Enter" };
 const REJECT: Combo = { key: "Backspace" };
 
+export interface Approvals {
+  pending: CloudAction[];
+  appOf: (slug: string) => { name: string; logo: string | null };
+  approve: (a: CloudAction) => void;
+  reject: (a: CloudAction) => Promise<void>;
+  busy: string | null;
+  error: unknown;
+  reload: () => void;
+}
+
 /**
- * Heed Cloud's approval queue, as a split: one line per proposed action on the left, exactly
- * what it will send on the right with Approve and Reject pinned under it (⌘↵ / Ctrl+↵ and ⌫).
- * Nothing runs until Approve, which echoes the digest of what was shown; then a "Sent · Undo"
- * toast holds it for a few seconds (see approvals.ts). Reject cancels it. `tick` changes when a
- * new action was proposed.
+ * Heed Cloud's approval queue: actions proposed from cards (a reply, an event) with exactly what
+ * they will send. Nothing runs until Approve, which echoes the digest of what was shown; then a
+ * "Sent · Undo" toast holds it for a few seconds (see approvals.ts). Reject cancels it. `tick`
+ * changes when a new action was proposed. Needs you lists these rows above its cards and shows the
+ * selected one in its pane.
  */
-export function ActionQueue({ tick, onDone }: { tick: number; onDone: (status: string) => void }) {
+export function useApprovals(enabled: boolean, tick: number, onDone: (status: string) => void): Approvals {
   const t = useT();
-  const headingId = useId();
-  const list = useAsync(() => cloudApi.actions("pending"), [tick]);
-  const apps = useAsync(() => cloudApi.apps().catch(() => []), []);
+  const list = useAsync(() => (enabled ? cloudApi.actions("pending") : Promise.resolve([] as CloudAction[])), [enabled, tick]);
+  const apps = useAsync(() => (enabled ? cloudApi.apps().catch(() => []) : Promise.resolve([])), [enabled]);
   const held = useHeldApprovals();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => setError(null), [tick]);
 
   const pending = (list.data ?? []).filter((a) => !held.has(a.id));
-  const selected = pending.find((a) => a.id === selectedId) ?? pending[0];
-  if (!list.error && pending.length === 0) return null;
-  const app = (slug: string) => apps.data?.find((a) => a.slug === slug) ?? { name: slug, logo: null };
+  const appOf = (slug: string) => apps.data?.find((a) => a.slug === slug) ?? { name: slug, logo: null };
 
   const approve = (a: CloudAction) => {
     setError(null);
@@ -99,65 +105,36 @@ export function ActionQueue({ tick, onDone }: { tick: number; onDone: (status: s
     }
   };
 
-  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const k = e.nativeEvent;
-    if (e.defaultPrevented || isComposing(k) || isTypingTarget(e.target) || !selected || selected.decision === "deny" || busy) return;
-    if (hasMod(k) && e.key === "Enter") {
-      e.preventDefault();
-      approve(selected);
-    } else if (!hasMod(k) && !e.altKey && (e.key === "Backspace" || e.key === "Delete")) {
-      e.preventDefault();
-      void reject(selected);
-    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      if (!(e.target as HTMLElement).closest(".needs-list")) return;
-      e.preventDefault();
-      const i = pending.findIndex((a) => a.id === selected.id);
-      const next = pending[(i + (e.key === "ArrowDown" ? 1 : pending.length - 1)) % pending.length];
-      if (!next) return;
-      setSelectedId(next.id);
-      e.currentTarget.querySelector<HTMLButtonElement>(`[data-action="${CSS.escape(next.id)}"]`)?.focus();
-    }
-  };
+  return { pending, appOf, approve, reject, busy, error: list.error ?? error, reload: list.reload };
+}
 
+/** One row per pending action, for the Needs you queue. */
+export function ApprovalRows({ approvals, selected, onSelect }: { approvals: Approvals; selected: string | null; onSelect: (id: string) => void }) {
+  const t = useT();
   return (
-    <section className="action-queue" aria-labelledby={headingId}>
-      <h2 id={headingId}>{t("needs.actions.title")}</h2>
-      <ErrorNote error={list.error ?? error} onRetry={list.reload} />
-      {selected && (
-        <div className="needs-split action-split" onKeyDown={onKey}>
-          <ul className="needs-list" aria-label={t("needs.actions.listLabel")}>
-            {pending.map((a) => {
-              const target = app(a.toolkit);
-              return (
-                <li key={a.id}>
-                  <button type="button" className="needs-item action-row" data-action={a.id} aria-current={a.id === selected.id ? "true" : undefined} onClick={() => setSelectedId(a.id)}>
-                    <AppLogo app={target} />
-                    <span className="needs-item-kind">
-                      {t(KIND[a.kind] ?? "needs.actions.kind.other")} · {t("needs.actions.in", { app: target.name })}
-                    </span>
-                    <span className="needs-item-title" dir="auto">
-                      {a.summary}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          <ActionPane
-            key={selected.id}
-            a={selected}
-            appInfo={app(selected.toolkit)}
-            busy={busy}
-            onApprove={() => approve(selected)}
-            onReject={() => void reject(selected)}
-          />
-        </div>
-      )}
-    </section>
+    <>
+      {approvals.pending.map((a) => {
+        const target = approvals.appOf(a.toolkit);
+        return (
+          <li key={a.id}>
+            <button type="button" className="needs-item action-row" data-action={a.id} aria-current={a.id === selected ? "true" : undefined} onClick={() => onSelect(a.id)}>
+              <AppLogo app={target} />
+              <span className="needs-item-kind">
+                {t(KIND[a.kind] ?? "needs.actions.kind.other")} · {t("needs.actions.in", { app: target.name })}
+              </span>
+              <span className="needs-item-title" dir="auto">
+                {a.summary}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </>
   );
 }
 
-function ActionPane({
+/** The selected action in the Needs you pane: what it will send, with Approve and Reject. */
+export function ActionPane({
   a,
   appInfo,
   busy,
@@ -241,6 +218,7 @@ function ActionPane({
             className="btn btn-primary"
             disabled={busy !== null}
             onClick={onApprove}
+            data-shortcut="primary"
             aria-label={t("needs.actions.approveLabel", { summary: a.summary })}
             aria-keyshortcuts={comboAria(APPROVE)}
           >
@@ -254,6 +232,7 @@ function ActionPane({
             className="btn btn-ghost"
             disabled={busy !== null}
             onClick={onReject}
+            data-shortcut="reject"
             aria-label={t("needs.actions.rejectLabel", { summary: a.summary })}
             aria-keyshortcuts={comboAria(REJECT)}
           >

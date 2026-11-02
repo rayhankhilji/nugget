@@ -14,6 +14,10 @@ export interface PaletteItem {
   /** What kind of thing this is: the section it is listed under ("Pages", "Mail"). */
   group: string;
   run: () => void;
+  /** A second line under the label (a person's apps and item count). */
+  detail?: string;
+  /** Show an initial avatar before the label (people). */
+  avatar?: boolean;
   /** For search results: where it came from and who wrote it (for `in:` and `from:`). */
   source?: string;
   sourceName?: string;
@@ -301,7 +305,15 @@ export function CommandPalette({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => runAt(i)}
               >
-                <span className="palette-label">{item.label}</span>
+                {item.avatar && (
+                  <span className="palette-avatar" aria-hidden="true">
+                    {item.label.slice(0, 1).toLocaleUpperCase()}
+                  </span>
+                )}
+                <span className="palette-text">
+                  <span className="palette-label">{item.label}</span>
+                  {item.detail && <span className="palette-detail">{item.detail}</span>}
+                </span>
                 <span className="palette-meta">
                   {item.sourceName && <span className="palette-source">{item.sourceName}</span>}
                   {item.hint && <kbd dir="ltr">{item.hint}</kbd>}
@@ -328,6 +340,7 @@ export function CommandPalette({
           </>
         )}{" "}
         · <kbd dir="ltr">{t("shortcuts.key.esc")}</kbd> {t("palette.hint.close")}
+        {query.trim() && <span className="palette-count">{t("palette.count", { count: results.length })}</span>}
       </p>
     </dialog>
   );

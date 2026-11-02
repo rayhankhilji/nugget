@@ -2516,5 +2516,7 @@
   "palette.filter.from": "से: {value}",
   "palette.filter.in": "में: {value}",
   "palette.filter.remove": "फ़िल्टर {label} हटाएँ",
-  "cloud.billing.selfHostedTitle": "सेल्फ़-होस्टेड · बिलिंग बंद"
+  "cloud.billing.selfHostedTitle": "सेल्फ़-होस्टेड · बिलिंग बंद",
+  "needs.cards.title": "जवाब या फ़ैसला चाहिए",
+  "palette.person.items": "{count, plural, one {# आइटम} other {# आइटम}}"
 }
