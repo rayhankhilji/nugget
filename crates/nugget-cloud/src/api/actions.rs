@@ -96,6 +96,10 @@ async fn propose(
     let c = caller(&s, &h).await?;
     c.entitled()?;
     let u = c.user;
+    s.limits
+        .action
+        .check(&u.id)
+        .map_err(|w| ApiError::rate_limited("action", w))?;
     let kind = ActionKind::parse(&b.kind).ok_or_else(|| bad("unknown action kind"))?;
     check_key(&b.idempotency_key)?;
     let toolkit = b.toolkit.to_ascii_lowercase();
@@ -167,6 +171,10 @@ async fn approve(
     let c = caller(&s, &h).await?;
     c.entitled()?;
     let u = c.user;
+    s.limits
+        .action
+        .check(&u.id)
+        .map_err(|w| ApiError::rate_limited("action", w))?;
     Ok(Json(s.actions().approve(u.id, id, &b.digest).await?))
 }
 

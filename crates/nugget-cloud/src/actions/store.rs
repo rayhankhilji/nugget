@@ -413,10 +413,22 @@ impl Actions {
                         .map(|r| r.get::<_, String>(0)),
                     None => None,
                 };
-                // The digest covers the account: a reconnected account is a different action.
-                let Some(account) = account.filter(|acc| digest(acc, &a.tool, &a.arguments) == a.digest) else {
+                let Some(account) = account else {
                     return Ok(Gate::Err(ActionError::NotConnected(a.toolkit.clone())));
                 };
+                // The digest covers the account, tool and arguments: a reconnected account, or a
+                // stored call that changed since the preview, is not what was approved.
+                if digest(&account, &a.tool, &a.arguments) != a.digest {
+                    audit(
+                        tx,
+                        user,
+                        Some(id),
+                        "approval_rejected",
+                        json!({"why": "stored_call_changed"}),
+                    )
+                    .await?;
+                    return Ok(Gate::Err(ActionError::DigestMismatch));
+                }
                 let r = tx
                     .query_one(
                         &format!("update public.pending_actions set status = 'executing', decided_at = now()

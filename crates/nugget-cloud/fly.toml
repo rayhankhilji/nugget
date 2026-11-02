@@ -2,9 +2,13 @@
 #   fly deploy --config crates/nugget-cloud/fly.toml --dockerfile crates/nugget-cloud/Dockerfile
 # Secrets (fly secrets set ...): DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY,
 # SUPABASE_SERVICE_ROLE_KEY, COMPOSIO_API_KEY, COMPOSIO_AUTH_CONFIGS, ANTHROPIC_API_KEY,
-# optionally OPENAI_API_KEY, COMPOSIO_WEBHOOK_SECRET, DATABASE_CA_CERT.
+# optionally OPENAI_API_KEY, COMPOSIO_WEBHOOK_SECRET, DATABASE_CA_CERT, SENTRY_DSN.
+# Ops knobs (env, not secret): see docs/ops/runbook.md.
 app = "nugget-cloud"
 primary_region = "lhr"
+# SIGTERM, then this long to drain (the service gives in-flight work NUGGET_SHUTDOWN_GRACE_SECS).
+kill_signal = "SIGTERM"
+kill_timeout = 30
 
 [http_service]
   internal_port = 8080
@@ -14,9 +18,15 @@ primary_region = "lhr"
   min_machines_running = 1
 
   [[http_service.checks]]
-    path = "/healthz"
+    # Readiness: the database answers. /healthz is liveness only.
+    path = "/readyz"
     interval = "30s"
     timeout = "5s"
+
+# Prometheus text from the internal metrics listener (NUGGET_METRICS_BIND, not public).
+[metrics]
+  port = 9091
+  path = "/metrics"
 
 [[vm]]
   size = "shared-cpu-1x"

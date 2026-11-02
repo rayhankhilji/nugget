@@ -259,6 +259,47 @@ do $$ begin
 end $$;
 rollback;
 
+-- Same-user foreign keys (20261102120002): an action cannot point at another user's
+-- connection, and an audit entry cannot point at another user's action.
+insert into public.connections (id, user_id, toolkit, composio_account_id)
+  values ('00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-00000000000b', 'gmail', 'ca_b_fk');
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  begin
+    insert into public.pending_actions (user_id, connection_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+      values ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-0000000000c2', 'send_mail', 'gmail',
+              'GMAIL_SEND_EMAIL', '{}', 's', repeat('d', 64), 'send', 'confirm', 'fk1');
+    raise exception 'action on another user''s connection was allowed';
+  exception when foreign_key_violation then null;
+  end;
+end $$;
+rollback;
+-- Even a superuser write (a service bug with RLS off) cannot cross users.
+do $$ begin
+  begin
+    insert into public.action_audit (user_id, action_id, seq, event, prev_hash, hash)
+      values ('00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000a1', 1, 'forged', repeat('0', 64), repeat('2', 64));
+    raise exception 'audit entry for another user''s action was allowed';
+  exception when foreign_key_violation then null;
+  end;
+end $$;
+-- Disconnecting clears only connection_id.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+insert into public.pending_actions (id, user_id, connection_id, kind, toolkit, tool, arguments, summary, digest, risk, decision, idempotency_key)
+  values ('00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000000b', '00000000-0000-0000-0000-0000000000c2',
+          'send_mail', 'gmail', 'GMAIL_SEND_EMAIL', '{}', 's', repeat('e', 64), 'send', 'confirm', 'fk2');
+commit;
+delete from public.connections where id = '00000000-0000-0000-0000-0000000000c2';
+do $$ begin
+  assert (select connection_id is null and user_id = '00000000-0000-0000-0000-00000000000b'
+          from public.pending_actions where id = '00000000-0000-0000-0000-0000000000b1'),
+         'disconnect clears the action''s connection only';
+end $$;
+
 -- Slack and Teams messages are items too.
 begin;
 set local role nugget_service;
@@ -274,8 +315,8 @@ do $$ begin
   assert (select count(*) from public.chunks) = 0, 'chunks cascade';
   assert (select count(*) from public.usage_events) = 0, 'usage cascade';
   assert (select count(*) from public.connections) = 0, 'connections cascade';
-  assert (select count(*) from public.pending_actions) = 0, 'actions cascade';
-  assert (select count(*) from public.action_audit) = 0, 'audit cascades with the user';
+  assert (select count(*) from public.pending_actions where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'actions cascade';
+  assert (select count(*) from public.action_audit where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'audit cascades with the user';
   assert (select count(*) from public.subscriptions) = 0, 'subscriptions cascade';
   assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;

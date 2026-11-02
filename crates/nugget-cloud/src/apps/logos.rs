@@ -9,8 +9,16 @@
 //!   in depth for any other way the markup gets used.
 //! - Whatever cannot be fetched or fails a check becomes a generated monogram, so every app
 //!   always has a logo.
+//!
+//! The fetch itself is SSRF-guarded (the URL comes from Composio's catalogue, which we do not
+//! control): https only; at most [`MAX_REDIRECTS`] redirects, each re-checked; no proxy; and a
+//! DNS resolver that refuses names resolving to loopback, private, link-local (cloud metadata
+//! at 169.254.169.254 and `fd00:ec2::254`), CGNAT, multicast or other non-public addresses, so
+//! the check applies to the address actually connected to. IP-literal hosts are checked the
+//! same way. Size (32 KB) and time (5 s) are capped.
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,6 +29,100 @@ pub const MAX_LOGO_BYTES: usize = 32 * 1024;
 const OK_TTL: Duration = Duration::from_secs(24 * 3600);
 const FAIL_TTL: Duration = Duration::from_secs(3600);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Redirects followed before giving up.
+pub const MAX_REDIRECTS: usize = 3;
+
+/// Whether `ip` is a public unicast address (anything else is refused as a fetch target).
+pub fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, c, _] = v4.octets();
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast()
+                || a == 0
+                || a >= 240
+                || (a == 100 && (64..128).contains(&b)) // CGNAT 100.64/10
+                || (a == 198 && (b == 18 || b == 19)) // benchmarking
+                || (a == 192 && b == 0 && c == 0)) // IETF protocol assignments
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(v4));
+            }
+            let seg = v6.segments();
+            // NAT64 (64:ff9b::/96) embeds an IPv4 address.
+            if seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                let [a, b] = seg[6].to_be_bytes();
+                let [c, d] = seg[7].to_be_bytes();
+                return is_public(IpAddr::V4(Ipv4Addr::new(a, b, c, d)));
+            }
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                || v6.is_multicast()
+                || (seg[0] & 0xfe00) == 0xfc00 // unique local, incl. fd00:ec2::254
+                || (seg[0] & 0xffc0) == 0xfe80 // link-local
+                || (seg[0] == 0x2001 && seg[1] == 0x0db8)) // documentation
+        }
+    }
+}
+
+/// Whether a URL's host is acceptable before any lookup: a name, or a public IP literal.
+fn host_ok(url: &reqwest::Url, allow_private: bool) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => !d.is_empty(),
+        Some(url::Host::Ipv4(ip)) => allow_private || is_public(IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => allow_private || is_public(IpAddr::V6(ip)),
+        None => false,
+    }
+}
+
+/// Resolves with the system resolver and drops non-public addresses; none left is an error.
+struct PublicOnly;
+
+impl reqwest::dns::Resolve for PublicOnly {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> = tokio::net::lookup_host((host.as_str(), 0))
+                .await?
+                .filter(|a| is_public(a.ip()))
+                .collect();
+            if addrs.is_empty() {
+                return Err(format!("{host} resolves to no public address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
+        })
+    }
+}
+
+/// The logo client: guarded DNS, re-checked redirects, no proxy, short timeouts.
+fn guarded_client(allow_private: bool) -> Option<reqwest::Client> {
+    let redirects = reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt.error("too many redirects");
+        }
+        let url = attempt.url();
+        let scheme_ok = url.scheme() == "https" || (allow_private && url.scheme() == "http");
+        if !scheme_ok || !host_ok(url, allow_private) {
+            return attempt.error("redirect to a refused location");
+        }
+        attempt.follow()
+    });
+    let mut b = reqwest::Client::builder()
+        .redirect(redirects)
+        .timeout(FETCH_TIMEOUT)
+        .connect_timeout(FETCH_TIMEOUT)
+        .no_proxy();
+    if !allow_private {
+        b = b.dns_resolver(PublicOnly);
+    }
+    b.build().ok()
+}
 
 /// When it was fetched, and the data URI (None: the fetch or a check failed).
 type Cached = (Instant, Option<String>);
@@ -31,23 +133,25 @@ type Attrs = (Vec<(String, String)>, bool, usize);
 pub struct LogoCache {
     /// None: never fetch (tests, or no network); every logo is a monogram.
     http: Option<reqwest::Client>,
-    /// Plain `http://` is accepted only in tests (a local mock server).
+    /// Plain `http://` and loopback are accepted only in tests (a local mock server).
     allow_http: bool,
     map: Arc<Mutex<HashMap<String, Cached>>>,
 }
 
 impl LogoCache {
-    pub fn new(http: reqwest::Client) -> Self {
+    /// A fetching cache with the SSRF-guarded client (no fetching if it cannot be built).
+    pub fn new() -> Self {
         Self {
-            http: Some(http),
+            http: guarded_client(false),
             ..Default::default()
         }
     }
 
+    /// Allows `http://` and loopback, for a local mock server. Redirect limits still apply.
     #[cfg(test)]
-    pub fn insecure_for_tests(http: reqwest::Client) -> Self {
+    pub fn insecure_for_tests() -> Self {
         Self {
-            http: Some(http),
+            http: guarded_client(true),
             allow_http: true,
             ..Default::default()
         }
@@ -80,12 +184,13 @@ impl LogoCache {
 
     async fn fetch(&self, url: &str) -> Option<String> {
         let http = self.http.as_ref()?;
+        let parsed = reqwest::Url::parse(url).ok()?;
         let ok_scheme =
-            url.starts_with("https://") || (self.allow_http && url.starts_with("http://"));
-        if !ok_scheme {
+            parsed.scheme() == "https" || (self.allow_http && parsed.scheme() == "http");
+        if !ok_scheme || !host_ok(&parsed, self.allow_http) {
             return None;
         }
-        let mut res = http.get(url).timeout(FETCH_TIMEOUT).send().await.ok()?;
+        let mut res = http.get(parsed).send().await.ok()?;
         if !res.status().is_success() {
             return None;
         }
@@ -535,6 +640,84 @@ mod tests {
         assert!(sanitize_svg(&svg).is_some());
     }
 
+    #[test]
+    fn only_public_addresses() {
+        for bad in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "100.64.0.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "198.18.0.1",
+            "::1",
+            "::",
+            "fd00:ec2::254",
+            "fe80::1",
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "64:ff9b::a9fe:a9fe",
+            "2001:db8::1",
+            "ff02::1",
+        ] {
+            assert!(!is_public(bad.parse().unwrap()), "{bad} must be refused");
+        }
+        for good in ["1.1.1.1", "104.18.0.1", "2606:4700::1111", "::ffff:8.8.8.8"] {
+            assert!(is_public(good.parse().unwrap()), "{good} is public");
+        }
+    }
+
+    #[tokio::test]
+    async fn refuses_internal_targets_without_connecting() {
+        let c = LogoCache::new();
+        for url in [
+            "https://169.254.169.254/latest/meta-data/",
+            "https://127.0.0.1/logo.svg",
+            "https://[::1]/logo.svg",
+            "https://[fd00:ec2::254]/",
+            "http://example.com/logo.svg",
+            "file:///etc/passwd",
+            "https://localhost/logo.svg", // resolves to loopback: the resolver refuses it
+        ] {
+            assert_eq!(c.fetch(url).await, None, "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn redirects_are_capped() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        for i in 0..5 {
+            Mock::given(method("GET"))
+                .and(path(format!("/r{i}")))
+                .respond_with(
+                    ResponseTemplate::new(302)
+                        .insert_header("location", format!("{}/r{}", server.uri(), i + 1)),
+                )
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path("/r5"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("<svg><g/></svg>"))
+            .mount(&server)
+            .await;
+        let c = LogoCache::insecure_for_tests();
+        assert_eq!(
+            c.fetch(&format!("{}/r0", server.uri())).await,
+            None,
+            "5 hops > 3"
+        );
+        assert!(
+            c.fetch(&format!("{}/r3", server.uri())).await.is_some(),
+            "2 hops are fine"
+        );
+    }
+
     #[tokio::test]
     async fn fetches_caches_and_falls_back() {
         use wiremock::matchers::{method, path};
@@ -555,7 +738,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0x89; MAX_LOGO_BYTES + 1]))
             .mount(&server)
             .await;
-        let c = LogoCache::insecure_for_tests(reqwest::Client::new());
+        let c = LogoCache::insecure_for_tests();
         let url = format!("{}/slack.svg", server.uri());
         let a = c.data_uri(&url, "Slack").await;
         assert_eq!(decode(&a), "<svg><circle r=\"1\"/></svg>");
@@ -568,7 +751,7 @@ mod tests {
             "over the cap: monogram"
         );
         // https only outside tests; no fetcher: monogram.
-        let prod = LogoCache::new(reqwest::Client::new());
+        let prod = LogoCache::new();
         assert!(decode(&prod.data_uri(&url, "Slack").await).contains(">S</text>"));
         assert!(
             decode(&LogoCache::default().data_uri("https://x/y", "Gmail").await)

@@ -83,7 +83,12 @@ These run inside `nugget-cloud`, as a tokio task per process:
 
 The desktop CSP is `img-src 'self' data:`, so the desktop cannot load remote images. `logo` is therefore always a `data:` URI:
 - The service fetches it from Composio's `GET /toolkits` (`meta.logo`). When that call fails, it uses `https://logos.composio.dev/api/<slug>`, which serves every slug but is not documented.
-- It is capped at 32 KB and cached (24 hours, or 1 hour after a failure).
+- The fetch is SSRF-guarded:
+  - https only, with no proxy;
+  - at most 3 redirects, each re-checked;
+  - a DNS resolver that refuses loopback, private, link-local and metadata (169.254.169.254, `fd00:ec2::254`), CGNAT and other non-public addresses, so the check applies to the address actually connected to;
+  - IP-literal hosts are checked the same way.
+- It is capped at 32 KB and 5 seconds, and cached (24 hours, or 1 hour after a failure).
 - Rasters are accepted only when their magic bytes match.
 - SVG is rebuilt from an allowlist: no scripts, styles, `foreignObject`, images, event handlers, DTDs, or references outside the document.
 - Anything else gets a generated monogram.
@@ -165,6 +170,10 @@ The call has some explicit settings:
 - The digest is SHA-256 over the account, the tool and the canonical arguments. An approval must echo it, or it is refused (`412 digest_mismatch`).
 - `pending` becomes `executing` under a row lock. Approving twice, approving concurrently, or proposing again with the same idempotency key never sends twice. The same key with a different call is a `409`.
 - A failed send is not retried. Actions expire after 24 hours.
+- Proposing and approving need a live subscription (`402`), and share a per-user rate limit (`NUGGET_RATE_ACTION_PER_MIN`, default 10, `429 rate_limited`). Listing, status, preview and cancel stay open.
+- Approval is scoped to the owner: another user gets `404`, even with the digest. Only the stored call runs; fields in the approval body other than `digest` are ignored. A stored call that no longer matches its digest is refused (`412`) and audited.
+- Tool slugs come only from a fixed table (`actions::tool_for`, and each adapter's declared read tools). No tool name or URL is ever taken from synced content, model output or a request.
+- Same-user foreign keys (`20261102120002`): an action can only point at its own user's connection, and an audit entry only at its own user's action.
 
 **Audit.** Every step is appended to `action_audit`, a per-user SHA-256 hash chain (`prev_hash`, `hash`) without message bodies:
 - `proposed`, `denied`, `approval_rejected`, `approved`, `succeeded`, `failed`, `cancelled`, `expired`.
