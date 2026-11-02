@@ -5,6 +5,9 @@
 -- The user's IANA time zone (sent by the desktop), for "today" and the 07:00 brief.
 alter table public.profiles add column timezone text;
 
+-- For "items changed since the last intelligence run" (nugget_private.intel_due).
+create index items_user_updated on public.items (user_id, updated_at);
+
 -- Entities: aliases and identifiers in metadata; the graph id keeps the projection stable.
 alter table public.entities add column graph_id text;
 
