@@ -795,3 +795,456 @@ async fn approval_runs_exactly_the_previewed_call_for_the_owner_only() {
     let last = h.db.audit_chain(u).await.unwrap().pop().unwrap();
     assert_eq!(last.detail["why"], "stored_call_changed");
 }
+
+fn patch(input: Value) -> Option<Value> {
+    Some(json!({ "input": input }))
+}
+
+/// Editing re-plans the call and rotates the digest: the old preview can no longer be approved.
+#[tokio::test]
+async fn edits_replan_rotate_the_digest_and_are_audited() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail"]).await;
+    let (_, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("e1"))).await;
+    let id = a["id"].as_str().unwrap().to_owned();
+    assert_eq!(a["revision"], 1);
+    assert_eq!(a["editable"], json!(["to", "cc", "bcc", "subject", "body"]));
+    let uri = format!("/v1/actions/{id}");
+    let (s, e) = call(
+        &h.app,
+        "PATCH",
+        &uri,
+        Some(u),
+        patch(json!({"subject": "Lease (signed)", "cc": ["carol@example.com"]})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{e}");
+    assert_eq!(e["revision"], 2);
+    assert_eq!(e["status"], "pending");
+    assert_ne!(e["digest"], a["digest"], "a new digest");
+    assert_eq!(
+        e["summary"],
+        "Send an email to bob@example.com: “Lease (signed)”"
+    );
+    assert!(
+        e["preview"]["fields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"label": "Cc", "value": "carol@example.com"}))
+    );
+    assert_eq!(e["input"]["subject"], "Lease (signed)");
+    // The old preview's digest is refused; the new one sends the edited mail, once.
+    let approve = format!("/v1/actions/{id}/approve");
+    let (s, x) = call(
+        &h.app,
+        "POST",
+        &approve,
+        Some(u),
+        Some(json!({"digest": a["digest"]})),
+    )
+    .await;
+    assert_eq!(
+        (s, x["error"].as_str()),
+        (StatusCode::PRECONDITION_FAILED, Some("digest_mismatch"))
+    );
+    assert!(executions(&h, "GMAIL_SEND_EMAIL").is_empty());
+    // Retrying the original proposal finds the (edited) action, not a conflict.
+    let (s, again) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("e1"))).await;
+    assert_eq!(
+        (s, again["id"].as_str()),
+        (StatusCode::OK, Some(id.as_str()))
+    );
+    assert_eq!(again["revision"], 2);
+    let (s, done) = call(
+        &h.app,
+        "POST",
+        &approve,
+        Some(u),
+        Some(json!({"digest": e["digest"]})),
+    )
+    .await;
+    assert_eq!(
+        (s, done["status"].as_str()),
+        (StatusCode::OK, Some("succeeded"))
+    );
+    let sent = executions(&h, "GMAIL_SEND_EMAIL");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["subject"], "Lease (signed)");
+    assert_eq!(sent[0]["cc"], json!(["carol@example.com"]));
+    // Edits after it ran are refused.
+    let (s, x) = call(
+        &h.app,
+        "PATCH",
+        &uri,
+        Some(u),
+        patch(json!({"body": "late"})),
+    )
+    .await;
+    assert_eq!(
+        (s, x["error"].as_str()),
+        (StatusCode::CONFLICT, Some("not_pending"))
+    );
+    let chain = h.db.audit_chain(u).await.unwrap();
+    let events: Vec<&str> = chain.iter().map(|e| e.event.as_str()).collect();
+    assert_eq!(
+        events,
+        [
+            "proposed",
+            "edited",
+            "approval_rejected",
+            "approved",
+            "succeeded"
+        ]
+    );
+    let edited = &chain[1].detail;
+    assert_eq!(edited["fields"], json!(["cc", "subject"]));
+    assert_eq!(
+        (&edited["old_digest"], &edited["digest"]),
+        (&a["digest"], &e["digest"])
+    );
+    assert!(
+        !edited.to_string().contains("Signed copy"),
+        "no bodies in the audit"
+    );
+    verify_chain(&chain).unwrap();
+}
+
+#[tokio::test]
+async fn edits_are_checked_like_proposals() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    let other = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail", "googlecalendar"]).await;
+    let (_, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("c1"))).await;
+    let uri = format!("/v1/actions/{}", a["id"].as_str().unwrap());
+    for (edit, code) in [
+        (json!({"to": ["not an address"]}), "bad_action"),
+        (json!({"body": " "}), "bad_action"),
+        (json!({"thread_id": "t9"}), "bad_action"),
+        (json!({}), "bad_action"),
+    ] {
+        let (s, e) = call(&h.app, "PATCH", &uri, Some(u), patch(edit.clone())).await;
+        assert_eq!(
+            (s, e["error"].as_str()),
+            (StatusCode::BAD_REQUEST, Some(code)),
+            "{edit}"
+        );
+    }
+    let (s, _) = call(
+        &h.app,
+        "PATCH",
+        &uri,
+        Some(u),
+        Some(json!({"input": {"body": "x"}, "tool": "X"})),
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "unknown body fields are refused"
+    );
+    let (s, _) = call(
+        &h.app,
+        "PATCH",
+        &uri,
+        Some(other),
+        patch(json!({"body": "mine now"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "only the owner");
+    let lapsed = add_user(&h.pool).await;
+    let (s, _) = call(
+        &h.app,
+        "PATCH",
+        &uri,
+        Some(lapsed),
+        patch(json!({"body": "x"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::PAYMENT_REQUIRED);
+    // Nothing changed through any of that.
+    let (_, still) = call(&h.app, "GET", &uri, Some(u), None).await;
+    assert_eq!(
+        (still["revision"].as_i64(), &still["digest"]),
+        (Some(1), &a["digest"])
+    );
+    // Where an action goes is fixed: an event update cannot be pointed at another event.
+    call(&h.app, "POST", "/v1/sync", Some(u), Some(json!({}))).await;
+    let (_, ev) = call(
+        &h.app,
+        "POST",
+        "/v1/actions",
+        Some(u),
+        Some(json!({
+        "kind": "update_event", "toolkit": "googlecalendar", "idempotency_key": "ev1",
+        "input": {"event_id": "e1", "title": "Dentist (moved)"}})),
+    )
+    .await;
+    let ev_uri = format!("/v1/actions/{}", ev["id"].as_str().unwrap());
+    let (s, _) = call(
+        &h.app,
+        "PATCH",
+        &ev_uri,
+        Some(u),
+        patch(json!({"event_id": "e2"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, e) = call(
+        &h.app,
+        "PATCH",
+        &ev_uri,
+        Some(u),
+        patch(json!({"start": "2026-11-06T10:00:00Z", "end": "2026-11-06T11:00:00Z"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{e}");
+    assert_eq!(
+        e["preview"]["diff"][1]["before"], "2026-11-05T10:00:00Z",
+        "the diff is re-run: {e}"
+    );
+    // Expired and old (pre-editing) actions cannot be edited.
+    let (_, old) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("c2"))).await;
+    let old_id: Uuid = old["id"].as_str().unwrap().parse().unwrap();
+    h.pool
+        .execute(
+            "update public.pending_actions set input = null where id = $1",
+            &[&old_id],
+        )
+        .await
+        .unwrap();
+    let (_, v) = call(
+        &h.app,
+        "GET",
+        &format!("/v1/actions/{old_id}"),
+        Some(u),
+        None,
+    )
+    .await;
+    assert_eq!(v["editable"], json!([]));
+    let (s, _) = call(
+        &h.app,
+        "PATCH",
+        &format!("/v1/actions/{old_id}"),
+        Some(u),
+        patch(json!({"body": "x"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let aid: Uuid = a["id"].as_str().unwrap().parse().unwrap();
+    h.pool
+        .execute("update public.pending_actions set expires_at = now() - interval '1 minute' where id = $1", &[&aid])
+        .await
+        .unwrap();
+    let (s, e) = call(&h.app, "PATCH", &uri, Some(u), patch(json!({"body": "x"}))).await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::GONE, Some("expired"))
+    );
+}
+
+/// An edit re-runs the policy: an edit the policy denies leaves the action denied, unsendable.
+#[tokio::test]
+async fn edits_rerun_the_policy() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail"]).await;
+    let mut cfg = nugget_policy::PolicyConfig::default();
+    cfg.rules.push(
+        nugget_policy::Rule::new("test:no-evil", nugget_policy::Effect::Deny).labels(["*evil*"]),
+    );
+    let actions = Actions {
+        db: h.db.clone(),
+        composio: Some(h.composio.clone() as Arc<dyn Composio>),
+        policy: Arc::new(nugget_policy::PolicyEngine::new(cfg)),
+    };
+    let input = json!({"to": ["bob@example.com"], "subject": "s", "body": "b"});
+    let a = actions
+        .propose(
+            u,
+            Proposal {
+                kind: ActionKind::SendMail,
+                toolkit: "gmail",
+                input: &input,
+                idempotency_key: "p1",
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(a.status, "pending");
+    let e = actions
+        .edit(u, a.id, &json!({"to": ["mallory@evil.example"]}))
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("test:no-evil"), "{e}");
+    let now = actions.get(u, a.id).await.unwrap();
+    assert_eq!(
+        (now.status.as_str(), now.decision.as_str()),
+        ("denied", "deny")
+    );
+    let r = actions.approve(u, a.id, &now.digest).await.unwrap_err();
+    assert!(r.to_string().contains("denied"), "{r}");
+    assert!(executions(&h, "GMAIL_SEND_EMAIL").is_empty());
+    let events: Vec<_> =
+        h.db.audit_chain(u)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.event)
+            .collect();
+    assert_eq!(events, ["proposed", "edited", "denied"]);
+}
+
+/// Snoozing hides an action from lists until a time, never past its expiry.
+#[tokio::test]
+async fn snoozed_actions_are_hidden_until_due() {
+    let Some(h) = harness_with(false, ALL).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    connect(&h, u, &["gmail"]).await;
+    let (_, a) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("s1"))).await;
+    let (_, b) = call(&h.app, "POST", "/v1/actions", Some(u), Some(mail("s2"))).await;
+    let id = a["id"].as_str().unwrap().to_owned();
+    let rfc = |t: time::OffsetDateTime| {
+        t.format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    };
+    let now = time::OffsetDateTime::now_utc();
+    let snooze = format!("/v1/actions/{id}/snooze");
+    let (s, v) = call(
+        &h.app,
+        "POST",
+        &snooze,
+        Some(u),
+        Some(json!({"until": rfc(now + time::Duration::hours(2))})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["snoozed_until"].is_string());
+    let ids = |v: &Value| -> Vec<String> {
+        v["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let (_, l) = call(&h.app, "GET", "/v1/actions", Some(u), None).await;
+    assert_eq!(
+        ids(&l),
+        vec![b["id"].as_str().unwrap().to_owned()],
+        "snoozed one hidden"
+    );
+    let (_, l) = call(
+        &h.app,
+        "GET",
+        "/v1/actions?status=pending&include=snoozed",
+        Some(u),
+        None,
+    )
+    .await;
+    assert_eq!(ids(&l).len(), 2);
+    let (s, _) = call(
+        &h.app,
+        "GET",
+        "/v1/actions?include=everything",
+        Some(u),
+        None,
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Past the expiry: capped at it (snoozing does not extend an action's life).
+    let (_, v) = call(
+        &h.app,
+        "POST",
+        &snooze,
+        Some(u),
+        Some(json!({"until": rfc(now + time::Duration::days(3))})),
+    )
+    .await;
+    assert_eq!(v["snoozed_until"], v["expires_at"], "{v}");
+    // Still approvable while snoozed; un-snooze shows it again.
+    let (s, v) = call(
+        &h.app,
+        "POST",
+        &snooze,
+        Some(u),
+        Some(json!({"until": null})),
+    )
+    .await;
+    assert_eq!((s, v["snoozed_until"].is_null()), (StatusCode::OK, true));
+    let (_, l) = call(&h.app, "GET", "/v1/actions", Some(u), None).await;
+    assert_eq!(ids(&l).len(), 2);
+    // Due snoozes come back by themselves.
+    let aid: Uuid = id.parse().unwrap();
+    h.pool
+        .execute("update public.pending_actions set snoozed_until = now() - interval '1 second' where id = $1", &[&aid])
+        .await
+        .unwrap();
+    let (_, l) = call(&h.app, "GET", "/v1/actions", Some(u), None).await;
+    assert_eq!(ids(&l).len(), 2);
+    for (body, code) in [
+        (
+            json!({"until": rfc(now - time::Duration::minutes(1))}),
+            StatusCode::BAD_REQUEST,
+        ),
+        (json!({"until": "tomorrow"}), StatusCode::BAD_REQUEST),
+    ] {
+        let (s, _) = call(&h.app, "POST", &snooze, Some(u), Some(body.clone())).await;
+        assert_eq!(s, code, "{body}");
+    }
+    let other = subscriber(&h.pool, "heed").await;
+    let (s, _) = call(
+        &h.app,
+        "POST",
+        &snooze,
+        Some(other),
+        Some(json!({"until": null})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    call(
+        &h.app,
+        "POST",
+        &format!("/v1/actions/{id}/cancel"),
+        Some(u),
+        Some(json!({})),
+    )
+    .await;
+    let (s, e) = call(
+        &h.app,
+        "POST",
+        &snooze,
+        Some(u),
+        Some(json!({"until": null})),
+    )
+    .await;
+    assert_eq!(
+        (s, e["error"].as_str()),
+        (StatusCode::CONFLICT, Some("not_pending"))
+    );
+    let events: Vec<_> =
+        h.db.audit_chain(u)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.event)
+            .collect();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| e.starts_with("snoozed") || e.starts_with("unsnoozed"))
+            .count(),
+        3,
+        "{events:?}"
+    );
+    verify_chain(&h.db.audit_chain(u).await.unwrap()).unwrap();
+}

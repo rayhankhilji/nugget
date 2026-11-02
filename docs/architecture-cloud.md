@@ -193,6 +193,8 @@ They all go through `pending_actions` (migration `20261102120001_apps_actions.sq
 | `GET /v1/actions/{id}/preview` | the dry run: fields, a before/after diff (an update compares against the synced event), and the digest |
 | `POST /v1/actions/{id}/approve` | `{digest}`: runs it once |
 | `POST /v1/actions/{id}/cancel` | |
+| `PATCH /v1/actions/{id}` | `{input}`: edit the editable fields → new preview and a NEW digest |
+| `POST /v1/actions/{id}/snooze` | `{until}`: hide it until then (RFC 3339; null shows it again) |
 
 **Proposing.** A proposal goes through these steps:
 1. The input is validated: addresses, ids, lengths, one-line subjects, end after start.
@@ -219,6 +221,29 @@ The call has some explicit settings:
 Neither the service role nor the user can update or delete the chain. The GDPR export includes both tables.
 
 **Clients.** `nugget-cloud-client` has typed methods for these routes, and the desktop has the Tauri commands `cloud_apps`, `cloud_actions_list`, `cloud_action_propose`, `cloud_action_preview`, `cloud_action_status`, `cloud_action_approve` and `cloud_action_cancel`, wrapped thinly in `cloud.ts`. The confirmation UI belongs to the design work.
+
+**Editing.** `PATCH /v1/actions/{id}` takes `{"input": {...}}` with only the fields an action of that kind may change:
+
+| Kind | Editable |
+|---|---|
+| send_mail | to, cc, bcc, subject, body |
+| reply_mail | to, body |
+| create_event, update_event | title, start, end, timezone, attendees, location, description |
+| post_message | text |
+| create_page | title, markdown |
+
+Where an action goes (thread, event, channel, parent page) is fixed at proposal. An edit:
+- is merged into the stored input (`null` removes an optional field);
+- is re-validated and re-planned like a proposal, and the event diff is re-run;
+- is re-assessed by `nugget-policy`. An edit the policy denies leaves the action `denied` and unsendable;
+- gets a new preview and a new digest, so an approval of the old preview is refused (`412 digest_mismatch`);
+- bumps `revision`.
+
+Like proposing, editing needs a live subscription and counts against the action rate limit. It is audited as `edited`, with the changed field names and the old and new digests, but no bodies. Retrying the original proposal with its idempotency key returns the edited action rather than a conflict (`proposed_digest`). Actions proposed before editing existed have no stored `input` and `editable: []`; they can be approved, cancelled or proposed again, not edited.
+
+**Snoozing.** `POST /v1/actions/{id}/snooze {"until"}` hides a pending action from `GET /v1/actions` until then, unless `?include=snoozed` is passed. Status, preview and approve still work on a snoozed action. `until` is **capped at the action's expiry**: snoozing never extends an action's life, so an approval is never more than 24 hours from its preview. Snoozing again with `null` shows it at once, and a due snooze clears itself. Snooze and un-snooze are audited. Migration `20261102140001_action_edits.sql` adds `input`, `revision`, `proposed_digest` and `snoozed_until` (checked `<= expires_at`) to `pending_actions`; RLS and the same-user keys are unchanged.
+
+**Citation authors.** Citations (`/v1/ask`, the brief), search results and card evidence carry `author`: a display name only (`crate::authors::display_name`). It is the name part of a `From` header (`Ann Lee <ann@x.com>` → `Ann Lee`), a Drive owner's or a Teams display name, or a Slack profile name. It is null for a bare address, a platform id (a Slack `U…` id, a UUID) or a sensitive card, so an email address is never returned. Invisible and control characters are dropped, angle brackets are neutralised, and the name is cut at 80 characters. Citations keep `snippet`.
 
 ## 3. AI gateway
 All model calls go through `nugget-cloud`'s gateway module. No provider key is ever sent to a client.
@@ -309,6 +334,11 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - opens a subscription Checkout with the trial;
   - returns `{url}`. The desktop opens it in the browser.
 - `POST /v1/billing/portal` returns the customer-portal URL, for upgrades, downgrades, cancellation, invoices and cards.
+- `GET /v1/billing/preview?plan=&interval=` previews moving the live subscription to that plan and interval.
+  - Stripe's `POST /v1/invoices/create_preview` replaces the removed `invoices/upcoming`. It is called with the subscription's item, the new price, `proration_behavior=create_prorations` (Stripe's and the portal's default) and `proration_date` = now.
+  - The response is `{plan, interval, amount_due (minor units), currency, proration_date (RFC 3339)}`.
+  - It is read only: nothing changes in Stripe.
+  - Errors: `409 no_subscription`, `400 unknown_plan` or `bad_interval`, and `404 billing_disabled` when `NUGGET_BILLING=off`, like the other billing routes.
 - Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`. The website can instead pass `return_url`, which must be on an origin in `NUGGET_SITE_ORIGINS`; anything else gets `400 bad_return_url`, so the endpoints cannot be used as an open redirect. The API sends CORS headers for those origins only, and allows no credentials, since auth is a bearer token.
 - `POST /v1/webhooks/stripe`:
   - Verification: `Stripe-Signature` must be HMAC-SHA256 over `t.body`, within 5 minutes.

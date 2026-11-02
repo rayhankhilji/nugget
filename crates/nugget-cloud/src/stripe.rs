@@ -29,6 +29,14 @@ pub struct Subscription {
     pub user_id: Option<String>,
 }
 
+/// What changing a subscription's price would invoice next (`POST /v1/invoices/create_preview`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvoicePreview {
+    /// In the currency's minor unit (pence for GBP).
+    pub amount_due: i64,
+    pub currency: String,
+}
+
 pub struct CheckoutRequest<'a> {
     pub customer: &'a str,
     pub price: &'a str,
@@ -54,6 +62,22 @@ pub trait Stripe: Send + Sync {
     /// Deletes the customer, which cancels their subscriptions at once. Invoices stay in Stripe
     /// (kept there for HMRC's six years); a missing customer counts as deleted.
     async fn delete_customer(&self, id: &str) -> Result<(), StripeError>;
+    /// Previews moving `subscription` to `price` as of `proration_date` (Unix seconds), with
+    /// Stripe's default `create_prorations`. Nothing changes in Stripe.
+    async fn preview_change(
+        &self,
+        subscription: &str,
+        price: &str,
+        proration_date: i64,
+    ) -> Result<InvoicePreview, StripeError>;
+}
+
+fn stripe_id(id: &str, prefix: &str) -> Result<(), StripeError> {
+    if id.starts_with(prefix) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Ok(())
+    } else {
+        Err(StripeError::Http(format!("bad {prefix} id")))
+    }
 }
 
 fn ts(v: &Value) -> Option<OffsetDateTime> {
@@ -219,6 +243,47 @@ impl Stripe for HttpStripe {
             200..=299 | 404 => Ok(()),
             s => Err(StripeError::Http(format!("delete customer: status {s}"))),
         }
+    }
+
+    async fn preview_change(
+        &self,
+        subscription: &str,
+        price: &str,
+        proration_date: i64,
+    ) -> Result<InvoicePreview, StripeError> {
+        stripe_id(subscription, "sub_")?;
+        stripe_id(price, "price_")?;
+        // The item to change: create_preview adds a new item when `id` is left out.
+        let sub = self
+            .call(
+                self.http
+                    .get(format!("{}/v1/subscriptions/{subscription}", self.base)),
+                None,
+            )
+            .await?;
+        let item = field(&sub["items"]["data"][0], "id")?;
+        let form = [
+            ("subscription", subscription.to_owned()),
+            ("subscription_details[items][0][id]", item),
+            ("subscription_details[items][0][price]", price.to_owned()),
+            (
+                "subscription_details[proration_behavior]",
+                "create_prorations".to_owned(),
+            ),
+            (
+                "subscription_details[proration_date]",
+                proration_date.to_string(),
+            ),
+        ];
+        let v = self
+            .post("/v1/invoices/create_preview", &form, None)
+            .await?;
+        Ok(InvoicePreview {
+            amount_due: v["amount_due"]
+                .as_i64()
+                .ok_or_else(|| StripeError::Http("response without amount_due".into()))?,
+            currency: field(&v, "currency")?,
+        })
     }
 }
 
@@ -387,5 +452,58 @@ mod tests {
                 .contains("No such subscription")
         );
         assert!(s.subscription("../x").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn preview_change_targets_the_existing_item() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/v1/subscriptions/sub_1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "sub_1", "customer": "cus_1", "status": "active",
+                "items": {"data": [{"id": "si_9", "price": {"id": "price_hm"}}]}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/invoices/create_preview"))
+            .and(header("authorization", "Bearer sk_test"))
+            .and(body_string_contains("subscription=sub_1"))
+            .and(body_string_contains(
+                "subscription_details%5Bitems%5D%5B0%5D%5Bid%5D=si_9",
+            ))
+            .and(body_string_contains(
+                "subscription_details%5Bitems%5D%5B0%5D%5Bprice%5D=price_xa",
+            ))
+            .and(body_string_contains(
+                "subscription_details%5Bproration_behavior%5D=create_prorations",
+            ))
+            .and(body_string_contains(
+                "subscription_details%5Bproration_date%5D=1800000000",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "object": "invoice", "amount_due": 7150, "currency": "gbp", "lines": {"data": []}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let s = HttpStripe {
+            http: reqwest::Client::new(),
+            base: server.uri(),
+            key: "sk_test".into(),
+        };
+        let p = s
+            .preview_change("sub_1", "price_xa", 1_800_000_000)
+            .await
+            .unwrap();
+        assert_eq!(
+            p,
+            InvoicePreview {
+                amount_due: 7150,
+                currency: "gbp".into()
+            }
+        );
+        assert!(s.preview_change("../x", "price_xa", 0).await.is_err());
+        assert!(s.preview_change("sub_1", "x&y=1", 0).await.is_err());
     }
 }

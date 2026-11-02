@@ -28,6 +28,9 @@ pub struct Citation {
     pub source: String,
     pub url: Option<String>,
     pub occurred_at: Option<String>,
+    /// Who wrote it, as a display name only: never an email address or a platform id.
+    #[serde(default)]
+    pub author: Option<String>,
     pub snippet: String,
 }
 
@@ -243,6 +246,7 @@ pub async fn ask(
                 source: s.meta.source.clone(),
                 url: safe_link(s.meta.url.as_deref()),
                 occurred_at: date(s.meta.occurred_at),
+                author: crate::authors::display_name(s.meta.author.as_deref()),
                 snippet: short(&s.text, 280),
             }
         })
