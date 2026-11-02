@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, Path, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -508,6 +508,7 @@ fn routes(state: Arc<AppState>) -> Router {
         .route("/v1/billing/plans", get(billing::plans))
         .route("/v1/billing/checkout", post(billing::checkout))
         .route("/v1/billing/portal", post(billing::portal))
+        .route("/v1/billing/preview", get(billing::preview))
         .route(
             "/v1/webhooks/stripe",
             // Stripe events can exceed the API's body limit.

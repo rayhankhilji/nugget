@@ -218,6 +218,7 @@ async fn m1_flow_sign_in_connect_sync_ask_with_citation() {
     let c = &v["citations"][0];
     assert_eq!(c["n"], 1);
     assert_eq!(c["title"], "Lease renewal");
+    assert_eq!(c["author"], "Landlord", "the From name, never the address");
     assert_eq!(c["source"], "gmail");
     assert!(c["url"].as_str().unwrap().contains("#all/t1"));
     assert!(c["snippet"].as_str().unwrap().contains("1 December"));

@@ -64,6 +64,9 @@ const action: CloudAction = {
   executed_at: null,
   result: null,
   error: null,
+  snoozed_until: null,
+  revision: 1,
+  editable: ["to", "body"],
 };
 
 describe("signed in to Heed Cloud", () => {

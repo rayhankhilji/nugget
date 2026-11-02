@@ -329,10 +329,21 @@ async fn knowledge_cards_brief_and_search() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|e| e["quote"].is_null()),
-            "sensitive cards are never quoted: {c}"
+                .all(|e| e["quote"].is_null() && e["author"].is_null()),
+            "sensitive cards are never quoted nor attributed: {c}"
         );
     }
+    // Card evidence names its author by display name only (never the address).
+    let authors: Vec<&Value> = cards
+        .iter()
+        .flat_map(|c| c["evidence"].as_array().unwrap())
+        .map(|e| &e["author"])
+        .collect();
+    assert!(authors.iter().any(|a| *a == "Dana Okoro"), "{v}");
+    assert!(
+        authors.iter().all(|a| !a.to_string().contains('@')),
+        "no email addresses: {authors:?}"
+    );
     let projected: i64 = pool
         .query_one(
             "select count(*) from public.cards where user_id = $1",
@@ -371,6 +382,10 @@ async fn knowledge_cards_brief_and_search() {
     assert_eq!(brief["timezone"], tz);
     assert!(brief["prose"].as_str().unwrap().contains("[1]"), "{v}");
     assert_eq!(brief["citations"][0]["n"], 1, "{v}");
+    for c in brief["citations"].as_array().unwrap() {
+        assert!(c.get("author").is_some() && c["snippet"].is_string(), "{c}");
+        assert!(!c["author"].to_string().contains('@'), "{c}");
+    }
     assert!(brief["brief"]["top"].is_array());
     let briefs_written = llm.count("morning brief");
     assert_eq!(briefs_written, 1);
@@ -478,6 +493,10 @@ async fn knowledge_cards_brief_and_search() {
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["mode"], "hybrid");
     assert_eq!(v["results"][0]["title"], "Signed contract", "{v}");
+    assert_eq!(
+        v["results"][0]["author"], "Dana Okoro",
+        "display name, not the From header"
+    );
     assert_eq!(
         v["facets"]["sources"][0],
         json!({"value": "gmail", "count": v["total"]})

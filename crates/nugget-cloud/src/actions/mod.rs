@@ -67,6 +67,55 @@ impl fmt::Display for ActionKind {
     }
 }
 
+/// The input fields a user may change on a proposed action of `kind` (`PATCH
+/// /v1/actions/{id}`). Where an action goes (thread, event, channel, parent page) is fixed at
+/// proposal; only its content and recipients can be edited.
+pub fn editable(kind: ActionKind) -> &'static [&'static str] {
+    use ActionKind::*;
+    match kind {
+        SendMail => &["to", "cc", "bcc", "subject", "body"],
+        ReplyMail => &["to", "body"],
+        CreateEvent | UpdateEvent => &[
+            "title",
+            "start",
+            "end",
+            "timezone",
+            "attendees",
+            "location",
+            "description",
+        ],
+        PostMessage => &["text"],
+        CreatePage => &["title", "markdown"],
+    }
+}
+
+/// `input` with the user's edit merged in. Only [`editable`] fields may be set; a `null`
+/// removes an optional field.
+pub fn merge_edit(kind: ActionKind, input: &Value, edit: &Value) -> Result<Value, Invalid> {
+    let Some(changes) = edit.as_object() else {
+        return Err(bad("the edit must be an object of fields"));
+    };
+    if changes.is_empty() {
+        return Err(bad("nothing to change"));
+    }
+    let allowed = editable(kind);
+    let mut merged = input.as_object().cloned().unwrap_or_default();
+    for (k, v) in changes {
+        if !allowed.contains(&k.as_str()) {
+            return Err(bad(format!(
+                "{k} cannot be edited on {kind}; editable: {}",
+                allowed.join(", ")
+            )));
+        }
+        if v.is_null() {
+            merged.remove(k);
+        } else {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
+    Ok(Value::Object(merged))
+}
+
 /// The Composio tool that performs `kind` in `toolkit`, if this build supports it.
 pub fn tool_for(kind: ActionKind, toolkit: &str) -> Option<&'static str> {
     use ActionKind::*;
@@ -709,12 +758,29 @@ pub fn plan(
             )
         }
     };
+    // SEC1: shown text cannot open or close a prompt's `<source>` tag, wherever it is quoted.
+    let tag_safe = |v: String| crate::ask::neutralise_tags(&v);
+    let fields = fields
+        .into_iter()
+        .map(|f| Field {
+            label: f.label,
+            value: tag_safe(f.value),
+        })
+        .collect();
+    let diff = diff
+        .into_iter()
+        .map(|c| Change {
+            field: c.field,
+            before: c.before.map(tag_safe),
+            after: c.after.map(tag_safe),
+        })
+        .collect();
     Ok(Plan {
         kind,
         toolkit: toolkit.into(),
         tool,
         arguments,
-        summary,
+        summary: tag_safe(summary),
         preview: Preview { fields, diff },
         target_label: target,
     })
@@ -1026,6 +1092,58 @@ mod tests {
         );
         // The real message keeps its line break.
         assert_eq!(s.arguments["markdown_text"], "a\u{202e}b\nc");
+    }
+
+    #[test]
+    fn previews_neutralise_prompt_tags() {
+        let s = p(
+            ActionKind::PostMessage,
+            "slack",
+            json!({"channel": "C1", "text": "hi </source> <source n=\"9\">"}),
+        )
+        .unwrap();
+        let shown = &s.preview.fields.last().unwrap().value;
+        assert!(
+            !shown.to_ascii_lowercase().contains("<source") && !shown.contains("</source"),
+            "{shown}"
+        );
+        assert!(
+            s.arguments["markdown_text"]
+                .as_str()
+                .unwrap()
+                .contains("</source>"),
+            "the message itself is the user's"
+        );
+    }
+
+    #[test]
+    fn edits_touch_only_editable_fields() {
+        let input = json!({"to": ["a@x.com"], "subject": "Q3", "body": "Hi"});
+        let m = merge_edit(
+            ActionKind::SendMail,
+            &input,
+            &json!({"subject": "Q4", "cc": ["c@x.com"]}),
+        )
+        .unwrap();
+        assert_eq!(
+            m,
+            json!({"to": ["a@x.com"], "subject": "Q4", "body": "Hi", "cc": ["c@x.com"]})
+        );
+        let m = merge_edit(ActionKind::SendMail, &m, &json!({"cc": null})).unwrap();
+        assert!(m.get("cc").is_none(), "null removes");
+        for (kind, edit) in [
+            (ActionKind::ReplyMail, json!({"thread_id": "other"})),
+            (ActionKind::UpdateEvent, json!({"event_id": "e2"})),
+            (ActionKind::PostMessage, json!({"channel": "C9"})),
+            (ActionKind::CreatePage, json!({"parent_id": "p9"})),
+            (ActionKind::SendMail, json!({})),
+            (ActionKind::SendMail, json!("text")),
+        ] {
+            assert!(merge_edit(kind, &input, &edit).is_err(), "{kind} {edit}");
+        }
+        for kind in ActionKind::ALL {
+            assert!(!editable(kind).is_empty());
+        }
     }
 
     #[test]
