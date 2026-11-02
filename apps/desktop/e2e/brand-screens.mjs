@@ -38,6 +38,26 @@ async function settle(p) {
   await sleep(500);
 }
 
+/** Running Heed yourself: signed out of Heed Cloud, ChatGPT signed in, and two saved keys. */
+const SELF_RUN = {
+  cloud_session: () => ({ configured: true, signed_in: false, email: null }),
+  chatgpt_status: () => ({
+    state: "signed_in",
+    account: { email: "sam@okafor.studio", name: "Sam Okafor" },
+    plan_usage: true,
+    paused: false,
+    error: null,
+    models: { light: "gpt-4.1-mini", smart: "gpt-4.1" },
+    manage_usage_url: "https://chatgpt.com/settings/usage",
+  }),
+  ai_key_saved: () => ({
+    providers: [
+      { id: "openai", kind: "openai_responses", base_url: null, model: "gpt-4.1-mini", key: "keychain", env_var: null, available: true, error: null },
+      { id: "openrouter", kind: "openai_compatible", base_url: "https://openrouter.ai/api/v1", model: "llama-3.3-70b-instruct", key: "keychain", env_var: null, available: false, error: "rate limited" },
+    ],
+  }),
+};
+
 const SHOTS = [
   { name: "home-light", theme: "light", page: "today", ready: (p) => p.locator(".brief-prose").first().waitFor() },
   { name: "home-dark", theme: "dark", page: "today", ready: (p) => p.locator(".brief-prose").first().waitFor() },
@@ -74,6 +94,39 @@ const SHOTS = [
   { name: "connections", theme: "light", page: "connections", ready: (p) => p.getByText("Slack").first().waitFor() },
   { name: "account", theme: "light", page: "account", ready: (p) => p.locator(".cloud-subscription").waitFor() },
   { name: "welcome", theme: "light", page: "today", onboarding: true, signedOut: true, ready: (p) => p.locator(".ob-main h1").first().waitFor() },
+  { name: "open-core-fork-light", theme: "light", page: "today", onboarding: true, signedOut: true, ready: (p) => p.locator(".ob-fork").waitFor() },
+  { name: "open-core-fork-dark", theme: "dark", page: "today", onboarding: true, signedOut: true, ready: (p) => p.locator(".ob-fork").waitFor() },
+  {
+    name: "open-core-choose-ai-light",
+    theme: "light",
+    page: "today",
+    selfRun: true,
+    onboard: { version: 1, step: "ai", completed: ["welcome"], skipped: [], ai: null, path: "local", finished: false },
+    async ready(p) {
+      // A click anywhere on a row's head selects it (the radio covers the head).
+      await p.locator('.ai-choice[data-option="chatgpt"] .ai-choice-label').click();
+      await p.locator('.ai-choice.is-selected[data-option="chatgpt"]').waitFor();
+    },
+  },
+  {
+    name: "open-core-choose-ai-dark",
+    theme: "dark",
+    page: "today",
+    selfRun: true,
+    onboard: { version: 1, step: "ai", completed: ["welcome"], skipped: [], ai: null, path: "local", finished: false },
+    async ready(p) {
+      await p.locator('.ai-choice[data-option="openai"] .ai-choice-label').click();
+      await p.locator('.ai-choice.is-selected[data-option="openai"] .key-field').waitFor();
+      // The row scrolls its form into view; show the list and the open row's head instead.
+      await sleep(400);
+      await p.evaluate(() => {
+        document.scrollingElement?.scrollTo(0, 0);
+        document.querySelectorAll("main, .ob-main").forEach((m) => m.scrollTo?.(0, 0));
+      });
+    },
+  },
+  { name: "open-core-provider-status-light", theme: "light", page: "models", selfRun: true, ready: (p) => p.locator(".provider-status").waitFor() },
+  { name: "open-core-provider-status-dark", theme: "dark", page: "models", selfRun: true, ready: (p) => p.locator(".provider-status").waitFor() },
   {
     name: "quickask-dark",
     theme: "dark",
@@ -157,6 +210,7 @@ async function main() {
       });
       const fixture = cloudFixture();
       if (shot.signedOut) fixture.cloud_session = () => ({ configured: true, signed_in: false, email: null });
+      if (shot.selfRun) Object.assign(fixture, SELF_RUN);
       await ctx.route("**/invoke", async (route) => {
         let body = {};
         try {
@@ -177,7 +231,7 @@ async function main() {
           if (onboarded) localStorage.setItem("nugget.onboarding.v1", JSON.stringify(onboarded));
           else localStorage.removeItem("nugget.onboarding.v1");
         },
-        [shot.page ?? "today", shot.onboarding ? null : ONBOARDED],
+        [shot.page ?? "today", shot.onboard ?? (shot.onboarding ? null : ONBOARDED)],
       );
       try {
         await page.goto(`${bridge.url}${shot.url ?? "index.html"}`);

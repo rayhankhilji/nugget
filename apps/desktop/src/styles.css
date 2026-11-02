@@ -3633,7 +3633,12 @@ tr[aria-current="true"] {
 }
 
 /* The content's toolbar: the page name, small and centred-start, like a unified title bar. */
-.mac-window main {
+.mac-window main:not(.ob-main) {
+  background: var(--bg);
+}
+
+/* First run fills the window itself: an opaque canvas under its sky, not the vibrancy. */
+.mac-window body:has(.onboarding) {
   background: var(--bg);
 }
 
@@ -4377,6 +4382,11 @@ section[aria-labelledby="cloud-ask"] form input {
   font-family: var(--mono);
   font-size: var(--fs-xs);
   color: var(--text-2);
+}
+
+.provider-status .provider-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 /* Settings: the Advanced group is a disclosure, collapsed unless one of its pages is open. */

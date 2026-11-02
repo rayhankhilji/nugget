@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, chatgptApi, isMethodNotFound, isOpenableUrl, type ChatgptStatus } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { ErrorNote, Spinner } from "../components/ui";
-import "./open-core.css";
 
 /** How often the status is read again while the sign-in waits for the browser. */
 export const CHATGPT_POLL_MS = 1000;

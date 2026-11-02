@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { cloudApi, type CloudPlan } from "../cloud";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 import { StepHeading, type StepProps } from "./steps";
-import "./open-core.css";
 
 /** The cheapest plan's monthly price in pounds, or `null` when there is no plan with a price. */
 export function cheapestMonthly(plans: readonly CloudPlan[] | null | undefined): number | null {

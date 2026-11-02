@@ -22,9 +22,14 @@ to Heed Cloud. Regenerate them after a UI change:
 | `quickask-dark.png` | The quick ask window, dark, with a cited answer |
 | `ghost-text.png` | Ghost text in a mail compose window. The window is a neutral mock drawn by the script; the suggestion and its Tab hint use the app's real ghost styles |
 
-## Open-core design specs
+## Open core (real screens)
 
-`open-core-*.png` are not app screenshots. They are renders of `docs/brand/open-core.html`, the
-design spec for the first-run fork, Choose your AI and provider status. That page uses the app's
-own stylesheets, so its classes (`.ob-fork`, `.ai-choice`, `.key-field`, `.provider-status`) are
-the ones the real views use.
+Taken from the app like the rest, light and dark:
+
+| File | What it shows |
+| --- | --- |
+| `open-core-fork-*.png` | First run: "How do you want to run Heed?", the Heed Cloud and Run it yourself cards over the sky |
+| `open-core-choose-ai-*.png` | Choose your AI, running it yourself. Light: Sign in with ChatGPT selected and signed in. Dark: OpenAI API key open with its key form |
+| `open-core-provider-status-*.png` | Settings → Models → Your AI: ChatGPT signed in, an OpenAI key working, an OpenRouter key not working, each with its model and one action |
+
+The design spec they follow is `docs/brand/open-core.html`.

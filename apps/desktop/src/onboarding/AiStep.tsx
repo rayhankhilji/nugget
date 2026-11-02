@@ -13,7 +13,6 @@ import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { DownloadFailureNote, isCancelled, useInstallFocus } from "./DownloadFailure";
 import { detectOs, type Os } from "./platform";
 import { CommandSnippet, localMode, OfflineNote, StepHeading, type StepProps } from "./steps";
-import "./open-core.css";
 
 const ICON_PROPS = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 

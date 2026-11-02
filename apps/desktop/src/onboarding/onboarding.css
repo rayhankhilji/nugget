@@ -1086,14 +1086,9 @@ button.ob-app-tile:disabled {
 
 .ai-choice {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-large);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--hairline);
-  cursor: pointer;
 }
 
 .ai-choice:has(input:checked),
@@ -1106,10 +1101,29 @@ button.ob-app-tile:disabled {
   outline-offset: 2px;
 }
 
-.ai-choice input[type="radio"] {
+/* The row's head is the label: a real box laid out as icon · title and blurb · status. The radio
+   is invisible but covers exactly that box, so a click anywhere on the head selects the row (and
+   arrow keys move through the group), while the fields in .ai-choice-body stay clickable. */
+.ai-choice-label {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+}
+
+.ai-choice-label input[type="radio"],
+.ai-choice > input[type="radio"] {
   position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .ai-choice-icon {
@@ -1120,6 +1134,10 @@ button.ob-app-tile:disabled {
   border-radius: 10px;
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+.ai-choice-title + :not(.ai-choice-blurb) {
+  margin-inline-start: var(--space-2);
 }
 
 .ai-choice-title {
@@ -1138,11 +1156,39 @@ button.ob-app-tile:disabled {
 }
 
 .ai-choice-body {
-  grid-column: 1 / -1;
   display: grid;
-  gap: var(--space-2);
-  padding-block-start: var(--space-2);
+  gap: var(--space-3);
+  margin-inline: var(--space-4);
+  padding-block: var(--space-3) var(--space-4);
   border-block-start: 1px solid var(--hairline);
+}
+
+/* Sign in with ChatGPT: the button, then the waiting state and the fine print. */
+.chatgpt-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.chatgpt-panel .row {
+  flex-wrap: wrap;
+}
+
+.chatgpt-fineprint {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.key-field-link {
+  justify-self: start;
+}
+
+.ob-fork-note {
+  max-inline-size: 46rem;
+  margin: var(--space-4) auto 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-sm);
 }
 
 /* An API key field: mono, and it says what it found as soon as it has checked. */

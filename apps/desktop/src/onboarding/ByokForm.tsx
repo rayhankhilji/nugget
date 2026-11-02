@@ -11,7 +11,6 @@ import {
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { ErrorNote } from "../components/ui";
-import "./open-core.css";
 
 /** The provider choices: each a preset of the `ai.key.*` form. */
 export type ByokGuideKind = "anthropic" | "openai" | "openrouter" | "ollama" | "compatible";
