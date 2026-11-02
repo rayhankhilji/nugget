@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::composio::Composio;
 use crate::db::{Connection, Db, NewItem, Upsert};
 use crate::gateway::Gateway;
-use crate::plans::{Catalog, Plan, grants_access};
+use crate::plans::{Catalog, Plan};
 
 pub const GMAIL: &str = "gmail";
 pub const CALENDAR: &str = "googlecalendar";
@@ -541,9 +541,10 @@ impl Ingest {
 
     /// The user's live plan, if any.
     pub async fn plan_of(&self, user: Uuid) -> Option<Plan> {
-        let subs = self.db.subscriptions(user).await.ok()?;
-        let live = subs.into_iter().find(|s| grants_access(&s.status))?;
-        self.catalog.get(&live.plan).cloned()
+        crate::plans::entitlement(&self.db, &self.catalog, user)
+            .await
+            .ok()?
+            .map(|e| e.plan)
     }
 
     /// Returns the new cursor and whether more pages remain (continue soon).

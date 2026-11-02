@@ -21,7 +21,7 @@ use crate::composio::{Composio, ComposioError, Toolkit, map_status};
 use crate::db::{Db, DbError, SubscriptionRow};
 use crate::gateway::{Allowance, Gateway, GatewayError};
 use crate::ingest::{self, Ingest, SyncReport};
-use crate::plans::{Catalog, ModelTier, Plan, grants_access};
+use crate::plans::{Catalog, ModelTier, Plan};
 use crate::stripe::{Stripe, StripeError};
 use crate::webhook;
 
@@ -223,15 +223,11 @@ impl Caller {
 /// Signs the caller in, loads their subscription and enforces the plan's device limit.
 async fn caller(s: &AppState, h: &HeaderMap) -> ApiResult<Caller> {
     let user = user(s, h).await?;
-    let subscription =
-        s.db.subscriptions(user.id)
-            .await?
-            .into_iter()
-            .find(|x| grants_access(&x.status));
-    let plan = subscription
-        .as_ref()
-        .and_then(|x| s.plans.get(&x.plan))
-        .cloned();
+    let ent = crate::plans::entitlement(&s.db, &s.plans, user.id).await?;
+    let (subscription, plan) = match ent {
+        Some(e) => (Some(e.subscription), Some(e.plan)),
+        None => (None, None),
+    };
     if let Some(p) = &plan {
         let device = h
             .get("x-heed-device")

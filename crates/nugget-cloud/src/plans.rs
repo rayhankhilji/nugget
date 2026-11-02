@@ -147,6 +147,36 @@ impl Catalog {
     }
 }
 
+/// A user's live entitlement: their current subscription and the plan it grants.
+#[derive(Debug, Clone)]
+pub struct Entitlement {
+    pub plan_id: String,
+    pub plan: Plan,
+    pub subscription: crate::db::SubscriptionRow,
+}
+
+/// THE way to read what a user may do (API gating, gateway quotas, sync cadence). `None`:
+/// no live subscription, so no service.
+pub async fn entitlement(
+    db: &crate::db::Db,
+    catalog: &Catalog,
+    user: uuid::Uuid,
+) -> Result<Option<Entitlement>, crate::db::DbError> {
+    let live = db
+        .subscriptions(user)
+        .await?
+        .into_iter()
+        .find(|s| grants_access(&s.status));
+    Ok(live.and_then(|s| {
+        let plan = catalog.get(&s.plan)?.clone();
+        Some(Entitlement {
+            plan_id: s.plan.clone(),
+            plan,
+            subscription: s,
+        })
+    }))
+}
+
 /// Subscription statuses that grant the plan. `past_due` keeps access while Stripe retries the
 /// payment (its dunning ends in `canceled` or `unpaid`, which do not).
 pub fn grants_access(status: &str) -> bool {
