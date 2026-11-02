@@ -3,12 +3,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::serve::ListenerExt;
+
 use nugget_cloud::api::{AppState, router};
 use nugget_cloud::auth::SupabaseAuth;
 use nugget_cloud::composio::{Composio, HttpComposio};
 use nugget_cloud::config::Config;
 use nugget_cloud::db::Db;
 use nugget_cloud::gateway::Gateway;
+use nugget_cloud::llm::{LlmConfig, LlmState, upstream_client};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -58,8 +61,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
-    let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
+    let llm = Arc::new(LlmState::new(
+        state.clone(),
+        LlmConfig::from_config(&cfg, |k| std::env::var(k).ok()),
+        upstream_client()?,
+    ));
+    let app = router(state).merge(nugget_cloud::llm::router(llm));
+    // No Nagle delay: streamed tokens (ghost text) go out as soon as they are written.
+    let listener = tokio::net::TcpListener::bind(&cfg.bind)
+        .await?
+        .tap_io(|tcp| {
+            let _ = tcp.set_nodelay(true);
+        });
     tracing::info!(addr = %cfg.bind, "listening");
-    axum::serve(listener, router(state)).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }

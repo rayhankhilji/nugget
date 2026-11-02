@@ -5,6 +5,7 @@
 //! - [`composio`]: connected accounts and tool calls through Composio.
 //! - [`ingest`]: Gmail and Calendar sync into `items` and `chunks`.
 //! - [`gateway`]: LLM and embedding calls with our keys, metering and quotas.
+//! - [`llm`]: the Anthropic-compatible streaming model endpoint for the desktop (`/llm/v1`).
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
 //! - [`webhook`]: Composio webhook signature check.
@@ -17,6 +18,7 @@ pub mod config;
 pub mod db;
 pub mod gateway;
 pub mod ingest;
+pub mod llm;
 pub mod webhook;
 
 #[cfg(test)]
