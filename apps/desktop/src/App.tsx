@@ -358,6 +358,7 @@ export function App() {
         {t("app.skipToContent")}
       </a>
       <aside className="sidebar" aria-label={t("app.sidebarLabel")}>
+        <div className="titlebar" data-tauri-drag-region aria-hidden="true" />
         <div className="brand">
           <Logo pulse={needsCount > 0} />
           <span className="wordmark">{t("app.name").toLowerCase()}</span>
@@ -436,6 +437,9 @@ export function App() {
         </div>
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
+        <div className="titlebar" data-tauri-drag-region aria-hidden="true">
+          {t(current.label)}
+        </div>
         <div key={page} className="page-enter">
           {current.standalone ? (
             <Current />

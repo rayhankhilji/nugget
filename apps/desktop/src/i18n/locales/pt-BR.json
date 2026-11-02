@@ -1243,7 +1243,7 @@
   "today.new": "Novo",
   "today.sensitive": "Sensível",
   "today.people": "Com {people}",
-  "today.why": "Por quê:",
+  "today.why": "Por que está aqui:",
   "today.whyLabel": "Por que este cartão está aqui",
   "today.evidence": "{n, plural, one {Mostrar # fonte} other {Mostrar # fontes}}",
   "today.evidenceLabel": "Fontes de {title}",
@@ -2388,7 +2388,6 @@
   "home.greeting.morning": "Bom dia",
   "home.greeting.afternoon": "Boa tarde",
   "home.greeting.evening": "Boa noite",
-  "home.description": "Pergunte qualquer coisa e veja o que importa hoje. Nada é executado até você aprovar.",
   "home.askLabel": "Pergunte ao Heed",
   "home.askPlaceholder": "Pergunte qualquer coisa sobre seus e-mails, agenda, documentos e chats",
   "home.askHint": "Enter para perguntar · Shift+Enter para nova linha",
@@ -2412,5 +2411,13 @@
   "onboarding.answer.suggestionsLabel": "Perguntas para testar",
   "onboarding.answer.suggestion1": "O que precisa da minha resposta hoje?",
   "onboarding.answer.suggestion2": "O que tenho na agenda esta semana?",
-  "onboarding.answer.suggestion3": "O que prometi a alguém recentemente?"
+  "onboarding.answer.suggestion3": "O que prometi a alguém recentemente?",
+  "home.meetings": "{count, plural, one {# reunião} other {# reuniões}}",
+  "home.suggestLabel": "Perguntas para começar",
+  "home.suggest.prep": "Me prepare para {title}",
+  "home.suggest.card": "O que faço sobre “{title}”?",
+  "home.suggest.promised": "O que eu prometi esta semana?",
+  "home.suggest.week": "O que tenho na agenda esta semana?",
+  "home.suggest.changed": "O que mudou desde ontem?",
+  "home.empty.body": "Pergunte qualquer coisa acima. Novas reuniões, prazos e respostas aparecem aqui assim que chegam."
 }

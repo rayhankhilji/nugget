@@ -1243,7 +1243,7 @@
   "today.new": "New",
   "today.sensitive": "Sensitive",
   "today.people": "With {people}",
-  "today.why": "Why:",
+  "today.why": "Why it's here:",
   "today.whyLabel": "Why this card is here",
   "today.evidence": "{n, plural, one {Show # source} other {Show # sources}}",
   "today.evidenceLabel": "Sources for {title}",
@@ -2388,7 +2388,6 @@
   "home.greeting.morning": "Good morning",
   "home.greeting.afternoon": "Good afternoon",
   "home.greeting.evening": "Good evening",
-  "home.description": "Ask anything, and see what matters today. Nothing runs until you approve it.",
   "home.askLabel": "Ask Heed",
   "home.askPlaceholder": "Ask anything about your mail, calendar, docs and chats",
   "home.askHint": "Enter to ask · Shift+Enter for a new line",
@@ -2412,5 +2411,13 @@
   "onboarding.answer.suggestionsLabel": "Questions to try",
   "onboarding.answer.suggestion1": "What needs my reply today?",
   "onboarding.answer.suggestion2": "What's on my calendar this week?",
-  "onboarding.answer.suggestion3": "What did I promise someone recently?"
+  "onboarding.answer.suggestion3": "What did I promise someone recently?",
+  "home.meetings": "{count, plural, one {# meeting} other {# meetings}}",
+  "home.suggestLabel": "Questions to start with",
+  "home.suggest.prep": "Prep me for {title}",
+  "home.suggest.card": "What should I do about “{title}”?",
+  "home.suggest.promised": "What did I promise this week?",
+  "home.suggest.week": "What's on my calendar this week?",
+  "home.suggest.changed": "What changed since yesterday?",
+  "home.empty.body": "Ask anything above. New meetings, deadlines and replies show up here as they arrive."
 }

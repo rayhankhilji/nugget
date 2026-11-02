@@ -1243,7 +1243,7 @@
   "today.new": "新規",
   "today.sensitive": "機密",
   "today.people": "関係者：{people}",
-  "today.why": "理由：",
+  "today.why": "表示の理由：",
   "today.whyLabel": "このカードが表示される理由",
   "today.evidence": "{n, plural, other {根拠 # 件を表示}}",
   "today.evidenceLabel": "{title} の根拠",
@@ -2388,7 +2388,6 @@
   "home.greeting.morning": "おはようございます",
   "home.greeting.afternoon": "こんにちは",
   "home.greeting.evening": "こんばんは",
-  "home.description": "何でも質問して、今日大事なことを確認できます。承認するまで何も実行されません。",
   "home.askLabel": "Heed に質問",
   "home.askPlaceholder": "メール、カレンダー、ドキュメント、チャットについて何でも質問",
   "home.askHint": "Enter で質問 · Shift+Enter で改行",
@@ -2412,5 +2411,13 @@
   "onboarding.answer.suggestionsLabel": "試せる質問",
   "onboarding.answer.suggestion1": "今日返信が必要なものは？",
   "onboarding.answer.suggestion2": "今週の予定は？",
-  "onboarding.answer.suggestion3": "最近だれかと約束したことは？"
+  "onboarding.answer.suggestion3": "最近だれかと約束したことは？",
+  "home.meetings": "{count, plural, other {会議 # 件}}",
+  "home.suggestLabel": "最初の質問の例",
+  "home.suggest.prep": "{title} の準備を手伝って",
+  "home.suggest.card": "「{title}」はどうすればいい？",
+  "home.suggest.promised": "今週、何を約束した？",
+  "home.suggest.week": "今週の予定は？",
+  "home.suggest.changed": "昨日から何が変わった？",
+  "home.empty.body": "上の欄から何でも質問できます。新しい会議、締め切り、返信は届きしだいここに表示されます。"
 }
