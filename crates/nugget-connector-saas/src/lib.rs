@@ -134,6 +134,13 @@ pub struct Endpoints {
     pub linear_graphql: String,
     pub linear_auth_url: String,
     pub linear_token_url: String,
+    /// Slack's OAuth consent page (the token endpoint is `<slack_api>/oauth.v2.access`).
+    pub slack_auth_url: String,
+    /// Nugget's own OAuth clients, used when a source names none. Production: those baked in
+    /// at build time, if any ([`nugget_oauth::bundled`]); tests: none unless set.
+    pub builtin_github: Option<nugget_oauth::ClientCredentials>,
+    pub builtin_linear: Option<nugget_oauth::ClientCredentials>,
+    pub builtin_slack: Option<nugget_oauth::ClientCredentials>,
 }
 
 impl Default for Endpoints {
@@ -146,6 +153,10 @@ impl Default for Endpoints {
             linear_graphql: "https://api.linear.app/graphql".into(),
             linear_auth_url: auth::linear::AUTH_URL.into(),
             linear_token_url: auth::linear::TOKEN_URL.into(),
+            slack_auth_url: auth::slack::AUTH_URL.into(),
+            builtin_github: nugget_oauth::bundled::client("github"),
+            builtin_linear: nugget_oauth::bundled::client("linear"),
+            builtin_slack: nugget_oauth::bundled::client("slack"),
         }
     }
 }
@@ -153,7 +164,7 @@ impl Default for Endpoints {
 impl Endpoints {
     /// Everything under one base URL (`<base>/slack`, `<base>/notion/v1`, `<base>/github/graphql`,
     /// `<base>/github/login`, `<base>/linear/graphql`, `<base>/linear/authorize`,
-    /// `<base>/linear/token`). For tests.
+    /// `<base>/linear/token`, `<base>/slack/oauth/v2/authorize`). For tests.
     pub fn with_base(base: &str) -> Self {
         let b = base.trim_end_matches('/');
         Self {
@@ -164,6 +175,10 @@ impl Endpoints {
             linear_graphql: format!("{b}/linear/graphql"),
             linear_auth_url: format!("{b}/linear/authorize"),
             linear_token_url: format!("{b}/linear/token"),
+            slack_auth_url: format!("{b}/slack/oauth/v2/authorize"),
+            builtin_github: None,
+            builtin_linear: None,
+            builtin_slack: None,
         }
     }
 }

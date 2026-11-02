@@ -14,7 +14,9 @@ fn default_window() -> u32 {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GmailSettings {
-    pub client_id: String,
+    /// The user's own OAuth client (advanced). Absent: Nugget's built-in client.
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default)]
@@ -35,7 +37,9 @@ pub(crate) struct GmailSettings {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CalendarSettings {
-    pub client_id: String,
+    /// The user's own OAuth client (advanced). Absent: Nugget's built-in client.
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default)]
@@ -61,7 +65,9 @@ fn default_drive_file_mb() -> u32 {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DriveSettings {
-    pub client_id: String,
+    /// The user's own OAuth client (advanced). Absent: Nugget's built-in client.
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default)]
@@ -86,12 +92,24 @@ fn parse<T: for<'de> Deserialize<'de>>(settings: &Value) -> Result<T> {
     serde_json::from_value(v).map_err(|e| Error::Invalid(format!("settings: {e}")))
 }
 
-fn check_client(client_id: &str, account_hint: Option<&str>) -> Result<()> {
-    let id = client_id.trim();
-    if id.is_empty() {
-        return Err(Error::Invalid("settings: client_id is required".into()));
+/// Shown when neither the source nor this build has an OAuth client.
+pub(crate) const NO_CLIENT: &str = "this build of Nugget has no built-in Google sign-in; under Advanced, enter the client ID of your own Google OAuth client (see the Google guide)";
+
+/// A source without its own `client_id` needs a built-in client.
+pub(crate) fn require_client(client_id: Option<&str>, has_builtin: bool) -> Result<()> {
+    if has_builtin || client_id.is_some_and(|c| !c.trim().is_empty()) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!("settings: {NO_CLIENT}")))
     }
-    if id.len() > 512 || id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+}
+
+fn check_client(client_id: Option<&str>, account_hint: Option<&str>) -> Result<()> {
+    if let Some(id) = client_id.map(str::trim)
+        && (id.is_empty()
+            || id.len() > 512
+            || id.chars().any(|c| c.is_whitespace() || c.is_control()))
+    {
         return Err(Error::Invalid("settings: client_id is malformed".into()));
     }
     if account_hint.is_some_and(|h| h.len() > 320 || h.chars().any(char::is_control)) {
@@ -112,7 +130,7 @@ fn check_days(name: &str, v: u32, min: u32) -> Result<()> {
 impl GmailSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let s: Self = parse(settings)?;
-        check_client(&s.client_id, s.account_hint.as_deref())?;
+        check_client(s.client_id.as_deref(), s.account_hint.as_deref())?;
         check_days("window_days", s.window_days, 1)?;
         Ok(s)
     }
@@ -139,7 +157,7 @@ impl GmailSettings {
 impl CalendarSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let s: Self = parse(settings)?;
-        check_client(&s.client_id, s.account_hint.as_deref())?;
+        check_client(s.client_id.as_deref(), s.account_hint.as_deref())?;
         check_days("past_days", s.past_days, 0)?;
         check_days("future_days", s.future_days, 0)?;
         if let Some(cals) = &s.calendars {
@@ -189,7 +207,7 @@ impl CalendarSettings {
 impl DriveSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let s: Self = parse(settings)?;
-        check_client(&s.client_id, s.account_hint.as_deref())?;
+        check_client(s.client_id.as_deref(), s.account_hint.as_deref())?;
         if s.max_file_mb < 1 || s.max_file_mb > MAX_DRIVE_FILE_MB {
             return Err(Error::Invalid(format!(
                 "settings: max_file_mb must be between 1 and {MAX_DRIVE_FILE_MB}"
@@ -228,15 +246,14 @@ fn common_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
-        "required": ["client_id"],
         "properties": {
             "client_id": {
-                "type": "string", "minLength": 1, "title": "OAuth client ID",
-                "description": "From your own Google Cloud project: an OAuth client of type \"Desktop app\"."
+                "type": "string", "minLength": 1, "title": "Your own OAuth client ID (advanced)",
+                "description": "Leave empty to sign in with Nugget's own Google client. Otherwise: an OAuth client of type \"Desktop app\" from your own Google Cloud project."
             },
             "client_secret": {
-                "type": "string", "title": "OAuth client secret",
-                "description": "Shown next to the client ID. Not confidential for desktop apps, but never logged."
+                "type": "string", "title": "Your own OAuth client secret (advanced)",
+                "description": "Only with your own client ID. Not confidential for desktop apps, but never logged."
             },
             "account_hint": {
                 "type": "string", "title": "Google account",

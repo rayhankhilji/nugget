@@ -6,7 +6,7 @@ use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{AuthFlow, CancellationToken, ConnectorContext};
 use nugget_core::secrets::oauth_account;
 use nugget_core::{Error, Result};
-use nugget_oauth::{AuthorizeOptions, ClientCredentials, OAuthClient, TokenSource};
+use nugget_oauth::{AuthorizeOptions, OAuthClient, TokenSource};
 use reqwest::Method;
 use reqwest::header::ACCEPT;
 use serde::Deserialize;
@@ -97,7 +97,12 @@ impl GraphApi {
     ) -> Result<Self> {
         let http = MeteredHttp::new(ctx.egress.clone(), feature)?;
         let provider = crate::oauth::provider_with_login(&endpoints.login, &common.tenant, scopes)?;
-        let creds = ClientCredentials::new(common.client_id.trim(), common.client_secret.clone());
+        let creds = nugget_oauth::bundled::resolve(
+            common.client_id.as_deref(),
+            common.client_secret.clone(),
+            endpoints.builtin_client.clone(),
+        )
+        .ok_or_else(|| Error::Invalid(crate::settings::NO_CLIENT.into()))?;
         let client = OAuthClient::new(provider, creds, http.clone())?;
         let tokens = TokenSource::new(
             client,
@@ -153,6 +158,13 @@ impl GraphApi {
     }
 
     /// Fail fast with `Unauthorized` when no tokens are stored.
+    /// Delete the stored tokens. Microsoft has no revocation endpoint for public clients;
+    /// the refresh token stops working after 90 days unused, or when the user removes the app
+    /// at https://myapps.microsoft.com (personal accounts: account.live.com/consent/Manage).
+    pub(crate) async fn sign_out(&self) -> Result<()> {
+        self.tokens.disconnect().await.map(|_| ())
+    }
+
     pub(crate) async fn ensure_token(&self) -> Result<()> {
         self.tokens.access_token().await.map(|_| ())
     }

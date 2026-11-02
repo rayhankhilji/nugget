@@ -181,6 +181,12 @@ pub trait Connector: Send + Sync {
         )))
     }
 
+    /// Disconnect the account: revoke the grant where the provider lets a public client do so
+    /// (best effort) and delete the stored tokens. Default: nothing to revoke.
+    async fn sign_out(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Start an interactive authorization (OAuth). Default: not needed.
     async fn begin_auth(&self) -> Result<AuthFlow> {
         Err(Error::Unsupported(format!(

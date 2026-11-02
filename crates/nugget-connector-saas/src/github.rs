@@ -235,21 +235,15 @@ impl GitHubFactory {
 
     fn make(&self, settings: GitHubSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
-        let tokens = match &settings.client_id {
-            Some(id) => Some(auth::token_source(
-                auth::github::provider(&self.endpoints.github_login),
-                id,
-                auth::client_secret(
-                    &ctx.secrets,
-                    ctx.source.as_str(),
-                    settings.client_secret.as_deref(),
-                ),
-                http.clone(),
-                ctx.secrets.clone(),
-                ctx.source.as_str(),
-            )?),
-            None => None,
-        };
+        let tokens = auth::token_source(
+            auth::github::provider(&self.endpoints.github_login),
+            settings.client_id.as_deref(),
+            self.endpoints.builtin_github.clone(),
+            settings.client_secret.as_deref(),
+            http.clone(),
+            ctx.secrets.clone(),
+            ctx.source.as_str(),
+        )?;
         let cred = Arc::new(Credential::new(
             SERVICE,
             ctx.secrets.clone(),
@@ -390,16 +384,16 @@ impl Connector for GitHubConnector {
     }
 
     async fn begin_auth(&self) -> Result<AuthFlow> {
-        let Some(client_id) = &self.settings.client_id else {
+        let Some(tokens) = &self.tokens else {
             return Err(Error::Unsupported(
-                "set client_id (an OAuth App with the device flow enabled) or paste a personal access token".into(),
+                "this build has no built-in GitHub sign-in: paste a personal access token, or under Advanced set client_id (your own OAuth App with the device flow enabled)".into(),
             ));
         };
         let flow = auth::github_device_flow(
             &self.api.http,
             DeviceFlow {
                 login_root: self.login_root.clone(),
-                client_id: client_id.trim().to_string(),
+                client_id: tokens.client().client_id().to_string(),
                 min_interval: self.device_poll,
                 timeout: nugget_oauth::DEFAULT_AUTH_TIMEOUT,
             },
@@ -412,6 +406,16 @@ impl Connector for GitHubConnector {
             self.api.cred.clone(),
             self.tokens.clone(),
         ))
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        auth::sign_out(
+            &self.api.cred,
+            self.tokens.as_ref(),
+            &self.ctx.secrets,
+            self.ctx.source.as_str(),
+        )
+        .await
     }
 
     async fn sync(

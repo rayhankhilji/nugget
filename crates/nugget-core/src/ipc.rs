@@ -39,6 +39,12 @@ pub mod method {
     pub const SOURCES_SYNC: &str = "sources.sync";
     pub const SOURCES_AUTH_BEGIN: &str = "sources.auth.begin";
     pub const SOURCES_SECRET_SET: &str = "sources.secret.set";
+    /// Disconnect a source's account: revoke its OAuth grant (where the provider allows it)
+    /// and delete the stored tokens. Params `SourceRef`; result `null`.
+    pub const SOURCES_AUTH_REVOKE: &str = "sources.auth.revoke";
+    /// OAuth providers this build has Nugget's own client for ("Connect" with no setup).
+    /// Params `{}`; result `{"providers": ["google", ...]}`.
+    pub const SOURCES_OAUTH_BUILTIN: &str = "sources.oauth.builtin";
     pub const INGEST_STATUS: &str = "ingest.status";
     pub const RETRIEVE_CONTEXT: &str = "retrieve.context";
     pub const RETRIEVE_ASK: &str = "retrieve.ask";

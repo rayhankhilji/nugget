@@ -89,6 +89,10 @@ impl Handler for RpcHandler {
             method::SOURCES_SYNC => self.sources_sync(parse_params(params)?),
             method::SOURCES_AUTH_BEGIN => self.sources_auth_begin(parse_params(params)?).await,
             method::SOURCES_SECRET_SET => self.sources_secret_set(parse_params(params)?).await,
+            method::SOURCES_AUTH_REVOKE => self.sources_auth_revoke(parse_params(params)?).await,
+            method::SOURCES_OAUTH_BUILTIN => {
+                Ok(json!({"providers": nugget_oauth::bundled::available()}))
+            }
             method::INGEST_STATUS => to_result(self.state.ingest.status().await?),
             method::RETRIEVE_CONTEXT => self.retrieve_context(parse_params(params)?).await,
             method::RETRIEVE_ASK => self.retrieve_ask(parse_params(params)?, notify).await,
@@ -679,6 +683,15 @@ impl RpcHandler {
             url: flow.url,
             user_code: flow.user_code,
         })
+    }
+
+    /// Disconnect: revoke the OAuth grant (best effort) and delete the stored tokens.
+    async fn sources_auth_revoke(&self, req: SourceRef) -> Result<Value, RpcError> {
+        self.state.ingest.sign_out(&req.id).await?;
+        tracing::info!(source = %req.id, "source signed out");
+        self.audit("source.auth.revoke", req.id.as_str(), json!({}))
+            .await;
+        Ok(Value::Null)
     }
 
     /// Store a source credential (see `crate::sources` for where each kind's goes).

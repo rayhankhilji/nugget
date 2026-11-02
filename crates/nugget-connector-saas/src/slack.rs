@@ -1,6 +1,8 @@
 //! `slack`: conversations read through the Slack Web API with the user's own token.
 //!
-//! Scopes: a Slack *user* token (`xoxp-…`) of the user's own app, read-only: `channels:history`,
+//! Auth: "Connect" signs in with Nugget's own Slack app (PKCE, a user token that is refreshed;
+//! see [`crate::auth::slack`]), or with the user's own app's `client_id`; otherwise a pasted
+//! user token. Scopes, read-only: `channels:history`,
 //! `groups:history`, `im:history`, `mpim:history` (messages of the conversation types synced),
 //! `channels:read`, `groups:read`, `im:read`, `mpim:read` (list and resolve conversations) and
 //! `users:read` (author names). No write scopes; the token comes only from the keychain (or `token_env`).
@@ -37,10 +39,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
 use nugget_connector::{
-    CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
+    AuthFlow, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, Content, Document,
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
+use nugget_oauth::TokenSource;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -48,7 +51,7 @@ use url::Url;
 
 use crate::SLACK_KIND;
 use crate::api::{self, Api, ItemFailures, Outcome, classify_common, retry_after_ms};
-use crate::auth::{Credential, Token};
+use crate::auth::{self, Credential, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
     DAY_SECS, clean, clock, date, day_start, hash_hex, now_unix, one_line, parse_date, safe_id,
@@ -117,6 +120,9 @@ fn default_recheck() -> u32 {
 pub(crate) struct SlackSettings {
     #[serde(default)]
     token_env: Option<String>,
+    /// The user's own Slack app with PKCE enabled (advanced); absent: Nugget's built-in app.
+    #[serde(default)]
+    client_id: Option<String>,
     /// Channel ids (`C…`, `G…`, `D…`) or names (`general`, `#general`). Empty: every DM and
     /// channel the user is a member of, up to `max_conversations`.
     #[serde(default)]
@@ -137,6 +143,7 @@ impl SlackSettings {
     pub(crate) fn parse(v: &Value) -> Result<Self> {
         let s: Self = settings::parse(v)?;
         settings::check_token_env(s.token_env.as_deref())?;
+        settings::check_client_id(s.client_id.as_deref())?;
         settings::check_list("conversations", s.conversations.as_deref(), 1000)?;
         settings::check_range("max_conversations", s.max_conversations, 1, 1000)?;
         settings::check_range("window_days", s.window_days, 1, MAX_WINDOW_DAYS)?;
@@ -160,6 +167,7 @@ impl SlackSettings {
         settings::schema(
             "the User OAuth Token (xoxp-…) of your own Slack app.",
             json!({
+                "client_id": settings::client_id_prop("Client ID of your own Slack app with PKCE enabled (redirect URL http://localhost). Leave empty to connect with Nugget's own app."),
                 "conversations": {
                     "type": "array", "items": {"type": "string", "minLength": 1},
                     "title": "Conversations",
@@ -237,15 +245,25 @@ factory!(
 impl SlackFactory {
     fn make(&self, settings: SlackSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
+        let tokens = auth::token_source(
+            auth::slack::provider(&self.endpoints.slack_auth_url, &self.endpoints.slack_api),
+            settings.client_id.as_deref(),
+            self.endpoints.builtin_slack.clone(),
+            None,
+            http.clone(),
+            ctx.secrets.clone(),
+            ctx.source.as_str(),
+        )?;
         let cred = Arc::new(Credential::new(
             SERVICE,
             ctx.secrets.clone(),
             ctx.source.as_str(),
             settings.token_env.clone(),
-            None,
+            tokens.clone(),
         ));
         Ok(Arc::new(SlackConnector {
             api: Api::new(http, cred, self.retry, SERVICE),
+            tokens,
             base: self.endpoints.slack_api.clone(),
             settings,
             ctx,
@@ -257,6 +275,8 @@ impl SlackFactory {
 /// One Slack workspace, as one user.
 pub struct SlackConnector {
     api: Api,
+    /// Nugget's or the user's own Slack app, when there is one.
+    tokens: Option<Arc<TokenSource>>,
     base: String,
     settings: SlackSettings,
     ctx: ConnectorContext,
@@ -496,6 +516,27 @@ impl Connector for SlackConnector {
 
     fn poll_interval(&self) -> Duration {
         Duration::from_secs(300)
+    }
+
+    async fn begin_auth(&self) -> Result<AuthFlow> {
+        auth::begin_browser(
+            self.tokens.as_ref(),
+            &self.api.cred,
+            &self.ctx.secrets,
+            self.ctx.source.as_str(),
+            "this build has no built-in Slack sign-in: paste a user token (xoxp-…), or under Advanced set client_id (your own Slack app with PKCE enabled)",
+        )
+        .await
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        auth::sign_out(
+            &self.api.cred,
+            self.tokens.as_ref(),
+            &self.ctx.secrets,
+            self.ctx.source.as_str(),
+        )
+        .await
     }
 
     async fn sync(

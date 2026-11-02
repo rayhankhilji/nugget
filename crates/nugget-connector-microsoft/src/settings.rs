@@ -26,7 +26,8 @@ fn default_max_file_mb() -> u32 {
 /// The OAuth part shared by every kind.
 #[derive(Clone)]
 pub(crate) struct Common {
-    pub client_id: String,
+    /// The user's own app registration (advanced); absent: Nugget's built-in client.
+    pub client_id: Option<String>,
     pub client_secret: Option<String>,
     pub tenant: String,
     pub account_hint: Option<String>,
@@ -35,7 +36,8 @@ pub(crate) struct Common {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OutlookSettings {
-    pub client_id: String,
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default = "default_tenant")]
@@ -53,7 +55,8 @@ pub(crate) struct OutlookSettings {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CalendarSettings {
-    pub client_id: String,
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default = "default_tenant")]
@@ -69,7 +72,8 @@ pub(crate) struct CalendarSettings {
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OneDriveSettings {
-    pub client_id: String,
+    #[serde(default)]
+    pub client_id: Option<String>,
     #[serde(default)]
     pub client_secret: Option<String>,
     #[serde(default = "default_tenant")]
@@ -95,12 +99,24 @@ fn parse<T: for<'de> Deserialize<'de>>(settings: &Value) -> Result<T> {
     serde_json::from_value(v).map_err(|e| Error::Invalid(format!("settings: {e}")))
 }
 
-fn check_common(client_id: &str, tenant: &str, account_hint: Option<&str>) -> Result<()> {
-    let id = client_id.trim();
-    if id.is_empty() {
-        return Err(Error::Invalid("settings: client_id is required".into()));
+/// Shown when neither the source nor this build has an OAuth client.
+pub(crate) const NO_CLIENT: &str = "this build of Nugget has no built-in Microsoft sign-in; under Advanced, enter the application (client) ID of your own Entra app registration (see the Microsoft guide)";
+
+/// A source without its own `client_id` needs a built-in client.
+pub(crate) fn require_client(client_id: Option<&str>, has_builtin: bool) -> Result<()> {
+    if has_builtin || client_id.is_some_and(|c| !c.trim().is_empty()) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!("settings: {NO_CLIENT}")))
     }
-    if id.len() > 512 || id.chars().any(|c| c.is_whitespace() || c.is_control()) {
+}
+
+fn check_common(client_id: Option<&str>, tenant: &str, account_hint: Option<&str>) -> Result<()> {
+    if let Some(id) = client_id.map(str::trim)
+        && (id.is_empty()
+            || id.len() > 512
+            || id.chars().any(|c| c.is_whitespace() || c.is_control()))
+    {
         return Err(Error::Invalid("settings: client_id is malformed".into()));
     }
     validate_tenant(tenant.trim())?;
@@ -160,7 +176,7 @@ pub(crate) fn normalize_path(p: &str) -> Result<String> {
 impl OutlookSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let s: Self = parse(settings)?;
-        check_common(&s.client_id, &s.tenant, s.account_hint.as_deref())?;
+        check_common(s.client_id.as_deref(), &s.tenant, s.account_hint.as_deref())?;
         check_days("window_days", s.window_days, 1)?;
         if let Some(f) = &s.folders {
             if f.len() > 100 {
@@ -220,7 +236,7 @@ impl OutlookSettings {
 impl CalendarSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let s: Self = parse(settings)?;
-        check_common(&s.client_id, &s.tenant, s.account_hint.as_deref())?;
+        check_common(s.client_id.as_deref(), &s.tenant, s.account_hint.as_deref())?;
         check_days("past_days", s.past_days, 0)?;
         check_days("future_days", s.future_days, 0)?;
         if s.past_days + s.future_days == 0 {
@@ -258,7 +274,7 @@ impl CalendarSettings {
 impl OneDriveSettings {
     pub(crate) fn parse(settings: &Value) -> Result<Self> {
         let mut s: Self = parse(settings)?;
-        check_common(&s.client_id, &s.tenant, s.account_hint.as_deref())?;
+        check_common(s.client_id.as_deref(), &s.tenant, s.account_hint.as_deref())?;
         if s.max_file_mb == 0 || s.max_file_mb > MAX_FILE_MB {
             return Err(Error::Invalid(format!(
                 "settings: max_file_mb must be between 1 and {MAX_FILE_MB}"
@@ -329,13 +345,17 @@ impl OneDriveSettings {
 }
 
 fn common(
-    client_id: &str,
+    client_id: &Option<String>,
     client_secret: &Option<String>,
     tenant: &str,
     account_hint: &Option<String>,
 ) -> Common {
     Common {
-        client_id: client_id.trim().to_string(),
+        client_id: client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         client_secret: client_secret.clone().filter(|s| !s.is_empty()),
         tenant: tenant.trim().to_string(),
         account_hint: account_hint.clone(),
@@ -347,15 +367,14 @@ fn common_schema() -> Value {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "additionalProperties": false,
-        "required": ["client_id"],
         "properties": {
             "client_id": {
-                "type": "string", "minLength": 1, "title": "Application (client) ID",
-                "description": "From your own Microsoft Entra app registration (Mobile and desktop applications platform, redirect URI http://localhost)."
+                "type": "string", "minLength": 1, "title": "Your own application (client) ID (advanced)",
+                "description": "Leave empty to sign in with Nugget's own app. Otherwise: your own Microsoft Entra app registration (Mobile and desktop applications platform, redirect URI http://localhost)."
             },
             "client_secret": {
-                "type": "string", "title": "Client secret",
-                "description": "Optional: public clients need none. Never logged."
+                "type": "string", "title": "Client secret (advanced)",
+                "description": "Only with your own client ID, and optional: public clients need none. Never logged."
             },
             "tenant": {
                 "type": "string", "default": DEFAULT_TENANT, "title": "Tenant",

@@ -28,6 +28,9 @@ pub(crate) fn client_secret_account(id: &SourceId) -> String {
 /// Kinds whose optional settings fields may arrive blank from a form (see
 /// [`reconcile_settings`]).
 const FORM_NORMALISED_KINDS: &[&str] = &[
+    "gmail",
+    "gcal",
+    "gdrive",
     "outlook",
     "outlook-calendar",
     "onedrive",
@@ -64,9 +67,9 @@ pub(crate) fn auth_kind(ingest: &Ingest, kind: &str) -> Option<AuthKind> {
 /// - `files`: an empty `include` list means "the default types" (the desktop sends `[]` when
 ///   the field is left blank; the connector requires a non-empty list or none), so it is
 ///   dropped. An empty `exclude` is fine.
-/// - Microsoft 365 and SaaS kinds: top-level fields that are `null`, blank strings or empty
+/// - Google, Microsoft 365 and SaaS kinds: top-level fields that are `null`, blank strings or empty
 ///   arrays are dropped, so blank form fields fall back to the connector's default (their
-///   schemas reject an empty `client_id`, `tenant` or `token_env` and an empty Linear
+///   schemas reject an empty `client_id` (no `client_id` = Nugget's built-in client), `tenant` or `token_env` and an empty Linear
 ///   `include`; an empty list elsewhere means the same as no list).
 /// - Any kind: a non-null `client_secret` is refused (use `sources.secret.set`).
 pub(crate) fn reconcile_settings(kind: &str, settings: Value) -> Result<Value> {

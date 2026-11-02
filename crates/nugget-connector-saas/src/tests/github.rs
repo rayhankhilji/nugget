@@ -556,3 +556,29 @@ async fn device_flow_refuses_foreign_verification_urls() {
         assert!(matches!(r, Err(Error::Invalid(_))), "{uri} accepted");
     }
 }
+
+#[tokio::test]
+async fn builtin_app_runs_the_device_flow_and_the_users_own_client_wins() {
+    let h = Harness::new().await;
+    for id in ["Iv1.nugget", "Iv1.mine"] {
+        Mock::given(method("POST"))
+            .and(path("/github/login/device/code"))
+            .and(body_string_contains(format!("client_id={id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "device_code": "dc", "user_code": "ABCD-EFGH",
+                "verification_uri": "https://github.com/login/device"
+            })))
+            .expect(1)
+            .mount(&h.server)
+            .await;
+    }
+    let mut ep = h.endpoints();
+    ep.builtin_github = Some(nugget_oauth::ClientCredentials::new("Iv1.nugget", None));
+    let f = factory(&h).with_endpoints(ep);
+    let flow = h.build(&f, json!({})).begin_auth().await.unwrap();
+    assert_eq!(flow.user_code.as_deref(), Some("ABCD-EFGH"));
+    h.build(&f, json!({"client_id": "Iv1.mine"}))
+        .begin_auth()
+        .await
+        .unwrap();
+}

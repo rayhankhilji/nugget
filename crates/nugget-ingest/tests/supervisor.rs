@@ -134,6 +134,36 @@ async fn begin_auth_completes_and_resyncs() {
 }
 
 #[tokio::test]
+async fn sign_out_revokes_deletes_tokens_and_asks_to_reconnect() {
+    let h = start(Opts::default()).await;
+    let st = h.factory.state("fake-1");
+    st.script(vec![Step::Return(json!("ok"))]);
+    st.script(vec![Step::Fail(ErrKind::Unauthorized)]);
+    h.add("fake-1").await;
+    h.wait_state("fake-1", SourceState::Idle).await;
+    nugget_connector::SecretStore::set(&h.secrets, "oauth:fake-1", "{}").unwrap();
+    nugget_connector::SecretStore::set(&h.secrets, "password:fake-1", "pw").unwrap();
+    h.ingest.sign_out(&id()).await.unwrap();
+    assert_eq!(st.sign_outs.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        nugget_connector::SecretStore::get(&h.secrets, "oauth:fake-1").unwrap(),
+        None
+    );
+    // A pasted credential is not an OAuth grant: kept.
+    assert!(
+        nugget_connector::SecretStore::get(&h.secrets, "password:fake-1")
+            .unwrap()
+            .is_some()
+    );
+    h.wait_state("fake-1", SourceState::NeedsAuth).await;
+    // Removing a source signs out first, too.
+    h.ingest.remove(&id(), false).await.unwrap();
+    assert_eq!(st.sign_outs.load(Ordering::SeqCst), 2);
+    assert!(h.ingest.sign_out(&id()).await.is_err());
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
 async fn backfills_pause_on_low_power_unless_forced() {
     let power = Arc::new(TogglePower::default());
     power.0.store(true, Ordering::SeqCst);

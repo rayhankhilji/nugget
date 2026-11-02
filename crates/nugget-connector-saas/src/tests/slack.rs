@@ -645,3 +645,60 @@ async fn hostile_error_codes_are_capped_and_printable() {
     assert!(msg.len() < 400, "{} bytes", msg.len());
     assert!(!msg.chars().any(char::is_control), "{msg:?}");
 }
+
+#[tokio::test]
+async fn connect_with_builtin_app_uses_pkce_user_scopes_and_disconnect_revokes() {
+    use wiremock::matchers::body_string_contains;
+    let h = Harness::new().await;
+    Mock::given(method("POST"))
+        .and(path("/slack/oauth.v2.access"))
+        .and(body_string_contains("code_verifier="))
+        .and(body_string_contains("client_id=nugget-slack"))
+        .respond_with(ok(json!({"authed_user": {
+            "id": "U1", "access_token": "xoxp-1", "refresh_token": "xoxe-1",
+            "expires_in": 43200, "token_type": "user"
+        }})))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/slack/auth.revoke"))
+        .and(body_string_contains("token=xoxp-1"))
+        .respond_with(ok(json!({"revoked": true})))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    mount_auth(&h.server).await;
+    mount_convs(&h.server, json!([])).await;
+    let mut ep = h.endpoints();
+    ep.builtin_slack = Some(nugget_oauth::ClientCredentials::new("nugget-slack", None));
+    let conn = h.build(
+        &SlackFactory::new()
+            .with_endpoints(ep)
+            .with_retry(fast_retry(2)),
+        json!({}),
+    );
+    let flow = conn.begin_auth().await.unwrap();
+    let url = url::Url::parse(&flow.url).unwrap();
+    assert!(url.path().ends_with("/slack/oauth/v2/authorize"));
+    let q: HashMap<String, String> = url.query_pairs().into_owned().collect();
+    assert_eq!(q["client_id"], "nugget-slack");
+    assert!(!q.contains_key("scope"), "no bot scopes");
+    assert!(q["user_scope"].contains("channels:history") && !q["user_scope"].contains("write"));
+    assert_eq!(q["code_challenge_method"], "S256");
+    let redirect = q["redirect_uri"].replace("http://localhost:", "http://127.0.0.1:");
+    assert_ne!(
+        redirect, q["redirect_uri"],
+        "Slack desktop redirects use localhost"
+    );
+    let done = tokio::spawn(flow.done);
+    let resp = reqwest::get(format!("{redirect}?state={}&code=c", q["state"]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    done.await.unwrap().unwrap();
+    run(&conn, None, &h.sink()).await.unwrap();
+
+    conn.sign_out().await.unwrap();
+    assert!(is_unauthorized(&run(&conn, None, &h.sink()).await));
+}

@@ -1,8 +1,8 @@
 # Gmail, Google Calendar and Google Drive
 
-Nugget talks to Google directly with **your own OAuth client**: no Nugget server or Nugget-owned
-Google app sees your data. The cost is a one-time setup in the Google Cloud console, and a weekly
-re-sign-in while your app is in Testing mode ([below](#the-7-day-sign-in-limit-in-testing-mode)).
+Nugget talks to Google directly from your computer: no Nugget server sees your data. Release builds
+sign in with Nugget's own Google client; you can [use your own](#advanced-use-your-own-oauth-client)
+instead.
 
 | Source | Scope | Sync |
 |---|---|---|
@@ -16,7 +16,25 @@ read file content. The one exception is Gmail's **Allow archiving** (`allow_modi
 everything except permanent deletion (including sending); Nugget uses it only to remove the `INBOX`
 label. It takes effect after you reconnect.
 
-## Set up your OAuth client
+## Connect
+
+On **Sources**, choose **Add source → Gmail** (or **Google Calendar**, **Google Drive**), then
+**Connect**, and approve in the browser. The browser redirects to a one-time listener on `127.0.0.1`
+(PKCE, with a state check) and syncing starts. Tokens stay in the OS keychain and are refreshed
+automatically.
+
+While Nugget's Google app is in Google's **Testing** status, only people on its test-user list can
+sign in, and Google expires the sign-in after **7 days**: the source then shows **Needs sign-in**
+(`needs_auth`). Nothing is lost: choose **Reconnect** and syncing resumes where it stopped.
+
+**Disconnect** revokes Nugget's access at Google and deletes the tokens; you can also remove access
+at [myaccount.google.com/permissions](https://myaccount.google.com/permissions). Removing the source
+does the same.
+
+## Advanced: use your own OAuth client
+
+Use this if you prefer your own client, or if your build has none built in (builds from source
+usually don't; for Google, they then require `client_id`). Your client always wins when set.
 
 In the [Google Cloud console](https://console.cloud.google.com/), signed in with the account to index:
 
@@ -30,23 +48,12 @@ In the [Google Cloud console](https://console.cloud.google.com/), signed in with
 4. Under **Credentials** (or **Google Auth Platform → Clients**), **Create credentials → OAuth client
    ID**, type **Desktop app**. Copy the client ID and secret.
 
-## Connect in Nugget
-
-On **Sources**, choose **Add source → Gmail** (or **Google Calendar**, **Google Drive**), paste the
-client ID and secret, and choose **Connect**. Google warns the app is unverified: it is yours, so
-continue and approve. The browser redirects to a one-time listener on `127.0.0.1` and syncing starts.
-Secrets and tokens stay in the OS keychain. One client can serve all three sources.
-
-## The 7-day sign-in limit in Testing mode
-
-While your app's publishing status is **Testing**, Google expires refresh tokens after **7 days**.
-The source then shows **Needs sign-in** (`needs_auth`). Nothing is lost: choose **Reconnect** and
-syncing resumes where it stopped.
-
-To avoid this, set the publishing status to **In production**. Google still shows the "unverified
-app" warning but stops expiring tokens. Unverified apps with restricted scopes such as
-`gmail.readonly` are capped at a small number of users, so check Google's policy before sharing your
-client. A shared, Google-verified Nugget client is planned.
+In Nugget, open **Advanced: use your own OAuth client** when adding the source, paste the client ID
+and secret, and choose **Connect**. Google warns the app is unverified: it is yours, so continue. One
+client can serve all three sources. The same 7-day limit applies while your app is in **Testing**;
+setting it to **In production** stops the expiry (Google still shows the "unverified app" warning,
+and unverified apps with restricted scopes such as `gmail.readonly` are capped at a small number of
+users).
 
 ## What gets indexed
 

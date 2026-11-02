@@ -19,10 +19,10 @@ folder kinds.
 | `outlook` | Outlook mail | OAuth, `offline_access User.Read Mail.Read` | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
 | `outlook-calendar` | Outlook calendar | OAuth, `… Calendars.Read` | as for `outlook` |
 | `onedrive` | OneDrive | OAuth, `… Files.Read` | as for `outlook` |
-| `slack` | Slack | password (pasted token) | `password:<source id>` |
+| `slack` | Slack | OAuth (PKCE, user token), or password (pasted token) | `password:<source id>`, `oauth:<source id>` |
 | `notion` | Notion | password (pasted token) | `password:<source id>` |
-| `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
-| `linear` | Linear | password (pasted API key), or OAuth with `client_id` | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
+| `github` | GitHub | password (pasted token), or the device flow | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
+| `linear` | Linear | password (pasted API key), or OAuth (PKCE) | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
 | `imessage` | iMessage | none | none |
 | `whatsapp` | WhatsApp exports | none | none |
 | `telegram` | Telegram export | none | none |
@@ -61,7 +61,7 @@ up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none i
 <!-- check-refs: connector.gmail -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | Your OAuth client id (type "Desktop app") |
+| `client_id` | string | none | Your own OAuth client id (type "Desktop app"); wins when set. Absent: Nugget's built-in client, if this build has one (`sources.oauth.builtin`); otherwise required |
 | `client_secret` | string | none | **Refused** by the daemon in settings; set it with `sources.secret.set`. The daemon injects it when it builds the connector |
 | `account_hint` | string | none | Email address to pre-select on Google's consent screen |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
@@ -73,7 +73,7 @@ up in `token_env`, then `oauth:<source id>`, then `password:<source id>`; none i
 <!-- check-refs: connector.gcal -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | As for `gmail` |
+| `client_id` | string | none | As for `gmail` |
 | `client_secret` | string | none | As for `gmail`: set it with `sources.secret.set` |
 | `account_hint` | string | none | As for `gmail` |
 | `calendars` | array of calendar ids | every calendar selected in Google Calendar | Calendar ids to sync, for example `["primary"]` |
@@ -87,7 +87,7 @@ Setup: [Google sources](../guide/sources-google.md), [Google Drive](../guide/sou
 <!-- check-refs: connector.gdrive -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | As for `gmail` |
+| `client_id` | string | none | As for `gmail` |
 | `client_secret` | string | none | As for `gmail`: set it with `sources.secret.set` |
 | `account_hint` | string | none | As for `gmail` |
 | `include_shared_with_me` | bool | `false` | Also index files other people shared with you (outside shared drives) |
@@ -121,7 +121,7 @@ App registration: [Microsoft 365](../guide/sources-microsoft.md).
 <!-- check-refs: connector.outlook -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | Application (client) ID of your own Microsoft Entra app registration (public client, redirect URI `http://localhost`) |
+| `client_id` | string | none | Application (client) ID of your own Microsoft Entra app registration (public client, redirect URI `http://localhost`); wins when set. Absent: Nugget's built-in client, if this build has one; otherwise required |
 | `client_secret` | string | none | Optional: public clients need none. Set it with `sources.secret.set`, never in settings; the daemon injects it when it builds the connector |
 | `tenant` | string | `common` | `common` (work, school and personal accounts), `organizations`, `consumers`, a tenant id or a verified domain. Anything else is refused |
 | `account_hint` | string | none | Email address to pre-select on the sign-in screen |
@@ -133,7 +133,7 @@ App registration: [Microsoft 365](../guide/sources-microsoft.md).
 <!-- check-refs: connector.outlook_calendar -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | As for `outlook` |
+| `client_id` | string | none | As for `outlook` |
 | `client_secret` | string | none | As for `outlook` |
 | `tenant` | string | `common` | As for `outlook` |
 | `account_hint` | string | none | As for `outlook` |
@@ -145,7 +145,7 @@ App registration: [Microsoft 365](../guide/sources-microsoft.md).
 <!-- check-refs: connector.onedrive -->
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `client_id` | string | required | As for `outlook` |
+| `client_id` | string | none | As for `outlook` |
 | `client_secret` | string | none | As for `outlook` |
 | `tenant` | string | `common` | As for `outlook` |
 | `account_hint` | string | none | As for `outlook` |
@@ -158,6 +158,7 @@ App registration: [Microsoft 365](../guide/sources-microsoft.md).
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `token_env` | environment variable name | none | Read the token from this variable instead of the keychain |
+| `client_id` | string | none | Client ID of your own Slack app with PKCE enabled (redirect URL `http://localhost`); wins when set. Absent: Nugget's built-in app, if this build has one. Either enables `sources.auth.begin`; with neither, paste a token |
 | `conversations` | array of strings, at most 1000 | every conversation you are in | Channel ids (`C…`, `G…`, `D…`) or names (`general`, `#general`) |
 | `include_dms` | bool | `true` | With no `conversations`: include DMs and group DMs |
 | `include_channels` | bool | `true` | With no `conversations`: include public and private channels you are a member of |
@@ -165,7 +166,7 @@ App registration: [Microsoft 365](../guide/sources-microsoft.md).
 | `window_days` | integer, 1 to 3650 | `90` | How far back to index messages on first sync |
 | `recheck_days` | integer, 0 to 30 | `3` | Days re-read every 6 hours to pick up edits, deletions and thread replies |
 
-Token: a user token (`xoxp-…`) with the `*:history` and `*:read` scopes for channels, groups, IMs
+Token (pasted or from **Connect**): a user token (`xoxp-…`) with the `*:history` and `*:read` scopes for channels, groups, IMs
 and MPIMs, plus `users:read`.
 
 ## `notion`
@@ -184,7 +185,7 @@ Token: an internal integration secret with **Read content**.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `token_env` | environment variable name | none | As for `slack` |
-| `client_id` | string | none | Client ID of your own OAuth App (or GitHub App) with the device flow enabled. Enables `sources.auth.begin` |
+| `client_id` | string | none | Client ID of your own OAuth App (or GitHub App) with the device flow enabled; wins when set. Absent: Nugget's built-in app, if this build has one. Either enables `sources.auth.begin`; with neither, paste a token |
 | `client_secret` | string | none | Only for refreshing expiring GitHub App user tokens. Not settable in this build |
 | `repos` | array of `owner/name`, at most 100 | everything involving you | Repositories to index |
 | `all_activity` | bool | `false` | With `repos`: index everything in them, not only what involves you. Requires `repos` |
@@ -199,7 +200,7 @@ Token: fine-grained, read-only Issues, Pull requests, Discussions and Metadata (
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `token_env` | environment variable name | none | As for `slack` |
-| `client_id` | string | none | Client ID of your own Linear OAuth application (redirect URI `http://127.0.0.1`). Enables `sources.auth.begin` (PKCE, scope `read`) |
+| `client_id` | string | none | Client ID of your own Linear OAuth application (redirect URI `http://127.0.0.1`); wins when set. Absent: Nugget's built-in app, if this build has one. Either enables `sources.auth.begin` (PKCE, scope `read`); with neither, paste an API key |
 | `client_secret` | string | none | Optional with PKCE. The connector reads it from `oauth_client_secret:<source id>`, which this build has no way to set |
 | `include` | array of `assigned`, `created`, `subscribed` | all three | Which of your issues to index. Must not be empty |
 | `teams` | array of team keys, at most 200 | every team | For example `["ENG"]` |

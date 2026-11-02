@@ -57,7 +57,11 @@ macro_rules! graph_factory {
             }
 
             fn validate(&self, settings: &serde_json::Value) -> nugget_core::Result<()> {
-                <$settings>::parse(settings).map(|_| ())
+                let s = <$settings>::parse(settings)?;
+                crate::settings::require_client(
+                    s.client_id.as_deref(),
+                    self.endpoints.builtin_client.is_some(),
+                )
             }
 
             fn build(
@@ -127,6 +131,9 @@ pub struct MicrosoftEndpoints {
     pub download_hosts: Vec<String>,
     /// Allow plain-HTTP download URLs. Never in production; tests only.
     pub allow_http_downloads: bool,
+    /// Nugget's own OAuth client, used when the source names none. Production: the one baked in
+    /// at build time, if any ([`nugget_oauth::bundled`]); tests: none unless set.
+    pub builtin_client: Option<nugget_oauth::ClientCredentials>,
 }
 
 /// Microsoft-owned hosts that serve `@microsoft.graph.downloadUrl` content (OneDrive personal
@@ -148,6 +155,7 @@ impl Default for MicrosoftEndpoints {
             graph_api: "https://graph.microsoft.com/v1.0".into(),
             download_hosts: DOWNLOAD_HOSTS.iter().map(|h| (*h).to_string()).collect(),
             allow_http_downloads: false,
+            builtin_client: nugget_oauth::bundled::client("microsoft"),
         }
     }
 }
@@ -162,6 +170,7 @@ impl MicrosoftEndpoints {
             graph_api: format!("{b}/v1.0"),
             download_hosts: vec!["127.0.0.1".into()],
             allow_http_downloads: true,
+            builtin_client: None,
         }
     }
 }

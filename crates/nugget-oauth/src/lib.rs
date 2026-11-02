@@ -14,6 +14,7 @@
 //! so it lands in the egress ledger and never follows redirects. Client secrets and tokens are
 //! redacted from `Debug` output and never logged.
 
+pub mod bundled;
 mod client;
 pub mod google;
 mod loopback;
@@ -30,7 +31,7 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// An OAuth provider: endpoints, scopes and extra authorization parameters.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provider {
     /// Short name, used in messages (e.g. `google`).
     pub name: String,
@@ -40,9 +41,18 @@ pub struct Provider {
     /// Extra query parameters on the authorization URL (e.g. Google's `access_type=offline`).
     #[serde(default)]
     pub extra_auth_params: Vec<(String, String)>,
+    /// Token revocation endpoint (RFC 7009 style: a form POST with `token`), if the provider
+    /// lets a public client revoke its grant.
+    #[serde(default)]
+    pub revoke_url: Option<String>,
+    /// Host name in the loopback redirect URI (default `127.0.0.1`). The listener always binds
+    /// `127.0.0.1`; only `localhost` is accepted as an alternative, for providers that register
+    /// desktop redirects by that name.
+    #[serde(default)]
+    pub redirect_host: Option<String>,
 }
 
-/// The user's own OAuth client. For installed apps the secret (when the provider issues one, as
+/// An OAuth client: the user's own or Nugget's built-in one ([`bundled`]). For installed apps the secret (when the provider issues one, as
 /// Google does) is not confidential, but it is still never logged.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientCredentials {

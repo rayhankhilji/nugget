@@ -44,6 +44,9 @@ const EVENT_CAPACITY: usize = 1024;
 /// (its loopback listener closed).
 pub const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
+/// Longest wait for a provider to revoke a grant on disconnect or removal.
+const SIGN_OUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Adds values that must never be persisted (for example an OAuth client secret read from the
 /// keychain) to a source's settings right before its connector is built.
 pub type SettingsResolver =
@@ -495,6 +498,26 @@ impl Inner {
 
     /// Cancel the source's OAuth flow, if one is running, and wait until it has stopped (so it can
     /// no longer write credentials).
+    /// Revoke the source's OAuth grant at the provider (best effort, bounded) and delete its
+    /// tokens, through the connector. Failures are logged; callers delete `oauth:<id>` anyway.
+    async fn sign_out_connector(self: &Arc<Self>, id: &SourceId) {
+        let me = self.clone();
+        let sid = id.clone();
+        let conn = match tokio::task::spawn_blocking(move || me.connector(&sid)).await {
+            Ok(Ok(c)) => c,
+            Ok(Err(e)) => {
+                tracing::debug!(source = %id, error = %e, "no connector to sign out with");
+                return;
+            }
+            Err(_) => return,
+        };
+        match tokio::time::timeout(SIGN_OUT_TIMEOUT, conn.sign_out()).await {
+            Ok(Ok(())) => tracing::info!(source = %id, "signed out"),
+            Ok(Err(e)) => tracing::warn!(source = %id, error = %e, "sign-out failed"),
+            Err(_) => tracing::warn!(source = %id, "sign-out timed out"),
+        }
+    }
+
     async fn cancel_auth(&self, id: &SourceId) {
         let task = lock(&self.slots).get_mut(id).and_then(|s| s.auth.take());
         if let Some(t) = task {
@@ -1053,6 +1076,8 @@ impl Ingest {
         inner.stop_source(id).await;
         // Before any account is deleted: a flow finishing later would write `oauth:<id>` again.
         inner.cancel_auth(id).await;
+        // Revoke the grant at the provider while the connector can still be built.
+        inner.sign_out_connector(id).await;
         let Some(mut slot) = lock(&inner.slots).remove(id) else {
             return Err(Error::NotFound(format!("source `{id}`")));
         };
@@ -1298,6 +1323,34 @@ impl Ingest {
             user_code: flow.user_code,
             done: Box::pin(async move { rx.await.unwrap_or(Err(Error::Cancelled)) }),
         })
+    }
+
+    /// Disconnect a source's account (`sources.auth.revoke`): revoke the OAuth grant where the
+    /// provider allows it and delete the stored tokens. The source stays, and asks to be
+    /// connected again on its next pass. A pasted token or password is kept.
+    pub async fn sign_out(&self, id: &SourceId) -> Result<()> {
+        let inner = &self.inner;
+        let _g = inner.ops.lock().await;
+        if !lock(&inner.slots).contains_key(id) {
+            return Err(Error::NotFound(format!("source `{id}`")));
+        }
+        inner.cancel_auth(id).await;
+        inner.sign_out_connector(id).await;
+        let secrets = inner.secrets.clone();
+        let account = nugget_core::secrets::oauth_account(id.as_str());
+        tokio::task::spawn_blocking(move || secrets.delete(&account))
+            .await
+            .map_err(join_err)??;
+        // Rebuild so no connector keeps tokens in memory; the next pass reports NeedsAuth.
+        inner.set_reconfiguring(id, true);
+        inner.stop_source(id).await;
+        if let Some(s) = lock(&inner.slots).get_mut(id) {
+            s.connector = None;
+            s.reconfiguring = false;
+        }
+        inner.start_sources(vec![id.clone()]).await;
+        inner.emit_source(id).await;
+        Ok(())
     }
 
     /// Store a credential for a source in the keychain and re-sync it.

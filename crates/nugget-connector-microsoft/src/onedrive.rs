@@ -261,6 +261,10 @@ impl Connector for OneDriveConnector {
         self.api.begin_auth().await
     }
 
+    async fn sign_out(&self) -> Result<()> {
+        self.api.sign_out().await
+    }
+
     async fn sync(
         &self,
         cursor: Option<Value>,

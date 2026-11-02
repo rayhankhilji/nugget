@@ -53,6 +53,11 @@ the key ceremony. Commands assume `R=rayhankhilji/nugget`, run from a repository
   signing key. GitHub doesn't refuse unsigned tags; the approver checks with `git tag -v`.
 - [ ] Never put a signing secret at repository level; environment secrets are readable only by
   jobs deploying to that environment.
+- [ ] **Nugget's own OAuth apps** (optional; one-click **Connect**): register them as in
+  [oauth-apps.md](oauth-apps.md), then set repository variables `NUGGET_OAUTH_GOOGLE_CLIENT_ID`,
+  `NUGGET_OAUTH_MICROSOFT_CLIENT_ID`, `NUGGET_OAUTH_GITHUB_CLIENT_ID`,
+  `NUGGET_OAUTH_LINEAR_CLIENT_ID`, `NUGGET_OAUTH_SLACK_CLIENT_ID` and the repository secret
+  `NUGGET_OAUTH_GOOGLE_CLIENT_SECRET`. Any left unset: that provider stays bring-your-own-client.
 
 ## Step 2. Apple: Developer ID certificate and notarization key
 
@@ -259,15 +264,17 @@ the beta channel receives.
 
 # Secrets and variables
 
-`release.yml` reads only the secrets and variables set in Steps 2 to 5, plus `GITHUB_TOKEN`
-(scoped per job); dry runs, the rehearsal and the signing proof read none. Missing Apple values:
+`release.yml` reads only the secrets and variables set in Steps 1 to 5, plus `GITHUB_TOKEN`
+(scoped per job); dry runs, the rehearsal and the signing proof read no signing secret. Missing Apple values:
 ad-hoc signed or not notarized, with a warning. Missing Azure variables: the `.pfx`, else unsigned
 with a warning. Missing `TAURI_SIGNING_PRIVATE_KEY`: no `.sig` files or `latest.json`, so feeds
 don't move (a missing password fails `sign`). Missing `NUGGET_UPDATER_PUBKEY`: the app has no
 updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line of
 `manifests/default.json.sig`: a real release fails before building. Set by the workflow:
 `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_TRUSTED_SIGNING_DLIB`.
-`NUGGET_UPDATER_FEED` overrides the feed URL at build time (rehearsal only).
+`NUGGET_UPDATER_FEED` overrides the feed URL at build time (rehearsal only). The repository-level
+`NUGGET_OAUTH_*` values from Step 1 are read by every build, dry runs included; unset ones leave
+that provider without a built-in client.
 
 ---
 

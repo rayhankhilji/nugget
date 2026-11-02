@@ -33,7 +33,7 @@ use nugget_connector::{
 };
 use nugget_core::ids::ItemKey;
 use nugget_core::{Error, Result};
-use nugget_oauth::{AuthorizeOptions, TokenSource};
+use nugget_oauth::TokenSource;
 use reqwest::Method;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -195,24 +195,18 @@ factory!(
 impl LinearFactory {
     fn make(&self, settings: LinearSettings, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
         let http = api::metered(ctx.egress.clone(), FEATURE)?;
-        let tokens = match &settings.client_id {
-            Some(id) => Some(auth::token_source(
-                auth::linear::provider_with_endpoints(
-                    &self.endpoints.linear_auth_url,
-                    &self.endpoints.linear_token_url,
-                ),
-                id,
-                auth::client_secret(
-                    &ctx.secrets,
-                    ctx.source.as_str(),
-                    settings.client_secret.as_deref(),
-                ),
-                http.clone(),
-                ctx.secrets.clone(),
-                ctx.source.as_str(),
-            )?),
-            None => None,
-        };
+        let tokens = auth::token_source(
+            auth::linear::provider_with_endpoints(
+                &self.endpoints.linear_auth_url,
+                &self.endpoints.linear_token_url,
+            ),
+            settings.client_id.as_deref(),
+            self.endpoints.builtin_linear.clone(),
+            settings.client_secret.as_deref(),
+            http.clone(),
+            ctx.secrets.clone(),
+            ctx.source.as_str(),
+        )?;
         let cred = Arc::new(Credential::new(
             SERVICE,
             ctx.secrets.clone(),
@@ -333,24 +327,24 @@ impl Connector for LinearConnector {
     }
 
     async fn begin_auth(&self) -> Result<AuthFlow> {
-        let Some(tokens) = &self.tokens else {
-            return Err(Error::Unsupported(
-                "set client_id (your Linear OAuth application) or paste a personal API key".into(),
-            ));
-        };
-        let flow = tokens
-            .client()
-            .begin(
-                self.ctx.secrets.clone(),
-                nugget_core::secrets::oauth_account(self.ctx.source.as_str()),
-                AuthorizeOptions::default(),
-            )
-            .await?;
-        Ok(auth::clearing(
-            flow,
-            self.api.cred.clone(),
-            Some(tokens.clone()),
-        ))
+        auth::begin_browser(
+            self.tokens.as_ref(),
+            &self.api.cred,
+            &self.ctx.secrets,
+            self.ctx.source.as_str(),
+            "this build has no built-in Linear sign-in: paste a personal API key, or under Advanced set client_id (your own Linear OAuth application)",
+        )
+        .await
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        auth::sign_out(
+            &self.api.cred,
+            self.tokens.as_ref(),
+            &self.ctx.secrets,
+            self.ctx.source.as_str(),
+        )
+        .await
     }
 
     async fn sync(

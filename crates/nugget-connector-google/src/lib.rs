@@ -50,6 +50,9 @@ pub struct GoogleEndpoints {
     pub sheets_api: String,
     /// Slides API root, e.g. `https://slides.googleapis.com/v1` (Slides exported per slide).
     pub slides_api: String,
+    /// Nugget's own OAuth client, used when the source names none. Production: the one baked in
+    /// at build time, if any ([`nugget_oauth::bundled`]); tests: none unless set.
+    pub builtin_client: Option<nugget_oauth::ClientCredentials>,
 }
 
 impl Default for GoogleEndpoints {
@@ -62,6 +65,7 @@ impl Default for GoogleEndpoints {
             drive_api: "https://www.googleapis.com/drive/v3".into(),
             sheets_api: "https://sheets.googleapis.com/v4".into(),
             slides_api: "https://slides.googleapis.com/v1".into(),
+            builtin_client: nugget_oauth::bundled::client("google"),
         }
     }
 }
@@ -80,6 +84,7 @@ impl GoogleEndpoints {
             drive_api: format!("{b}/drive/v3"),
             sheets_api: format!("{b}/sheets/v4"),
             slides_api: format!("{b}/slides/v1"),
+            builtin_client: None,
         }
     }
 }

@@ -133,6 +133,8 @@ fn main() {
             commands::sources_remove,
             commands::sources_sync,
             commands::sources_auth_begin,
+            commands::sources_auth_revoke,
+            commands::sources_oauth_builtin,
             commands::sources_secret_set,
             commands::ingest_status,
             commands::retrieve_context,

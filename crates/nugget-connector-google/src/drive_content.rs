@@ -1135,7 +1135,7 @@ mod unit {
             "sync:gdrive",
             "https://www.googleapis.com/auth/drive.readonly",
             OAuthSettings {
-                client_id: "cid".into(),
+                client_id: Some("cid".into()),
                 client_secret: None,
                 login_hint: None,
             },

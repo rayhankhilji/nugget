@@ -84,5 +84,7 @@ pub fn provider_with_login(login: &str, tenant: &str, scopes: &[&str]) -> Result
             ("response_mode".into(), "query".into()),
             ("prompt".into(), "select_account".into()),
         ],
+        // No revocation endpoint for public clients.
+        ..Provider::default()
     })
 }

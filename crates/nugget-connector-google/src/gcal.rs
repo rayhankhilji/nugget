@@ -128,7 +128,11 @@ impl ConnectorFactory for CalendarFactory {
     }
 
     fn validate(&self, settings: &Value) -> Result<()> {
-        CalendarSettings::parse(settings).map(|_| ())
+        let s = CalendarSettings::parse(settings)?;
+        crate::settings::require_client(
+            s.client_id.as_deref(),
+            self.endpoints.builtin_client.is_some(),
+        )
     }
 
     fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
@@ -309,6 +313,10 @@ impl Connector for CalendarConnector {
 
     async fn begin_auth(&self) -> Result<AuthFlow> {
         self.api.begin_auth().await
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        self.api.sign_out().await
     }
 
     async fn sync(

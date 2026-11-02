@@ -113,6 +113,7 @@ no_arg_commands! {
     policy_resume -> KillState = agent_method::POLICY_RESUME, ();
     policy_log_export -> PolicyLogExport = agent_method::POLICY_LOG_EXPORT, ();
     browser_status -> BrowserStatus = agent_method::BROWSER_STATUS, ();
+    sources_oauth_builtin -> Value = method::SOURCES_OAUTH_BUILTIN, json!({});
 }
 
 // API keys travel in these requests: they are passed through, never logged. Backup requests may
@@ -121,6 +122,7 @@ request_commands! {
     sources_add(SourceSpec) -> SourceInfo = method::SOURCES_ADD, check_source_spec;
     sources_update(SourceUpdate) -> SourceInfo = method::SOURCES_UPDATE;
     sources_auth_begin(SourceRef) -> AuthBegin = method::SOURCES_AUTH_BEGIN;
+    sources_auth_revoke(SourceRef) -> Value = method::SOURCES_AUTH_REVOKE;
     ai_key_test(Value) -> Value = "ai.key.test";
     ai_key_save(Value) -> Value = "ai.key.save";
     ai_key_update(Value) -> Value = "ai.key.update";

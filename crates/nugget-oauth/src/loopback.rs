@@ -47,8 +47,9 @@ impl Loopback {
         Ok(Self { listener, port })
     }
 
-    pub(crate) fn redirect_uri(&self) -> String {
-        format!("http://127.0.0.1:{}{CALLBACK_PATH}", self.port)
+    /// `host` is `127.0.0.1` or `localhost` (checked by the client).
+    pub(crate) fn redirect_uri(&self, host: &str) -> String {
+        format!("http://{host}:{}{CALLBACK_PATH}", self.port)
     }
 
     /// Wait for the redirect and return the authorization code.

@@ -76,7 +76,7 @@ embedding tier needs an opt-in (see [Privacy](privacy.md)).
 
 | State or error | What to do |
 |---|---|
-| `needs_auth` on Gmail, Google Calendar or Google Drive | Reconnect. If it happens weekly, see [the 7-day limit](sources-google.md#the-7-day-sign-in-limit-in-testing-mode). |
+| `needs_auth` on Gmail, Google Calendar or Google Drive | Reconnect. If it happens weekly, see [the 7-day limit](sources-google.md#connect). |
 | `needs_auth` on IMAP or CalDAV | Set a new app password. |
 | TLS or certificate error on IMAP | Your OS doesn't trust the server's certificate. For Proton Mail Bridge, see [the certificate steps](sources-imap-caldav.md#proton-mail-bridge-the-certificate). |
 | `refusing plain http` on CalDAV | Use `https://` (plain http only for `localhost`). |

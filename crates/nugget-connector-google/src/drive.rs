@@ -147,7 +147,11 @@ impl ConnectorFactory for DriveFactory {
     }
 
     fn validate(&self, settings: &Value) -> Result<()> {
-        DriveSettings::parse(settings).map(|_| ())
+        let s = DriveSettings::parse(settings)?;
+        crate::settings::require_client(
+            s.client_id.as_deref(),
+            self.endpoints.builtin_client.is_some(),
+        )
     }
 
     fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
@@ -371,6 +375,10 @@ impl Connector for DriveConnector {
 
     async fn begin_auth(&self) -> Result<AuthFlow> {
         self.api.begin_auth().await
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        self.api.sign_out().await
     }
 
     async fn sync(

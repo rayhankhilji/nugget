@@ -9,10 +9,12 @@ use crate::{OneDriveFactory, OutlookCalendarFactory, OutlookFactory};
 
 #[test]
 fn validates_settings() {
+    // No built-in client (as in a source build): `client_id` is then required.
+    let ep = || MicrosoftEndpoints::with_base("http://127.0.0.1:9");
     let (o, c, d) = (
-        OutlookFactory::new(),
-        OutlookCalendarFactory::new(),
-        OneDriveFactory::new(),
+        OutlookFactory::new().with_endpoints(ep()),
+        OutlookCalendarFactory::new().with_endpoints(ep()),
+        OneDriveFactory::new().with_endpoints(ep()),
     );
     let fs: [&dyn ConnectorFactory; 3] = [&o, &c, &d];
     let ok = [
@@ -63,6 +65,38 @@ fn validates_settings() {
                 .is_ok()
         );
     }
+}
+
+#[tokio::test]
+async fn builtin_client_connects_without_settings_and_sign_out_forgets_tokens() {
+    let h = Harness::new().await;
+    let mut ep = h.endpoints();
+    ep.builtin_client = Some(nugget_oauth::ClientCredentials::new("nugget-app", None));
+    let f = OutlookFactory::new().with_endpoints(ep);
+    assert!(f.validate(&json!({})).is_ok());
+    let conn = h.build(&f, json!({}));
+    let flow = conn.begin_auth().await.unwrap();
+    assert!(flow.url.contains("client_id=nugget-app"), "{}", flow.url);
+    drop(flow);
+    let conn = h.build(&f, json!({"client_id": "mine"}));
+    assert!(
+        conn.begin_auth()
+            .await
+            .unwrap()
+            .url
+            .contains("client_id=mine")
+    );
+    h.seed_tokens("at", false);
+    conn.sign_out().await.unwrap();
+    assert!(
+        h.ctx()
+            .secrets
+            .get(&nugget_core::secrets::oauth_account(
+                h.ctx().source.as_str()
+            ))
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]

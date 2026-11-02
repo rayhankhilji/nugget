@@ -977,3 +977,118 @@ async fn regression_revoked_unsaved_tokens_are_dropped() {
     assert_eq!(ts.access_token().await.unwrap(), "at-grant");
     assert_eq!(stored(&secrets.inner).access_token, "at-grant");
 }
+
+#[test]
+fn users_own_client_wins_over_the_builtin_one_and_secrets_never_mix() {
+    let builtin = Some(ClientCredentials::new("nugget-id", Some("nugget-s".into())));
+    let r = bundled::resolve(Some(" mine "), None, builtin.clone()).unwrap();
+    assert_eq!((r.client_id.as_str(), r.client_secret), ("mine", None));
+    let r = bundled::resolve(Some(""), Some("stray".into()), builtin.clone()).unwrap();
+    assert_eq!(r, builtin.clone().unwrap());
+    assert_eq!(bundled::resolve(None, None, None), None);
+    // Unknown providers never have a built-in client.
+    assert!(bundled::client("nosuch").is_none());
+}
+
+#[test]
+fn redirect_host_is_loopback_only_and_empty_scopes_are_omitted() {
+    let http = MeteredHttp::new(Arc::new(VecEgress::default()), "sync:x").unwrap();
+    let creds = ClientCredentials::new("id", None);
+    let mut p = google::provider(&[]);
+    p.redirect_host = Some("evil.example".into());
+    assert!(OAuthClient::new(p.clone(), creds.clone(), http.clone()).is_err());
+    p.redirect_host = Some("localhost".into());
+    let c = OAuthClient::new(p, creds, http).unwrap();
+    let url = c
+        .authorization_url(
+            "http://localhost:1/",
+            "st",
+            &Pkce::generate().unwrap(),
+            None,
+        )
+        .unwrap();
+    assert!(!query(&url).contains_key("scope"));
+}
+
+#[tokio::test]
+async fn slack_user_tokens_and_ok_false_errors_are_understood() {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .and(body_string_contains("code=good"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "ok": true, "app_id": "A1",
+            "authed_user": {"id": "U1", "scope": "search:read", "access_token": "xoxe.xoxp-1",
+                            "token_type": "user", "refresh_token": "xoxe-1", "expires_in": 43200}
+        })))
+        .mount(&e.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .and(body_string_contains("code=bad"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"ok": false, "error": "invalid_code"})),
+        )
+        .mount(&e.server)
+        .await;
+    let t = e
+        .client
+        .exchange_code("good", "v", "http://x/")
+        .await
+        .unwrap();
+    assert_eq!(t.access_token, "xoxe.xoxp-1");
+    assert_eq!(t.refresh_token.as_deref(), Some("xoxe-1"));
+    assert!(t.expires_at.is_some());
+    let err = e
+        .client
+        .exchange_code("bad", "v", "http://x/")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Unauthorized(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn disconnect_revokes_at_the_provider_and_deletes_the_tokens() {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .and(body_string_contains("token=at-live"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    seed(&*e.secrets, "at-live", Some("rt"), Some(now() + 3600));
+    let ts = source(&e);
+    assert!(ts.disconnect().await.unwrap());
+    assert!(e.secrets.get(ACCOUNT).unwrap().is_none());
+    assert!(matches!(
+        ts.access_token().await,
+        Err(Error::Unauthorized(_))
+    ));
+}
+
+#[tokio::test]
+async fn disconnect_deletes_the_tokens_even_when_revoking_fails() {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .and(body_string_contains("token=rt-old"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    // Expired access token: the refresh token is what gets revoked.
+    seed(&*e.secrets, "at-old", Some("rt-old"), Some(now() - 10));
+    assert!(!source(&e).disconnect().await.unwrap());
+    assert!(e.secrets.get(ACCOUNT).unwrap().is_none());
+    assert!(
+        e.egress
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|r| !format!("{r:?}").contains("rt-old")),
+        "tokens never reach the egress ledger"
+    );
+}

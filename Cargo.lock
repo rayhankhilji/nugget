@@ -4633,6 +4633,7 @@ dependencies = [
  "nugget-knowledge",
  "nugget-mcp",
  "nugget-models",
+ "nugget-oauth",
  "nugget-plugin",
  "nugget-policy",
  "nugget-proactive",

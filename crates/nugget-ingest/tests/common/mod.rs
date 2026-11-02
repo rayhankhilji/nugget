@@ -80,6 +80,7 @@ pub struct FakeState {
     pub poll_interval: Mutex<Duration>,
     pub known: Mutex<Option<HashMap<ItemKey, Option<String>>>>,
     pub auth_done: Mutex<Option<oneshot::Receiver<()>>>,
+    pub sign_outs: AtomicUsize,
 }
 
 impl Default for FakeState {
@@ -88,6 +89,7 @@ impl Default for FakeState {
         Self {
             passes: Mutex::new(VecDeque::new()),
             sync_calls: AtomicUsize::new(0),
+            sign_outs: AtomicUsize::new(0),
             sync_times: Mutex::new(Vec::new()),
             cursors_seen: Mutex::new(Vec::new()),
             sent: AtomicUsize::new(0),
@@ -192,6 +194,11 @@ impl Connector for FakeConnector {
                 },
             }
         }
+    }
+
+    async fn sign_out(&self) -> Result<()> {
+        self.state.sign_outs.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 
     async fn begin_auth(&self) -> Result<AuthFlow> {

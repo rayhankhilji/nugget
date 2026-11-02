@@ -3,8 +3,9 @@
 //! A connector looks for its token, in order:
 //! 1. `token_env` from settings: the named environment variable (headless setups). If the
 //!    setting is present but the variable is unset, the pass is `Unauthorized`.
-//! 2. `oauth:<source>`: a token set stored by `begin_auth` (GitHub device flow, Linear PKCE).
-//!    It is refreshed through [`TokenSource`] when it expires and an OAuth client is configured.
+//! 2. `oauth:<source>`: a token set stored by `begin_auth` (GitHub device flow, Linear and Slack
+//!    PKCE). It is refreshed through [`TokenSource`] when it expires and an OAuth client (the
+//!    user's own, else Nugget's built-in one) is available.
 //! 3. `password:<source>`: a token pasted through `sources.secret.set` (Slack user token, Notion
 //!    integration token, GitHub fine-grained PAT, Linear personal API key).
 //!
@@ -29,6 +30,7 @@ pub mod linear {
     pub const AUTH_URL: &str = "https://linear.app/oauth/authorize";
     pub const TOKEN_URL: &str = "https://api.linear.app/oauth/token";
 
+    /// Revocation is the token endpoint's `/revoke` sibling.
     pub fn provider_with_endpoints(auth_url: &str, token_url: &str) -> Provider {
         Provider {
             name: "linear".into(),
@@ -36,6 +38,45 @@ pub mod linear {
             token_url: token_url.into(),
             scopes: vec!["read".into()], // read-only
             extra_auth_params: vec![("prompt".into(), "consent".into())],
+            revoke_url: Some(format!("{}/revoke", token_url.trim_end_matches("/token"))),
+            redirect_host: None,
+        }
+    }
+}
+
+/// Slack OAuth v2 as a public client (PKCE, no client secret): a *user* token with read-only
+/// user scopes. Slack treats `http://localhost` redirects of PKCE apps as desktop redirects.
+pub mod slack {
+    use nugget_oauth::Provider;
+
+    pub const AUTH_URL: &str = "https://slack.com/oauth/v2/authorize";
+
+    /// Read-only: messages and conversation lists of the synced conversation types, and names.
+    pub const USER_SCOPES: &[&str] = &[
+        "channels:history",
+        "groups:history",
+        "im:history",
+        "mpim:history",
+        "channels:read",
+        "groups:read",
+        "im:read",
+        "mpim:read",
+        "users:read",
+    ];
+
+    /// `api_root` is the Web API root (`https://slack.com/api`): token exchange and refresh at
+    /// `oauth.v2.access`, revocation at `auth.revoke`.
+    pub fn provider(auth_url: &str, api_root: &str) -> Provider {
+        let api = api_root.trim_end_matches('/');
+        Provider {
+            name: "slack".into(),
+            auth_url: auth_url.into(),
+            token_url: format!("{api}/oauth.v2.access"),
+            // User scopes go in `user_scope`; `scope` (bot scopes) stays empty.
+            scopes: Vec::new(),
+            extra_auth_params: vec![("user_scope".into(), USER_SCOPES.join(","))],
+            revoke_url: Some(format!("{api}/auth.revoke")),
+            redirect_host: Some("localhost".into()),
         }
     }
 }
@@ -56,7 +97,8 @@ pub mod github {
             auth_url: format!("{b}/oauth/authorize"),
             token_url: format!("{b}/oauth/access_token"),
             scopes: SCOPES.iter().map(|s| (*s).to_string()).collect(),
-            extra_auth_params: Vec::new(),
+            // Revoking a GitHub grant needs the client secret: tokens are only deleted locally.
+            ..Provider::default()
         }
     }
 }
@@ -252,25 +294,73 @@ pub(crate) fn client_secret(
         .filter(|s| !s.is_empty())
 }
 
-/// A [`TokenSource`] for `provider` and the user's client id, stored under `oauth:<source>`.
+/// A [`TokenSource`] for `provider`, stored under `oauth:<source>`: with the user's own client
+/// (`user_id`, plus the secret from settings or the keychain) when set, else `builtin`. `None`
+/// when neither exists (the source then works with a pasted token only).
 pub(crate) fn token_source(
     provider: Provider,
-    client_id: &str,
-    secret: Option<String>,
+    user_id: Option<&str>,
+    builtin: Option<ClientCredentials>,
+    settings_secret: Option<&str>,
     http: MeteredHttp,
     secrets: Arc<dyn SecretStore>,
     source: &str,
-) -> Result<Arc<TokenSource>> {
-    let client = OAuthClient::new(
-        provider,
-        ClientCredentials::new(client_id.trim(), secret),
-        http,
-    )?;
-    Ok(Arc::new(TokenSource::new(
+) -> Result<Option<Arc<TokenSource>>> {
+    let user_secret = user_id.and_then(|_| client_secret(&secrets, source, settings_secret));
+    let Some(creds) = nugget_oauth::bundled::resolve(user_id, user_secret, builtin) else {
+        return Ok(None);
+    };
+    let client = OAuthClient::new(provider, creds, http)?;
+    Ok(Some(Arc::new(TokenSource::new(
         client,
         secrets,
         oauth_account(source),
-    )))
+    ))))
+}
+
+/// The browser (PKCE loopback) flow with `tokens`' client; `Unsupported(no_client)` without one.
+pub(crate) async fn begin_browser(
+    tokens: Option<&Arc<TokenSource>>,
+    cred: &Arc<Credential>,
+    secrets: &Arc<dyn SecretStore>,
+    source: &str,
+    no_client: &str,
+) -> Result<AuthFlow> {
+    let Some(tokens) = tokens else {
+        return Err(Error::Unsupported(no_client.into()));
+    };
+    let flow = tokens
+        .client()
+        .begin(
+            secrets.clone(),
+            oauth_account(source),
+            nugget_oauth::AuthorizeOptions::default(),
+        )
+        .await?;
+    Ok(clearing(flow, cred.clone(), Some(tokens.clone())))
+}
+
+/// Disconnect: revoke and delete the OAuth tokens (or just delete them when there is no client
+/// to revoke with) and forget the cached credential. A pasted token is kept.
+pub(crate) async fn sign_out(
+    cred: &Credential,
+    tokens: Option<&Arc<TokenSource>>,
+    secrets: &Arc<dyn SecretStore>,
+    source: &str,
+) -> Result<()> {
+    match tokens {
+        Some(t) => {
+            t.disconnect().await?;
+        }
+        None => {
+            let (secrets, account) = (secrets.clone(), oauth_account(source));
+            tokio::task::spawn_blocking(move || secrets.delete(&account))
+                .await
+                .map_err(|e| Error::Other(format!("keychain task failed: {e}")))??;
+        }
+    }
+    cred.reset();
+    Ok(())
 }
 
 /// Wrap a flow so the credential cache is reset once it stored new tokens.

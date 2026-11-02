@@ -325,3 +325,43 @@ async fn secrets_are_stored_never_echoed_and_cleaned_up() {
     assert!(left.is_empty(), "{left:?}");
     h.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn builtin_clients_are_listed_and_disconnect_forgets_tokens() {
+    let h = Harness::start(NO_RUNTIME).await;
+    let builtin: Value = h.call(method::SOURCES_OAUTH_BUILTIN, json!({})).await;
+    assert_eq!(
+        builtin,
+        json!({"providers": nugget_oauth::bundled::available()})
+    );
+
+    let gmail: SourceInfo = h
+        .call(
+            method::SOURCES_ADD,
+            json!({"kind": "gmail", "name": "Gmail", "settings": {"client_id": "123-abc.apps.googleusercontent.com"}}),
+        )
+        .await;
+    // An expired token without a refresh token: nothing to revoke, so no request leaves.
+    h.secrets
+        .set("oauth:gmail-1", r#"{"access_token":"at","expires_at":1}"#)
+        .unwrap();
+    h.secrets.set("oauth_client_secret:gmail-1", "cs").unwrap();
+    let r: Value = h
+        .call(method::SOURCES_AUTH_REVOKE, json!({"id": gmail.id}))
+        .await;
+    assert_eq!(r, Value::Null);
+    assert_eq!(h.secrets.get("oauth:gmail-1").unwrap(), None);
+    // The user's own client stays configured for the next Connect.
+    assert!(
+        h.secrets
+            .get("oauth_client_secret:gmail-1")
+            .unwrap()
+            .is_some()
+    );
+    let audit = serde_json::to_string(&h.audit()).unwrap();
+    assert!(audit.contains("source.auth.revoke"));
+    let (c, _) = h
+        .call_err(method::SOURCES_AUTH_REVOKE, json!({"id": "nosuch-1"}))
+        .await;
+    assert_ne!(c, 0);
+}

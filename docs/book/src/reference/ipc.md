@@ -78,6 +78,8 @@ in the question; `partial` lists citations that are near misses. Both are absent
 | `sources.remove` | `SourceRemove`: `id`, `purge` (default `true`: also delete everything indexed from it) | `null` | yes |
 | `sources.sync` | `SourceSync`: `{id}`, or `{}` for every enabled source | `null`; progress arrives as `ingest.progress` | yes |
 | `sources.auth.begin` | `SourceRef`: `{id}` | `AuthBegin`: `{url}`. The client opens the URL; completion arrives as `sources.changed` | yes |
+| `sources.auth.revoke` | `SourceRef`: `{id}` | `null`. Disconnects: revokes the OAuth grant where the provider lets a public client (Google, Slack, Linear), deletes the stored tokens, and the source asks to be connected again. Pasted tokens are kept | yes |
+| `sources.oauth.builtin` | `{}` | `{providers}`: the OAuth providers this build has Nugget's own client for (`google`, `microsoft`, `github`, `linear`, `slack`); for these, `client_id` is optional | yes |
 | `sources.secret.set` | `SourceSecret`: `{id, secret}` | `null` | yes |
 | `ingest.status` | `{}` | `IngestStatus`: `queue_depth`, `freshness_p50_ms`, `freshness_p95_ms`, `embedding_provider`, `triage_provider`, `sources` | yes |
 

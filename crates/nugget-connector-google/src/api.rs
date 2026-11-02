@@ -7,7 +7,7 @@ use nugget_connector::retry;
 use nugget_connector::{AuthFlow, CancellationToken, ConnectorContext};
 use nugget_core::secrets::oauth_account;
 use nugget_core::{Error, Result};
-use nugget_oauth::{AuthorizeOptions, ClientCredentials, OAuthClient, TokenSource};
+use nugget_oauth::{AuthorizeOptions, OAuthClient, TokenSource};
 use reqwest::Method;
 use reqwest::header::ACCEPT;
 use serde::Deserialize;
@@ -20,9 +20,9 @@ const RATE_REASONS: &[&str] = &["rateLimitExceeded", "userRateLimitExceeded"];
 /// Google 403 reasons for an exhausted daily quota: back off for a long time, no inline retry.
 const QUOTA_REASONS: &[&str] = &["dailyLimitExceeded", "quotaExceeded"];
 
-/// The user's OAuth client, from source settings.
+/// The user's OAuth client, from source settings (absent: the built-in one).
 pub(crate) struct OAuthSettings {
-    pub client_id: String,
+    pub client_id: Option<String>,
     pub client_secret: Option<String>,
     pub login_hint: Option<String>,
 }
@@ -118,7 +118,12 @@ impl GoogleApi {
             &endpoints.token_url,
             &[scope],
         );
-        let creds = ClientCredentials::new(client_id.trim(), client_secret);
+        let creds = nugget_oauth::bundled::resolve(
+            client_id.as_deref(),
+            client_secret,
+            endpoints.builtin_client.clone(),
+        )
+        .ok_or_else(|| Error::Invalid(crate::settings::NO_CLIENT.into()))?;
         let client = OAuthClient::new(provider, creds, http.clone())?;
         let tokens = TokenSource::new(
             client,
@@ -160,6 +165,11 @@ impl GoogleApi {
                 Ok(())
             }),
         })
+    }
+
+    /// Revoke the grant at Google (best effort) and delete the stored tokens.
+    pub(crate) async fn sign_out(&self) -> Result<()> {
+        self.tokens.disconnect().await.map(|_| ())
     }
 
     /// Fail fast with `Unauthorized` when no tokens are stored.

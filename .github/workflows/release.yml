@@ -200,6 +200,16 @@ jobs:
           # dev-signed bundled manifest keeps working. Real releases trust the release key only.
           NUGGET_MANIFEST_RELEASE_PUBKEY: ${{ vars.NUGGET_MANIFEST_RELEASE_PUBKEY }}
           NUGGET_TRUST_DEV_MANIFEST_KEY: ${{ env.RELEASE != 'true' && '1' || '' }}
+          # Nugget's own public OAuth clients ("Connect" with no setup; docs/oauth-apps.md).
+          # Client ids are public repository variables; Google's desktop-client "secret" is not
+          # confidential for installed apps but is kept a repository secret anyway. Unset values
+          # leave that provider on bring-your-own-client.
+          NUGGET_OAUTH_GOOGLE_CLIENT_ID: ${{ vars.NUGGET_OAUTH_GOOGLE_CLIENT_ID }}
+          NUGGET_OAUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.NUGGET_OAUTH_GOOGLE_CLIENT_SECRET }}
+          NUGGET_OAUTH_MICROSOFT_CLIENT_ID: ${{ vars.NUGGET_OAUTH_MICROSOFT_CLIENT_ID }}
+          NUGGET_OAUTH_GITHUB_CLIENT_ID: ${{ vars.NUGGET_OAUTH_GITHUB_CLIENT_ID }}
+          NUGGET_OAUTH_LINEAR_CLIENT_ID: ${{ vars.NUGGET_OAUTH_LINEAR_CLIENT_ID }}
+          NUGGET_OAUTH_SLACK_CLIENT_ID: ${{ vars.NUGGET_OAUTH_SLACK_CLIENT_ID }}
         run: packaging/scripts/stage-sidecar.sh ${{ matrix.target }}
 
       # Each signing step writes a Tauri config fragment; the build merges whichever exist.

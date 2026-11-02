@@ -13,21 +13,27 @@ A **source** is one configured connector: a folder, a vault, a mailbox, an accou
 |---|---|---|---|
 | [`files`](sources-files.md) | Folders on this machine | None | Live watcher |
 | [`obsidian`](sources-obsidian.md) | An Obsidian vault | None | Live watcher |
-| [`gmail`](sources-google.md) | Gmail, read-only | Your own Google OAuth client | Every 60 s |
-| [`gcal`](sources-google.md) | Google Calendar, read-only | Your own Google OAuth client | Every 5 min |
-| [`gdrive`](sources-google.md#google-drive) | Google Drive documents, read-only | Your own Google OAuth client | Every 5 min |
+| [`gmail`](sources-google.md) | Gmail, read-only | Connect (Google) | Every 60 s |
+| [`gcal`](sources-google.md) | Google Calendar, read-only | Connect (Google) | Every 5 min |
+| [`gdrive`](sources-google.md#google-drive) | Google Drive documents, read-only | Connect (Google) | Every 5 min |
 | [`imap`](sources-imap-caldav.md) | Any IMAP mailbox over TLS | Password or app password | IMAP IDLE, plus polling |
 | [`caldav`](sources-imap-caldav.md) | Any CalDAV calendar over https | Password or app password | Every 5 min |
-| [`outlook`](sources-microsoft.md) | Outlook / Exchange Online mail | Your own Microsoft Entra app | Every 60 s |
-| [`outlook-calendar`](sources-microsoft.md) | Your default Outlook calendar | Your own Microsoft Entra app | Every 5 min |
-| [`onedrive`](sources-microsoft.md) | OneDrive documents | Your own Microsoft Entra app | Every 5 min |
-| [`slack`](sources-saas.md#slack) | Your DMs and channels | Pasted user token | Every 5 min |
+| [`outlook`](sources-microsoft.md) | Outlook / Exchange Online mail | Connect (Microsoft) | Every 60 s |
+| [`outlook-calendar`](sources-microsoft.md) | Your default Outlook calendar | Connect (Microsoft) | Every 5 min |
+| [`onedrive`](sources-microsoft.md) | OneDrive documents | Connect (Microsoft) | Every 5 min |
+| [`slack`](sources-saas.md#slack) | Your DMs and channels | Connect, or pasted user token | Every 5 min |
 | [`notion`](sources-saas.md#notion) | Pages shared with your integration | Pasted integration secret | Every 5 min |
-| [`github`](sources-saas.md#github) | Issues, PRs and discussions involving you | Token or device flow | Every 10 min |
-| [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | API key or OAuth | Every 5 min |
+| [`github`](sources-saas.md#github) | Issues, PRs and discussions involving you | Connect (device flow), or token | Every 10 min |
+| [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | Connect, or API key | Every 5 min |
 | [`imessage`](sources-messaging.md#imessage) | Messages on this Mac (macOS only) | None; needs Full Disk Access | Every 2 min |
 | [`whatsapp`](sources-messaging.md#whatsapp) | Chats you export into a folder | None | Folder watcher |
 | [`telegram`](sources-messaging.md#telegram) | A Telegram Desktop JSON export | None | Folder watcher |
+
+**Connect** signs in with Nugget's own app for that service, with nothing to register. Each page
+also has **Advanced: use your own OAuth client**, which builds from source usually need (Google and
+Microsoft then require it; Slack, GitHub and Linear fall back to a pasted token). **Disconnect** signs
+a source out and revokes Nugget's access where the service allows it. Notion has no Connect: its
+OAuth needs a server-held secret.
 
 Message sources are [private by default](sources-messaging.md#private-by-default); Signal is
 [not supported](sources-messaging.md#signal). Apple Notes and Mail are planned.
@@ -67,8 +73,8 @@ says what is wrong and what to do (over IPC, `health` in `sources.list`):
 | `item_errors` | Some items couldn't be read and were skipped | Nothing, unless you need them |
 | `error` | Anything else | Try **Sync now**, then [Troubleshooting](troubleshooting.md) |
 
-A source that needs you shows a matching button: **Sign in** (Google, Microsoft, Linear), a device
-code (GitHub), **Set password** (IMAP, CalDAV) or **Set token**.
+A source that needs you shows a matching button: **Sign in** (Google, Microsoft, Slack, Linear), a
+device code (GitHub), **Set password** (IMAP, CalDAV) or **Set token**.
 
 ### Reporting a problem
 
@@ -80,7 +86,8 @@ See [Troubleshooting](troubleshooting.md#reporting-a-bug).
 
 ## Removing a source
 
-Removing a source deletes everything indexed from it and its stored credentials. Over IPC,
+Removing a source deletes everything indexed from it and its stored credentials, first revoking
+Nugget's access where the service allows it (as **Disconnect** does). Over IPC,
 `sources.remove` with `"purge": false` keeps the indexed items.
 
 ## Without the desktop app

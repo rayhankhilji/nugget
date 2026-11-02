@@ -82,6 +82,11 @@ impl Authorization {
 
 #[derive(Deserialize)]
 struct TokenResponse {
+    /// Slack: `false` on errors (sent with HTTP 200).
+    ok: Option<bool>,
+    error: Option<String>,
+    /// Slack: user tokens come here instead of at the top level.
+    authed_user: Option<Box<TokenResponse>>,
     access_token: Option<String>,
     refresh_token: Option<String>,
     /// Seconds. Some providers (Azure AD v1, ADFS) send it as a string, some as a float.
@@ -103,7 +108,19 @@ impl OAuthClient {
         if creds.client_id.trim().is_empty() {
             return Err(Error::Invalid("OAuth client_id is empty".into()));
         }
-        for (what, u) in [("auth", &provider.auth_url), ("token", &provider.token_url)] {
+        if !matches!(
+            provider.redirect_host.as_deref(),
+            None | Some("127.0.0.1" | "localhost")
+        ) {
+            return Err(Error::Invalid(
+                "the redirect host must be 127.0.0.1 or localhost".into(),
+            ));
+        }
+        let revoke = provider.revoke_url.iter().map(|u| ("revoke", u));
+        for (what, u) in [("auth", &provider.auth_url), ("token", &provider.token_url)]
+            .into_iter()
+            .chain(revoke)
+        {
             let parsed = Url::parse(u)
                 .map_err(|e| Error::Invalid(format!("bad {what} endpoint `{u}`: {e}")))?;
             if !matches!(parsed.scheme(), "https" | "http") {
@@ -128,7 +145,12 @@ impl OAuthClient {
     /// Bind the loopback listener and build the authorization URL.
     pub async fn authorize(&self, opts: &AuthorizeOptions) -> Result<Authorization> {
         let loopback = Loopback::bind().await?;
-        let redirect_uri = loopback.redirect_uri();
+        let host = self
+            .provider
+            .redirect_host
+            .as_deref()
+            .unwrap_or("127.0.0.1");
+        let redirect_uri = loopback.redirect_uri(host);
         let state = random_token(32)?;
         let pkce = Pkce::generate()?;
         let url =
@@ -158,9 +180,13 @@ impl OAuthClient {
             let mut q = url.query_pairs_mut();
             q.append_pair("response_type", "code")
                 .append_pair("client_id", &self.creds.client_id)
-                .append_pair("redirect_uri", redirect_uri)
-                .append_pair("scope", &self.provider.scopes.join(" "))
-                .append_pair("state", state)
+                .append_pair("redirect_uri", redirect_uri);
+            // Providers with their own scope parameter (Slack's `user_scope`) set it in
+            // `extra_auth_params` and leave `scopes` empty.
+            if !self.provider.scopes.is_empty() {
+                q.append_pair("scope", &self.provider.scopes.join(" "));
+            }
+            q.append_pair("state", state)
                 .append_pair("code_challenge", &pkce.challenge)
                 .append_pair("code_challenge_method", pkce.method());
             for (k, v) in &self.provider.extra_auth_params {
@@ -211,6 +237,51 @@ impl OAuthClient {
         self.token_request(&mut form).await
     }
 
+    /// Revoke the grant behind `token` (a refresh token where there is one) at the provider's
+    /// revocation endpoint. `Ok(false)` when the provider has none for public clients. An
+    /// already invalid token counts as revoked.
+    pub async fn revoke(&self, token: &str) -> Result<bool> {
+        let Some(url) = &self.provider.revoke_url else {
+            return Ok(false);
+        };
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .append_pair("token", token)
+            .append_pair("client_id", &self.creds.client_id)
+            .finish();
+        let req = self
+            .http
+            .request(Method::POST, url)
+            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(ACCEPT, "application/json")
+            .body(body);
+        let resp = self.http.send(req, &[]).await?;
+        let status = resp.status.as_u16();
+        let err: TokenError = serde_json::from_slice(&resp.body).unwrap_or_default();
+        let code = err.error.unwrap_or_default();
+        // Slack answers HTTP 200 with `{"ok": false, "error": ...}`.
+        let refused = serde_json::from_slice::<serde_json::Value>(&resp.body)
+            .ok()
+            .and_then(|v| v.get("ok").and_then(serde_json::Value::as_bool))
+            == Some(false);
+        // A token that is already dead needs no revoking.
+        let dead = matches!(
+            code.as_str(),
+            "invalid_token" | "invalid_grant" | "invalid_auth" | "token_revoked" | "token_expired"
+        );
+        match status {
+            200..=299 if !refused || dead => Ok(true),
+            400 if dead => Ok(true),
+            429 => Err(Error::RateLimited {
+                retry_after_ms: retry_after_ms(&resp.headers),
+            }),
+            _ => Err(Error::Network(format!(
+                "{} did not revoke the token (HTTP {status} {})",
+                self.provider.name,
+                code.chars().take(64).collect::<String>()
+            ))),
+        }
+    }
+
     /// Use a refresh token. The returned set keeps `refresh_token` only if the provider sent a
     /// new one; [`TokenSource`](crate::TokenSource) carries the old one over.
     pub async fn refresh(&self, refresh_token: &str) -> Result<TokenSet> {
@@ -240,6 +311,34 @@ impl OAuthClient {
     }
 }
 
+/// Slack reports token errors as HTTP 200 with `{"ok": false, "error": "..."}`.
+fn slack_token_error(code: &str) -> Error {
+    let code: String = code
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take(64)
+        .collect();
+    match code.as_str() {
+        "invalid_refresh_token"
+        | "invalid_grant_type"
+        | "invalid_code"
+        | "code_expired"
+        | "code_already_used"
+        | "token_revoked"
+        | "token_expired"
+        | "invalid_auth" => Error::Unauthorized(format!(
+            "the authorization was revoked or expired ({code}); reconnect the account"
+        )),
+        "invalid_client_id" | "bad_client_secret" | "bad_redirect_uri" => Error::Unauthorized(
+            format!("the OAuth client was rejected ({code}); check the client ID"),
+        ),
+        "ratelimited" => Error::RateLimited {
+            retry_after_ms: None,
+        },
+        _ => Error::Other(format!("token endpoint: {code}")),
+    }
+}
+
 /// Longest token lifetime believed from `expires_in` (servers occasionally send absurd values).
 const MAX_EXPIRES_IN: i64 = 10 * 365 * 86_400;
 
@@ -261,9 +360,25 @@ fn expires_in_secs(v: &serde_json::Value) -> Option<i64> {
 
 fn parse_token_response(resp: Response) -> Result<TokenSet> {
     let status = resp.status.as_u16();
+    let slack_error = resp
+        .status
+        .is_success()
+        .then(|| serde_json::from_slice::<TokenResponse>(&resp.body).ok())
+        .flatten()
+        .filter(|tr| tr.ok == Some(false))
+        .map(|tr| tr.error.unwrap_or_default());
+    if let Some(code) = slack_error {
+        return Err(slack_token_error(&code));
+    }
     if resp.status.is_success() {
-        let tr: TokenResponse = serde_json::from_slice(&resp.body)
+        let mut tr: TokenResponse = serde_json::from_slice(&resp.body)
             .map_err(|_| Error::Invalid("token endpoint returned malformed JSON".into()))?;
+        // Slack user-token flows: the tokens are under `authed_user`.
+        if tr.access_token.is_none()
+            && let Some(user) = tr.authed_user.take()
+        {
+            tr = *user;
+        }
         let access_token = tr
             .access_token
             .filter(|t| !t.is_empty())

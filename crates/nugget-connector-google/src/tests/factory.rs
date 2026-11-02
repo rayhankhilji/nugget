@@ -13,7 +13,8 @@ fn registers_every_kind_with_oauth() {
     assert_eq!(names, vec!["gcal", "gdrive", "gmail"]);
     assert!(kinds.iter().all(|k| k.auth == AuthKind::OAuth));
     for k in &kinds {
-        assert_eq!(k.settings_schema["required"], json!(["client_id"]));
+        // `client_id` is the advanced, bring-your-own option.
+        assert!(k.settings_schema.get("required").is_none());
         assert_eq!(k.settings_schema["additionalProperties"], json!(false));
     }
     assert!(kinds[2].settings_schema["properties"]["window_days"].is_object());
@@ -32,8 +33,10 @@ fn validates_settings() {
         g.validate(&json!({"client_id": "x", "client_secret": "s", "account_hint": "a@b.c", "window_days": 30, "include_spam_trash": true}))
             .is_ok()
     );
-    assert!(g.validate(&json!({})).is_err());
-    assert!(g.validate(&Value::Null).is_err());
+    let no_builtin = g.with_endpoints(GoogleEndpoints::with_base("http://127.0.0.1:9"));
+    assert!(no_builtin.validate(&json!({})).is_err());
+    assert!(no_builtin.validate(&Value::Null).is_err());
+    let g = GmailFactory::new();
     assert!(g.validate(&json!({"client_id": "  "})).is_err());
     assert!(g.validate(&json!({"client_id": "a b"})).is_err());
     assert!(
@@ -100,6 +103,53 @@ async fn begin_auth_returns_google_consent_url_with_scope() {
         assert!(!q.contains_key("client_secret"));
         drop(flow);
     }
+}
+
+#[tokio::test]
+async fn builtin_client_connects_without_settings_and_the_users_own_wins() {
+    let h = Harness::new().await;
+    let mut ep = h.endpoints();
+    ep.builtin_client = Some(nugget_oauth::ClientCredentials::new(
+        "nugget.apps.googleusercontent.com",
+        Some("nugget-secret".into()),
+    ));
+    let f = GmailFactory::new().with_endpoints(ep);
+    assert!(f.validate(&json!({})).is_ok());
+    for (settings, want) in [
+        (json!({}), "nugget.apps.googleusercontent.com"),
+        (json!({"client_id": "mine"}), "mine"),
+    ] {
+        let conn = h.build(&f, settings);
+        let flow = conn.begin_auth().await.unwrap();
+        let q: HashMap<String, String> = url::Url::parse(&flow.url)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(q["client_id"], want);
+    }
+}
+
+#[tokio::test]
+async fn sign_out_revokes_at_google_and_forgets_the_tokens() {
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, ResponseTemplate};
+    let h = Harness::new().await;
+    Mock::given(method("POST"))
+        .and(path("/revoke"))
+        .and(body_string_contains("token=at-live"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    let conn = h.build(
+        &GmailFactory::new().with_endpoints(h.endpoints()),
+        json!({"client_id": "cid"}),
+    );
+    h.seed_tokens("at-live", false);
+    conn.sign_out().await.unwrap();
+    let sink = RecSink::default();
+    assert!(is_unauthorized(&run(&conn, None, &sink).await));
 }
 
 #[tokio::test]

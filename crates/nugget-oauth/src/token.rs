@@ -227,6 +227,45 @@ impl TokenSource {
         self.cache.lock().await.forget();
     }
 
+    /// Disconnect: revoke the grant at the provider (best effort; where it allows a public
+    /// client to), then delete the stored tokens. Returns whether the provider confirmed the
+    /// revocation. The local tokens are deleted even when revoking fails.
+    pub async fn disconnect(&self) -> Result<bool> {
+        let mut cache = self.cache.lock().await;
+        let stored = match cache.tokens.take() {
+            Some(t) => Some(t),
+            None => load_tokens(self.secrets.clone(), self.account.clone())
+                .await
+                .ok()
+                .flatten(),
+        };
+        cache.forget();
+        // A live access token revokes the whole grant at Google, Slack and Linear; once it has
+        // expired, the refresh token is what is left to revoke.
+        let token = stored.as_ref().and_then(|t| {
+            if t.expired() {
+                t.refresh_token.clone()
+            } else {
+                Some(t.access_token.clone())
+            }
+        });
+        let revoked = match token {
+            Some(token) => match self.client.revoke(&token).await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::warn!(account = %self.account, error = %e, "could not revoke OAuth tokens; deleting them locally");
+                    false
+                }
+            },
+            None => false,
+        };
+        let (secrets, account) = (self.secrets.clone(), self.account.clone());
+        tokio::task::spawn_blocking(move || secrets.delete(&account))
+            .await
+            .map_err(|e| Error::Other(format!("keychain task failed: {e}")))??;
+        Ok(revoked)
+    }
+
     /// Whether tokens are stored for this account.
     pub async fn is_connected(&self) -> Result<bool> {
         Ok(load_tokens(self.secrets.clone(), self.account.clone())
