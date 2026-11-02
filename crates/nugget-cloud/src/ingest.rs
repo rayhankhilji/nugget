@@ -299,7 +299,16 @@ pub fn parse_gmail(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 metadata: json!({
                     "thread_id": thread,
                     "to": first_str(m, &["/to"]).or_else(|| header(m, "To")),
+                    "cc": first_str(m, &["/cc"]).or_else(|| header(m, "Cc")),
                     "labels": if labels.is_array() { labels } else { json!([]) },
+                    // Threading and bulk-mail signals for knowledge and cards (M2).
+                    "message_id": header(m, "Message-ID"),
+                    "in_reply_to": header(m, "In-Reply-To"),
+                    "references": header(m, "References"),
+                    "list_unsubscribe": header(m, "List-Unsubscribe"),
+                    "list_id": header(m, "List-Id"),
+                    "precedence": header(m, "Precedence"),
+                    "auto_submitted": header(m, "Auto-Submitted"),
                 }),
             })
         })
@@ -313,7 +322,9 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
         .filter(|e| e["status"].as_str() != Some("cancelled"))
         .filter_map(|e| {
             let id = first_str(e, &["/id"])?;
-            let start = e.pointer("/start/dateTime").or_else(|| e.pointer("/start/date"));
+            let start = e
+                .pointer("/start/dateTime")
+                .or_else(|| e.pointer("/start/date"));
             let start_s = start.and_then(Value::as_str).unwrap_or("");
             let end_s = first_str(e, &["/end/dateTime", "/end/date"]).unwrap_or_default();
             let attendees: Vec<String> = e["attendees"]
@@ -323,7 +334,9 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 .filter_map(|a| first_str(a, &["/displayName", "/email"]))
                 .collect();
             let location = first_str(e, &["/location"]);
-            let desc = first_str(e, &["/description"]).map(|d| strip_html(&d)).unwrap_or_default();
+            let desc = first_str(e, &["/description"])
+                .map(|d| strip_html(&d))
+                .unwrap_or_default();
             let mut body = format!("When: {start_s} – {end_s}");
             if let Some(l) = &location {
                 body.push_str(&format!("\nWhere: {l}"));
@@ -351,11 +364,42 @@ pub fn parse_calendar(data: &Value) -> (Vec<NewItem>, Option<String>) {
                 url: first_str(e, &["/htmlLink"]),
                 occurred_at: occurred,
                 body: cap(body, MAX_BODY),
-                metadata: json!({"start": start_s, "end": end_s, "location": location, "attendees": attendees}),
+                metadata: calendar_meta(e, location),
             })
         })
         .collect();
     (items, next_token(data))
+}
+
+/// Event metadata in the shape of the local Google Calendar connector, which the knowledge
+/// extractors and card generators read.
+fn calendar_meta(e: &Value, location: Option<String>) -> Value {
+    let when = |k: &str| {
+        json!({
+            "date": e.pointer(&format!("/{k}/date")),
+            "date_time": e.pointer(&format!("/{k}/dateTime")),
+            "time_zone": e.pointer(&format!("/{k}/timeZone")),
+        })
+    };
+    let person = |p: &Value| {
+        json!({
+            "email": p["email"], "name": p["displayName"], "response": p["responseStatus"],
+            "optional": p["optional"], "resource": p["resource"],
+        })
+    };
+    json!({
+        "event_id": e["id"],
+        "ical_uid": e["iCalUID"],
+        "status": e["status"],
+        "start": when("start"),
+        "end": when("end"),
+        "all_day": e.pointer("/start/date").is_some(),
+        "time_zone": e.pointer("/start/timeZone"),
+        "location": location,
+        "organizer": e.get("organizer").map(person),
+        "attendees": e["attendees"].as_array().into_iter().flatten().map(person).collect::<Vec<_>>(),
+        "recurring_event_id": e["recurringEventId"],
+    })
 }
 
 // ---- sync -----------------------------------------------------------------------------------------
@@ -647,6 +691,12 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items[0].body.contains("Where: High St"));
         assert!(items[0].body.contains("Attendees: a@x"));
+        let m = &items[0].metadata;
+        assert_eq!(m["event_id"], "e1");
+        assert_eq!(m["start"]["date_time"], "2026-11-05T10:00:00+00:00");
+        assert_eq!(m["attendees"][0]["email"], "a@x");
+        assert_eq!(items[1].metadata["all_day"], true);
+        assert_eq!(items[1].metadata["start"]["date"], "2026-12-24");
         assert_eq!(
             items[1].occurred_at.unwrap().date().to_string(),
             "2026-12-24"

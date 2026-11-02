@@ -19,7 +19,7 @@ const MAX_SOURCES: usize = 8;
 const MAX_CONTEXT_CHARS: usize = 60_000;
 const MAX_ANSWER_TOKENS: u32 = 800;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq)]
 pub struct Citation {
     pub n: usize,
     pub item_id: Uuid,

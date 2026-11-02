@@ -60,6 +60,13 @@ impl AppState {
         }
     }
 
+    pub fn intel(&self) -> crate::intel::Intel {
+        crate::intel::Intel {
+            db: self.db.clone(),
+            gateway: self.gateway.clone(),
+        }
+    }
+
     pub fn ingest(&self) -> Option<Ingest> {
         Some(Ingest {
             db: self.db.clone(),
@@ -187,6 +194,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/sync", post(sync))
         .route("/v1/ask", post(ask_route))
         .route("/v1/export", get(export))
+        .route("/v1/search", post(search::search))
+        .route("/v1/cards", get(cards::list))
+        .route("/v1/cards/refresh", post(cards::refresh))
+        .route("/v1/cards/seen", post(cards::seen))
+        .route("/v1/cards/{id}/{action}", post(cards::act))
+        .route("/v1/brief", get(brief::get))
         .route("/v1/webhooks/composio", post(composio_webhook))
         .with_state(state)
 }
@@ -442,5 +455,10 @@ async fn composio_webhook(
     Ok(StatusCode::OK)
 }
 
+mod brief;
+mod cards;
+#[cfg(test)]
+mod intel_tests;
+mod search;
 #[cfg(test)]
 mod tests;

@@ -198,7 +198,7 @@ impl Db {
     }
 
     /// Runs `f` in a transaction that RLS confines to `user`, and commits if it succeeds.
-    async fn scoped<T>(
+    pub(crate) async fn scoped<T>(
         &self,
         user: Option<Uuid>,
         f: impl AsyncFnOnce(&Transaction<'_>) -> Result<T, DbError>,
@@ -635,11 +635,15 @@ impl Db {
             ),
             (
                 "cards",
-                "select id, kind, title, body, status, created_at from public.cards",
+                "select id, kind, title, body, status, data, created_at from public.cards",
             ),
             (
                 "conversations",
                 "select id, title, created_at from public.conversations",
+            ),
+            (
+                "briefs",
+                "select day, timezone, prose, citations, data, created_at from public.briefs",
             ),
             (
                 "messages",

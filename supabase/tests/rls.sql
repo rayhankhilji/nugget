@@ -125,6 +125,94 @@ do $$ begin
 end $$;
 rollback;
 
+-- M2/M3 tables: the same isolation.
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000a', true);
+insert into public.proactive_state (user_id, state) values ('00000000-0000-0000-0000-00000000000a', '{"cards": {}}');
+insert into public.intel_runs (user_id) values ('00000000-0000-0000-0000-00000000000a');
+insert into public.llm_cache (user_id, key, response)
+  values ('00000000-0000-0000-0000-00000000000a', repeat('a', 64), '{}');
+insert into public.briefs (user_id, day, timezone, data)
+  values ('00000000-0000-0000-0000-00000000000a', '2026-11-02', 'Europe/London', '{}');
+insert into public.cards (user_id, kind, title, status, card_key)
+  values ('00000000-0000-0000-0000-00000000000a', 'renewal', 'Renews', 'snoozed', 'k1');
+update public.profiles set timezone = 'UTC' where user_id = '00000000-0000-0000-0000-00000000000a';
+commit;
+begin;
+set local role nugget_service;
+select set_config('nugget.user_id', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.proactive_state) = 0, 'service as B sees no A proactive state';
+  assert (select count(*) from public.intel_runs) = 0, 'service as B sees no A runs';
+  assert (select count(*) from public.llm_cache) = 0, 'service as B sees no A cache';
+  assert (select count(*) from public.briefs) = 0, 'service as B sees no A briefs';
+  assert (select count(*) from public.cards) = 0, 'service as B sees no A cards';
+  begin
+    insert into public.briefs (user_id, day, timezone, data)
+      values ('00000000-0000-0000-0000-00000000000a', '2026-11-03', 'UTC', '{}');
+    raise exception 'cross-user brief insert was allowed';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    update public.proactive_state set state = '{}';
+    if found then raise exception 'cross-user update touched A'; end if;
+  end;
+end $$;
+commit;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000b', true);
+do $$ begin
+  assert (select count(*) from public.briefs) = 0, 'B cannot read A briefs';
+  assert (select count(*) from public.llm_cache) = 0, 'B cannot read A cache';
+  begin
+    insert into public.llm_cache (user_id, key, response)
+      values ('00000000-0000-0000-0000-00000000000b', repeat('b', 64), 'x');
+    raise exception 'user insert into llm_cache was allowed';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+do $$ begin
+  assert (select count(*) from public.briefs) = 1, 'A reads own brief';
+  assert (select status from public.cards where card_key = 'k1') = 'snoozed', 'A reads own card';
+end $$;
+rollback;
+-- The schedulers' definers: A has items and no run or brief yet; only the service may call them.
+begin;
+set local role nugget_service;
+do $$ begin
+  -- A's run has not covered any item yet, B never ran: both are due.
+  assert (select count(*) from nugget_private.intel_due(10, '6 hours')) = 2, 'intel_due lists both';
+  perform * from nugget_private.brief_due(10);
+end $$;
+rollback;
+update public.intel_runs set items_through = now() + interval '1 minute';
+begin;
+set local role nugget_service;
+do $$ begin
+  assert (select count(*) from nugget_private.intel_due(10, '6 hours')) = 1, 'a covered, fresh run is not due';
+end $$;
+rollback;
+begin;
+set local role authenticated;
+do $$ begin
+  begin
+    perform nugget_private.intel_due(10, '6 hours');
+    raise exception 'authenticated could call intel_due';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform nugget_private.brief_due(10);
+    raise exception 'authenticated could call brief_due';
+  exception when insufficient_privilege then null;
+  end;
+end $$;
+rollback;
 -- Deleting the auth user cascades everywhere.
 delete from auth.users where id = '00000000-0000-0000-0000-00000000000a';
 do $$ begin
@@ -132,5 +220,8 @@ do $$ begin
   assert (select count(*) from public.chunks) = 0, 'chunks cascade';
   assert (select count(*) from public.usage_events) = 0, 'usage cascade';
   assert (select count(*) from public.connections) = 0, 'connections cascade';
+  assert (select count(*) from public.briefs where user_id = '00000000-0000-0000-0000-00000000000a') = 0, 'briefs cascade';
+  assert (select count(*) from public.proactive_state) = 0, 'proactive state cascades';
+  assert (select count(*) from public.llm_cache) = 0, 'llm cache cascades';
 end $$;
 select 'rls.sql: all assertions passed' as result;

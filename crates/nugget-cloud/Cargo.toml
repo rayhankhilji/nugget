@@ -12,6 +12,14 @@ publish = false
 nugget-core.workspace = true
 nugget-store.workspace = true
 nugget-retrieve.workspace = true
+# M2/M3 intelligence: reused as libraries over a per-user snapshot (see `snapshot`).
+nugget-knowledge.workspace = true
+nugget-proactive.workspace = true
+nugget-ingest.workspace = true
+nugget-infer.workspace = true
+nugget-graph.workspace = true
+futures.workspace = true
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

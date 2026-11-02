@@ -58,6 +58,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         });
     }
+    // Knowledge, cards and the 07:00 brief (see `intel`).
+    let intel = state.intel();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            tick.tick().await;
+            intel.tick().await;
+        }
+    });
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!(addr = %cfg.bind, "listening");
     axum::serve(listener, router(state)).await?;

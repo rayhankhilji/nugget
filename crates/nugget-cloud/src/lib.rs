@@ -8,15 +8,29 @@
 //! - [`ask`]: retrieval over the user's chunks and a cited answer.
 //! - [`api`]: the `/v1` HTTP routes.
 //! - [`webhook`]: Composio webhook signature check.
+//! - [`snapshot`]: a user's items as an in-memory local store, for the reused crates below.
+//! - [`knowledge`]: `nugget-knowledge` extraction into `entities` and `claims`.
+//! - [`cards`]: `nugget-proactive` cards ("Needs you") with accept, dismiss and snooze.
+//! - [`brief`]: the daily morning brief with cited prose.
+//! - [`search`]: hybrid search with facets and a timeline.
+//! - [`intel`]: the per-user jobs and their scheduler; [`llm_bridge`]: the gateway as a
+//!   `nugget-infer` provider (metered, cached).
 
 pub mod api;
 pub mod ask;
 pub mod auth;
+pub mod brief;
+pub mod cards;
 pub mod composio;
 pub mod config;
 pub mod db;
 pub mod gateway;
 pub mod ingest;
+pub mod intel;
+pub mod knowledge;
+pub mod llm_bridge;
+pub mod search;
+pub mod snapshot;
 pub mod webhook;
 
 #[cfg(test)]
