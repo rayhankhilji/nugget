@@ -4,7 +4,7 @@ import { useEvent } from "./hooks";
 import { requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
-import { Logo, Wordmark } from "./components/Logo";
+import { Wordmark } from "./components/Logo";
 import { Icon, type IconName } from "./components/Icon";
 import { cloudApi } from "./cloud";
 import { useCloudSignedIn } from "./cloudSignedIn";
@@ -81,8 +81,17 @@ export const PAGES: readonly PageDef[] = [
 
 const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
 
-/** The Settings list: Account first, then the rest in page order. */
-const SETTINGS_NAV = [...PAGES.filter((p) => p.id === "account"), ...PAGES.filter((p) => p.place === "settings" && p.id !== "account")];
+/**
+ * The Settings sidebar, in groups: Account on its own, then General, AI & models, Privacy &
+ * safety, and the rest under Advanced (collapsed unless one of its pages is open).
+ */
+const SETTINGS_GROUPS: readonly { id: string; label: MessageKey | null; pages: readonly PageId[] }[] = [
+  { id: "account", label: null, pages: ["account"] },
+  { id: "general", label: "app.navGroup.general", pages: ["sources", "apps", "doubletap"] },
+  { id: "ai", label: "app.navGroup.ai", pages: ["models", "agent"] },
+  { id: "privacy", label: "app.navGroup.privacy", pages: ["privacy", "safety"] },
+  { id: "advanced", label: "app.navGroup.advanced", pages: ["knowledge", "plugins", "status"] },
+];
 
 const PAGE_KEY = "nugget.page";
 const RECENT_CHATS = 5;
@@ -324,6 +333,7 @@ export function App() {
     next?.focus();
   };
 
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const navItem = (p: PageDef) => {
     const i = PAGES.indexOf(p);
     const combo = pageCombo(p, i);
@@ -366,8 +376,7 @@ export function App() {
       <aside className="sidebar" aria-label={t("app.sidebarLabel")}>
         <div className="titlebar" data-tauri-drag-region aria-hidden="true" />
         <div className="brand">
-          <Logo pulse={needsCount > 0} />
-          <Wordmark height={19} />
+          <Wordmark height={22} />
           <span className="visually-hidden">{t("app.name")}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
@@ -385,10 +394,26 @@ export function App() {
               </span>
               {t("app.backToApp")}
             </button>
-            <p className="nav-group-label" id="nav-group-settings">
-              {t("app.navGroup.settings")}
-            </p>
-            <ul aria-labelledby="nav-group-settings">{SETTINGS_NAV.map(navItem)}</ul>
+            {SETTINGS_GROUPS.map((g) => {
+              const items = g.pages.map((id) => PAGES.find((p) => p.id === id)!).map(navItem);
+              if (!g.label) return <ul key={g.id}>{items}</ul>;
+              if (g.id === "advanced") {
+                return (
+                  <details key={g.id} className="nav-advanced" open={advancedOpen || g.pages.includes(page)} onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}>
+                    <summary className="nav-group-label">{t(g.label)}</summary>
+                    <ul>{items}</ul>
+                  </details>
+                );
+              }
+              return (
+                <div key={g.id}>
+                  <p className="nav-group-label" id={`nav-group-${g.id}`}>
+                    {t(g.label)}
+                  </p>
+                  <ul aria-labelledby={`nav-group-${g.id}`}>{items}</ul>
+                </div>
+              );
+            })}
             <SidebarSettings onSetup={() => setOnboarding(true)} />
           </nav>
         ) : (

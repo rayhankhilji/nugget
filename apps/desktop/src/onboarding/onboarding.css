@@ -6,9 +6,10 @@
    bottom of the window once the content is taller than it. */
 .onboarding {
   display: grid;
-  grid-template-rows: auto auto auto auto;
-  align-content: start;
-  min-height: 100%;
+  /* Header and stepper on top; the step and its footer sit together in the middle of what's
+     left, between two empty spacer rows (the lower one a little taller, so it sits a touch high). */
+  grid-template-rows: auto auto 2fr auto auto 3fr;
+  min-height: 100vh;
   max-inline-size: 55rem;
   margin-inline: auto;
   padding-inline: var(--space-5);
@@ -147,7 +148,12 @@
 /* ---- the step ---- */
 
 .ob-main {
+  grid-row: 4;
   padding-block: var(--space-5) var(--space-6);
+}
+
+.onboarding > .ob-actions {
+  grid-row: 5;
 }
 
 /* Sections revealed by a choice scroll into view clear of the sticky footer. */

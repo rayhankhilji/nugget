@@ -204,18 +204,15 @@ export function deviceTimeZone(): string | undefined {
   }
 }
 
-/** Display names for the app slugs the cloud uses as source names; anything else is title-cased. */
+/** Display names for the cloud's app catalogue (crates/nugget-cloud/src/apps); anything else is title-cased. */
 const APP_NAMES: Record<string, string> = {
   gmail: "Gmail",
   googlecalendar: "Google Calendar",
-  googledrive: "Google Drive",
-  googledocs: "Google Docs",
-  slack: "Slack",
-  notion: "Notion",
   outlook: "Outlook",
-  linear: "Linear",
-  dropbox: "Dropbox",
-  github: "GitHub",
+  slack: "Slack",
+  microsoft_teams: "Microsoft Teams",
+  notion: "Notion",
+  googledrive: "Google Drive",
 };
 
 export function appName(slug: string): string {

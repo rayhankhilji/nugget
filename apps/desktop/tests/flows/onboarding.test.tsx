@@ -34,7 +34,7 @@ describe("onboarding flow", () => {
     await renderApp({ onboarding: true });
     expect(nav()).toBeNull();
     expect(heading()).toBe(t("onboarding.welcome.heading"));
-    expect(getByRole("main").textContent).toContain(t("onboarding.stepOf", { n: 1, total: 6 }));
+    expect(getByRole("main").textContent).toContain(t("onboarding.stepOf", { n: 1, total: 3 }));
 
     await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.source.heading"));

@@ -1,4 +1,4 @@
-import { currentLocale, formatDate, t, type MessageKey } from "./i18n";
+import { currentLocale, formatDate, regionalLocale, t, type MessageKey } from "./i18n";
 import { dateFormat, numberFormat } from "./i18n/icu";
 
 const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
@@ -36,9 +36,24 @@ export function formatDuration(secs: number): string {
   return t("format.duration.s", { s });
 }
 
-export function formatTime(rfc3339: string): string {
+/**
+ * A moment as people say it, never with seconds: "Today 08:14", "Yesterday 21:14" (the time in
+ * the user's own 12/24-hour style), "Sat 31 Oct" within a week, "14 Oct" this year, else
+ * "14 Oct 2025". `now` is injectable for tests.
+ */
+export function formatTime(rfc3339: string, now: number = Date.now()): string {
   const d = new Date(rfc3339);
-  return Number.isNaN(d.getTime()) ? rfc3339 : formatDate(d, { dateStyle: "medium", timeStyle: "medium" });
+  if (Number.isNaN(d.getTime())) return rfc3339;
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((midnight(d) - midnight(new Date(now))) / 86_400_000);
+  if (Math.abs(days) <= 1) {
+    const loc = regionalLocale();
+    const day = new Intl.RelativeTimeFormat(loc, { numeric: "auto" }).format(days, "day");
+    return `${day.charAt(0).toLocaleUpperCase(loc)}${day.slice(1)} ${formatDate(d, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  if (Math.abs(days) < 7) return formatDate(d, { weekday: "short", day: "numeric", month: "short" });
+  if (d.getFullYear() === new Date(now).getFullYear()) return formatDate(d, { day: "numeric", month: "short" });
+  return formatDate(d, { day: "numeric", month: "short", year: "numeric" });
 }
 
 export function percent(done: number, total: number): number {

@@ -212,6 +212,8 @@ export async function navTo(page, id) {
     if (await back.isVisible()) await back.click();
     else await page.locator("aside.sidebar .account").click();
   }
+  // Advanced settings pages sit in a collapsed group.
+  if (!(await item.isVisible())) await page.locator("aside.sidebar details.nav-advanced:not([open]) > summary").click();
   await item.click();
   await page.locator(`main[aria-label="${label}"]`).waitFor();
 }

@@ -9,15 +9,24 @@ export const ME = "sam@okafor.studio";
 const at = (hhmm, day = "2026-11-03") => `${day}T${hhmm}:00Z`;
 const ago = (mins) => new Date(Date.parse(NOW) - mins * 60_000).toISOString();
 
+/** Generic monochrome glyphs (an envelope, a calendar, a hash…), drawn here: never the apps' own marks. */
+const glyph = (body, color) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`)}`;
+const MAIL = '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>';
+const CAL = '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>';
+const HASH = '<path d="M5 9h15M4 15h15M10 3 8 21M16 3l-2 18"/>';
+const PEOPLE = '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14c1.8.8 3 2.6 3 4.7"/>';
+const PAGE = '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>';
+const DRIVE = '<path d="M8 4h8l6 10-4 6H6l-4-6z"/><path d="M8 4l6 10h8M2 14h12l-4 6"/>';
+
 export const APPS = [
-  { slug: "gmail", name: "Gmail", logo: null, connectable: true },
-  { slug: "googlecalendar", name: "Google Calendar", logo: null, connectable: true },
-  { slug: "slack", name: "Slack", logo: null, connectable: true },
-  { slug: "notion", name: "Notion", logo: null, connectable: true },
-  { slug: "googledrive", name: "Google Drive", logo: null, connectable: true },
-  { slug: "linear", name: "Linear", logo: null, connectable: true },
-  { slug: "outlook", name: "Outlook", logo: null, connectable: true },
-  { slug: "dropbox", name: "Dropbox", logo: null, connectable: true },
+  { slug: "gmail", name: "Gmail", logo: glyph(MAIL, "#C5221F"), connectable: true },
+  { slug: "googlecalendar", name: "Google Calendar", logo: glyph(CAL, "#1A73E8"), connectable: true },
+  { slug: "outlook", name: "Outlook", logo: glyph(MAIL, "#0F6CBD"), connectable: true },
+  { slug: "slack", name: "Slack", logo: glyph(HASH, "#4A154B"), connectable: true },
+  { slug: "microsoft_teams", name: "Microsoft Teams", logo: glyph(PEOPLE, "#5B5FC7"), connectable: true },
+  { slug: "notion", name: "Notion", logo: glyph(PAGE, "#191919"), connectable: true },
+  { slug: "googledrive", name: "Google Drive", logo: glyph(DRIVE, "#188038"), connectable: true },
 ];
 
 export const CONNECTIONS = {
@@ -168,8 +177,8 @@ export const ACTIONS = [
 ];
 
 const ENT = {
-  plan: "heed_pro",
-  name: "Heed Pro",
+  plan: "heed",
+  name: "Heed",
   max_connections: 10,
   sync_interval_minutes: 5,
   history_days: null,
@@ -188,17 +197,17 @@ const ENT = {
 export const ME_VIEW = {
   user_id: "u-sam",
   email: ME,
-  plan: "heed_pro",
+  plan: "heed",
   embeddings: true,
-  subscription: { plan: "heed_pro", status: "trialing", interval: "month", trial_end: "2026-11-12T00:00:00Z", current_period_end: "2026-11-12T00:00:00Z", cancel_at_period_end: false },
+  subscription: { plan: "heed", status: "trialing", interval: "month", trial_end: "2026-11-12T00:00:00Z", current_period_end: "2026-11-12T00:00:00Z", cancel_at_period_end: false },
   entitlements: ENT,
   usage: { month_cost_micros: 2_140_000, smart_asks_used: 212 },
 };
 
 export const PLANS = {
   plans: [
-    { id: "heed_pro", name: "Heed Pro", monthly_gbp: 18, annual_gbp: 180, trial_days: 14, entitlements: ENT },
-    { id: "heed_max", name: "Heed Max", monthly_gbp: 45, annual_gbp: 450, trial_days: 14, entitlements: { ...ENT, plan: "heed_max", name: "Heed Max", smart_asks_per_month: 1500, agent_tasks: true, computer_use: true, priority_support: true } },
+    { id: "heed", name: "Heed", monthly_gbp: 39, annual_gbp: 390, trial_days: 14, entitlements: ENT },
+    { id: "heed_max", name: "Heed Max", monthly_gbp: 99, annual_gbp: 990, trial_days: 14, entitlements: { ...ENT, plan: "heed_max", name: "Heed Max", smart_asks_per_month: 900, agent_tasks: true, computer_use: true, priority_support: true } },
   ],
 };
 

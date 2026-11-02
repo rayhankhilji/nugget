@@ -4,7 +4,7 @@ import { requestChatAsk } from "../hooks.nav";
 import { useT, type MessageKey } from "../i18n";
 import { LanguagePicker } from "../i18n/LanguagePicker";
 import { Logo } from "../components/Logo";
-import { loadState, reduce, saveState, stepGoalMet, STEPS, stepIndex, type OnboardingState, type StepId } from "./machine";
+import { loadState, reduce, saveState, stepGoalMet, stepIndex, type OnboardingState, type StepId } from "./machine";
 import { AiStep } from "./AiStep";
 import { TriggerStep } from "./TriggerStep";
 import { DoneStep, PermissionsStep, signInOffered, SourceStep, WelcomeStep } from "./steps";
@@ -130,7 +130,7 @@ export function Onboarding({
       </nav>
 
       <main className="ob-main" aria-labelledby="ob-heading" ref={mainRef}>
-        <p className="muted small ob-count">{t("onboarding.stepOf", { n: i + 1, total: STEPS.length })}</p>
+        <p className="muted small ob-count">{t("onboarding.stepOf", { n: seg + 1, total: SEGMENTS.length })}</p>
         <div className="ob-panel" key={state.step}>
           {state.step === "welcome" && <WelcomeStep {...stepProps} />}
           {state.step === "ai" && <AiStep {...stepProps} />}
