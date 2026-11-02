@@ -30,7 +30,7 @@ providers:
 ## In the desktop app
 
 The first launch opens a short setup: Welcome, Choose your AI, First source, Permissions and
-Double Tap. Every step can be skipped; **Run setup again** in the sidebar brings it back.
+Double Tap. Every step can be skipped; **Run setup again** in Settings brings it back.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/welcome-dark.png">
@@ -52,8 +52,10 @@ Then:
   <img src="../images/screenshots/status-light.png" alt="The Status page: daemon version, uptime, item and chunk counts, the audit log check, providers, indexing freshness and knowledge counts" loading="lazy">
 </picture>
 
-The sidebar also has [Today](today.md), [Double Tap](double-tap.md), [Agent](agent.md),
-[Safety](safety.md) and [Plugins](plugins.md).
+The sidebar has Home ([Today](today.md): ask, and the morning brief), Needs you, Search and
+Connections. [Double Tap](double-tap.md), [Agent](agent.md), [Safety](safety.md),
+[Plugins](plugins.md) and the other settings open from the account button at its foot (or
+Ctrl+,).
 
 The goal is a useful search result within two minutes of first launch; see
 [Benchmarks](../architecture/benchmarks.md).

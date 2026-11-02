@@ -20,9 +20,10 @@ afterEach(cleanup);
 describe("navigation", () => {
   it("renders the nav from the page registry, with shortcut hints", async () => {
     await render(<App />);
-    expect(navButtons().map((b) => b.textContent)).toEqual(PAGES.map((p) => t(p.label)));
+    const main = PAGES.filter((p) => p.place === "main");
+    expect(navButtons().slice(0, main.length).map((b) => b.textContent)).toEqual(main.map((p) => t(p.label)));
     expect(navButtons()[0]!.getAttribute("aria-keyshortcuts")).toBe("Control+1");
-    expect(navButtons()[1]!.title).toBe("Chat (Ctrl+2)");
+    expect(navButtons()[1]!.title).toBe("Needs you (Ctrl+2)");
     expect(navButtons()[0]!.getAttribute("aria-current")).toBe("page");
   });
 

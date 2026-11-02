@@ -26,7 +26,7 @@ import {
   type Tier,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
-import { requestPage, usePendingChatHandover, usePendingNewChat } from "../hooks.nav";
+import { requestPage, usePendingChatAsk, usePendingChatHandover, usePendingChatOpen, usePendingNewChat } from "../hooks.nav";
 import { handoverCitations, handoverExpired } from "../quickask/handover";
 import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
@@ -408,10 +408,11 @@ export function ChatPage() {
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
-    const text = input.trim();
-    if (!text || active) return;
+    await submit(input.trim(), historyOf(turns));
+  };
 
-    const history = historyOf(turns);
+  const submit = async (text: string, history: ChatMessage[]) => {
+    if (!text || active) return;
     const userTurn: Turn = { id: nextTurnId++, role: "user", text };
     const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
     setTurns((ts) => [...ts, userTurn, reply]);
@@ -545,6 +546,33 @@ export function ChatPage() {
     inputRef.current?.focus();
   };
   usePendingNewChat(startNew);
+
+  // A question asked from Home: a new conversation that sends it at once (into the composer
+  // instead while a reply is still streaming).
+  usePendingChatAsk((q) => {
+    if (active) {
+      setInput(q);
+      return;
+    }
+    startNew();
+    void submit(q.trim(), []);
+  });
+
+  // A conversation picked in the sidebar's recent chats (it may arrive before history loaded).
+  const pendingOpen = useRef<string | null>(null);
+  usePendingChatOpen((id) => {
+    const c = convs.find((x) => x.id === id);
+    if (c) open(c);
+    else pendingOpen.current = id;
+  });
+  useEffect(() => {
+    const id = pendingOpen.current;
+    const c = id ? convs.find((x) => x.id === id) : undefined;
+    if (!c) return;
+    pendingOpen.current = null;
+    open(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convs]);
 
   // Quick ask's "Open in Chat": a new conversation with its question and finished answer
   // (saved like any other), or with the question in the composer when there was no answer yet.

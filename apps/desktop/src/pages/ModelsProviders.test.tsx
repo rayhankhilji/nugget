@@ -95,6 +95,6 @@ describe("Your providers (Models page)", () => {
     await click(byText(dialog, "button", "Replace key"));
     expect(updates).toEqual([{ name: "custom", api_key: "sk-new" }]);
     expect(document.querySelector("dialog")).toBeNull();
-    expect(container.querySelector('[role="status"]')?.textContent).toBe("The key of custom was replaced. Nugget uses it now.");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("The key of custom was replaced. Heed uses it now.");
   });
 });

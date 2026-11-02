@@ -53,7 +53,7 @@ describe("NoTrayControls", () => {
     });
     let info = shell();
     const { container, unmount } = await render(<NoTrayControls info={info} onChange={(s) => (info = s)} />);
-    expect(container.textContent).toContain("Closing this window quits Nugget.");
+    expect(container.textContent).toContain("Closing this window quits Heed.");
     expect(container.textContent).toContain("kill switch on the Safety page");
     await click(byText(container, "button", "Pause indexing"));
     expect(info.indexing_paused).toBe(true);

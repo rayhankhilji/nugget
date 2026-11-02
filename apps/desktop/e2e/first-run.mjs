@@ -1,5 +1,6 @@
-// First run: an empty home, the real onboarding with "Decide later" for AI, the corpus folder
-// through the (stubbed) picker, then Search's "Find context" cites the note that answers the query.
+// First run: an empty home, the real onboarding (no account: the corpus folder through the
+// (stubbed) picker, then "Decide later" for AI), then Search's "Find context" cites the note that
+// answers the query.
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { CORPUS, FIRST_RUN_CONFIG, startDaemon } from "./daemon.mjs";
@@ -28,11 +29,8 @@ export async function firstRunScenario({ browser, bin }) {
     await check("first run: onboarding to a cited answer on an empty home", async () => {
       try {
         await page.goto(`${bridge.url}index.html`);
+        // No cloud in the e2e build: the local-first welcome, then sign in → connect → first answer.
         await heading("onboarding.welcome.heading").waitFor();
-        await cont();
-
-        await heading("onboarding.ai.heading").waitFor();
-        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
         await cont();
 
         await heading("onboarding.source.heading").waitFor();
@@ -40,12 +38,17 @@ export async function firstRunScenario({ browser, bin }) {
         log(`  first run: "${ready.text}"`);
         await cont();
 
+        await heading("onboarding.ai.heading").waitFor();
+        await page.getByRole("radio", { name: startsWith("onboarding.ai.later") }).check();
+        await cont();
+
         await heading("onboarding.perm.heading").waitFor();
         await cont();
         await heading("onboarding.trigger.heading").waitFor();
         await cont();
 
-        await heading("onboarding.done.heading").waitFor();
+        // The last step asks the first question; what setup did is its section below.
+        await page.getByRole("heading", { level: 2, name: t("onboarding.done.heading"), exact: true }).waitFor();
         await page.locator("footer.ob-actions").getByRole("button", { name: exactName("onboarding.done.search") }).click();
         await page.locator(`main[aria-label="${t("app.nav.search")}"]`).waitFor();
 

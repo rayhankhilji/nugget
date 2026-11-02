@@ -15,7 +15,8 @@ import { loadLocale } from "./i18n";
 
 /** Each page, and text from the mocked daemon that proves it rendered real content. */
 const PAGES: [PageId, string][] = [
-  ["today", "Needs you"],
+  ["today", "Ask Heed"],
+  ["needs", "Needs you"],
   ["chat", "Light"],
   ["search", "Search"],
   ["knowledge", "Ada Lovelace"],
@@ -57,7 +58,7 @@ describe("axe", () => {
     expect(document.documentElement.lang).toBe("ar");
     const state: OnboardingState = { version: 1, step: "welcome", completed: [], skipped: [], ai: null, finished: false };
     const { container } = await render(<Onboarding connected initial={state} onExit={() => {}} />);
-    expect(container.querySelector("h1")?.textContent).toBe("مرحبًا بك في Nugget");
+    expect(container.querySelector("h1")?.textContent).toBe("مرحبًا بك في Heed");
     expect(await violations()).toEqual([]);
   });
 });

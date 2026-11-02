@@ -40,51 +40,74 @@ describe("onboarding state machine", () => {
     expect(s.finished).toBe(true);
   });
 
+  it("reads as sign in, connect apps, then the setup steps and the first answer", () => {
+    expect([...STEPS]).toEqual(["welcome", "source", "ai", "permissions", "trigger", "done"]);
+  });
+
   it("skips a step, recording it, and completing it later clears the skip", () => {
     let s = run({ type: "next" }, { type: "skip" });
-    expect(s.step).toBe("source");
-    expect(s.skipped).toEqual(["ai"]);
-    expect(pendingSteps(s)).toEqual(["ai", "source", "permissions", "trigger"]);
-    s = reduce(s, { type: "goto", step: "ai" });
+    expect(s.step).toBe("ai");
+    expect(s.skipped).toEqual(["source"]);
+    expect(pendingSteps(s)).toEqual(["source", "ai", "permissions", "trigger"]);
     s = reduce(s, { type: "chooseAi", ai: "local" });
+    s = reduce(s, { type: "goto", step: "source" });
     s = reduce(s, { type: "next" });
     expect(s.skipped).toEqual([]);
-    expect(s.completed).toContain("ai");
+    expect(s.completed).toContain("source");
+    expect(s.step).toBe("ai");
     expect(s.ai).toBe("local");
   });
 
   it("Continue marks a step done only when it set something up, else skips it", () => {
     let s = run({ type: "continue" }, { type: "continue" });
-    expect(s.step).toBe("source");
-    expect(s.skipped).toEqual(["ai"]);
+    expect(s.step).toBe("ai");
+    expect(s.skipped).toEqual(["source"]);
     s = reduce(s, { type: "continue" });
-    expect(s.skipped).toEqual(["ai", "source"]);
+    expect(s.skipped).toEqual(["source", "ai"]);
     expect(s.completed).toEqual(["welcome"]);
 
-    s = run({ type: "next" }, { type: "chooseAi", ai: "local" }, { type: "aiSetUp", ai: "local", what: "qwen3-4b" }, { type: "continue" });
-    expect(s.completed).toEqual(["welcome", "ai"]);
-    // A setup on another path doesn't count for the current choice.
-    expect(stepGoalMet({ ...s, ai: "byok" }, "ai")).toBe(false);
-    s = reduce(s, { type: "sourcesFound", names: ["Notes"] });
+    s = run({ type: "next" }, { type: "sourcesFound", names: ["Notes"] });
     // GG6-2: a source with nothing indexed yet doesn't finish the step.
     expect(stepGoalMet(s, "source")).toBe(false);
     s = reduce(s, { type: "sourcesIndexed" });
     s = reduce(s, { type: "continue" });
-    expect(s.completed).toEqual(["welcome", "ai", "source"]);
+    expect(s.completed).toEqual(["welcome", "source"]);
     expect(s.sources).toEqual(["Notes"]);
     expect(s.indexed).toBe(true);
+
+    s = run({ type: "next" }, { type: "skip" }, { type: "chooseAi", ai: "local" }, { type: "aiSetUp", ai: "local", what: "qwen3-4b" }, { type: "continue" });
+    expect(s.completed).toEqual(["welcome", "ai"]);
+    expect(s.step).toBe("permissions");
+    // A setup on another path doesn't count for the current choice.
+    expect(stepGoalMet({ ...s, ai: "byok" }, "ai")).toBe(false);
+  });
+
+  it("a connected cloud app finishes the connect step", () => {
+    let s = run({ type: "next" });
+    expect(stepGoalMet(s)).toBe(false);
+    s = reduce(s, { type: "appsConnected", names: ["Gmail"] });
+    s = reduce(s, {
+      type: "appsConnected",
+      names: ["Gmail", "Google Calendar"],
+    });
+    expect(s.cloudApps).toEqual(["Gmail", "Google Calendar"]);
+    // The same apps again change nothing (no re-render loop).
+    expect(reduce(s, { type: "appsConnected", names: ["Gmail"] })).toBe(s);
+    s = reduce(s, { type: "continue" });
+    expect(s.completed).toEqual(["welcome", "source"]);
+    expect(s.step).toBe("ai");
   });
 
   it("GG6-21: Decide later is a decision, not a skipped step", () => {
-    const s = run({ type: "next" }, { type: "chooseAi", ai: "later" }, { type: "continue" });
-    expect(s.step).toBe("source");
-    expect(s.skipped).toEqual([]);
+    const s = run({ type: "next" }, { type: "skip" }, { type: "chooseAi", ai: "later" }, { type: "continue" });
+    expect(s.step).toBe("permissions");
+    expect(s.skipped).toEqual(["source"]);
     expect(s.completed).toEqual(["welcome", "ai"]);
     expect(pendingSteps(s)).not.toContain("ai");
   });
 
   it("GG6-2: Continue with a source that indexed nothing counts as continuing without one", () => {
-    let s = run({ type: "next" }, { type: "chooseAi", ai: "later" }, { type: "next" }, { type: "sourcesFound", names: ["Empty"] });
+    let s = run({ type: "next" }, { type: "sourcesFound", names: ["Empty"] });
     s = reduce(s, { type: "continue" });
     expect(s.skipped).toEqual(["source"]);
     expect(pendingSteps(s)).toContain("source");
@@ -106,5 +129,6 @@ describe("onboarding persistence", () => {
       parseState(JSON.stringify({ version: 1, step: "done", aiSetup: { ai: "byok", what: "anthropic" }, sources: ["Notes", 3] })),
     ).toEqual({ ...INITIAL, step: "done", aiSetup: { ai: "byok", what: "anthropic" }, sources: ["Notes"] });
     expect(parseState(JSON.stringify({ version: 1, step: "done", aiSetup: { ai: "cloud", what: 1 } }))).toEqual({ ...INITIAL, step: "done" });
+    expect(parseState(JSON.stringify({ version: 1, step: "source", cloudApps: ["Gmail", 2] }))).toEqual({ ...INITIAL, step: "source", cloudApps: ["Gmail"] });
   });
 });

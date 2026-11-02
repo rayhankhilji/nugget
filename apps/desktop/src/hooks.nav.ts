@@ -118,3 +118,26 @@ export function requestChatHandover(h: QuickAskHandover): void {
 export function usePendingChatHandover(onHandover: (h: QuickAskHandover) => void): void {
   chatHandover.usePending(onHandover);
 }
+
+// ---- a question asked from Home, and a saved conversation opened from the sidebar ----
+
+const chatAsk = channel<string>();
+const chatOpen = channel<string>();
+
+/** Ask the Chat page to start a new conversation with `question` and send it. */
+export function requestChatAsk(question: string): void {
+  chatAsk.request(question);
+}
+
+export function usePendingChatAsk(onAsk: (question: string) => void): void {
+  chatAsk.usePending(onAsk);
+}
+
+/** Ask the Chat page to open the saved conversation `id`. */
+export function requestChatOpen(id: string): void {
+  chatOpen.request(id);
+}
+
+export function usePendingChatOpen(onOpen: (id: string) => void): void {
+  chatOpen.usePending(onOpen);
+}

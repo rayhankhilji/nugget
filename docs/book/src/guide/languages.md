@@ -17,8 +17,8 @@ The desktop app is available in nine languages:
 ## Choosing a language
 
 Nugget follows your OS language by default, using the closest match (`pt-PT` gets Brazilian
-Portuguese, `zh-TW` Simplified Chinese) or English. To choose, use the **Language** menu at the
-bottom of the sidebar or in first-run setup; **System** goes back to the OS. The choice is stored on
+Portuguese, `zh-TW` Simplified Chinese) or English. To choose, use the **Language** menu in
+Settings or in first-run setup; **System** goes back to the OS. The choice is stored on
 this device only.
 
 In Arabic the window is mirrored. Your own content keeps its own direction, and answers and Double

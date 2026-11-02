@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { startBridge } from "./bridge.mjs";
 import { addCorpusSource, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
-import { check, checkWire, DIST, exactName, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
+import { check, checkWire, DIST, exactName, navTo, expect, INDEX_TIMEOUT_MS, KEEP, log, newContext, OUT, shot, t, tPattern, until } from "./harness.mjs";
 
 const BACKUP_TIMEOUT_MS = 120_000;
 const PASSPHRASE = "tidewater lantern quarry";
@@ -202,7 +202,7 @@ export async function backupScenario({ browser, bin }) {
       try {
         const hits = await rpc(daemon.socket, "search", { query: QUERY, limit: 10 });
         expect(Array.isArray(hits) && hits.length > 0, `search "${QUERY}" over IPC returned ${JSON.stringify(hits)}`);
-        await page.getByRole("navigation").getByRole("button", { name: t("app.nav.search"), exact: true }).click();
+        await navTo(page, "search");
         const box = page.getByRole("searchbox", { name: t("search.query") });
         await box.fill(QUERY);
         await box.press("Enter");

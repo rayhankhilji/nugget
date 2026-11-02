@@ -42,7 +42,7 @@ describe("QuitPrompt", () => {
     // The shell is told the question shows (else it quits with the default after 2 s).
     expect(acks).toBe(2);
     const dialog = document.querySelector("dialog");
-    expect(dialog?.textContent).toContain("When you quit Nugget, also stop background indexing and the local AI?");
+    expect(dialog?.textContent).toContain("When you quit Heed, also stop background indexing and the local AI?");
     await click(button(dialog!, /^Keep running in the background$/));
     expect(answers).toEqual([{ choice: "keep", quit: true }]);
     expect(document.querySelector("dialog")).toBeNull();

@@ -38,3 +38,11 @@ export function ghostStyle(p: GhostPaint): CSSProperties {
 export function ghostText(p: GhostPaint): string {
   return p.visible ? p.text.replace(/[ \t]+$/u, "") : "";
 }
+
+/** The last few words (about 24 characters, cut at a space), which shimmer while text streams in. */
+export function splitTail(text: string, chars = 24): [string, string] {
+  if (text.length <= chars) return ["", text];
+  const cut = text.lastIndexOf(" ", text.length - chars);
+  const at = cut > 0 ? cut : text.length - chars;
+  return [text.slice(0, at), text.slice(at)];
+}

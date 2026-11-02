@@ -54,8 +54,8 @@ describe("onboarding: MacPermissionStatus", () => {
     const box = container.querySelector<HTMLElement>(".dt-recover")!;
     expect(box).not.toBeNull();
     // Nothing was asked yet: no "turn it back on".
-    expect(box.textContent).toContain("Turn on Nugget in System Settings");
-    expect(container.textContent).toContain("Full Disk Access lets Nugget read your Messages");
+    expect(box.textContent).toContain("Turn on Heed in System Settings");
+    expect(container.textContent).toContain("Full Disk Access lets Heed read your Messages");
     await click(byText(box, "button", "Open Accessibility settings"));
     await click(byText(box, "button", "Open Input Monitoring settings"));
     await click(byText(box, "button", "Open Full Disk Access settings"));
@@ -67,7 +67,7 @@ describe("onboarding: MacPermissionStatus", () => {
     });
     await flush(10);
     expect(container.querySelector(".dt-recover")).toBeNull();
-    expect(container.textContent).toContain("Everything Nugget needs on this Mac is turned on.");
+    expect(container.textContent).toContain("Everything Heed needs on this Mac is turned on.");
   });
 
   it("renders nothing off macOS", async () => {
