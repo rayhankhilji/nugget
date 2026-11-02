@@ -259,6 +259,10 @@ fn main() {
             cloud::cloud_disconnect,
             cloud::cloud_sync,
             cloud::cloud_ask,
+            cloud::cloud_me,
+            cloud::cloud_billing_plans,
+            cloud::cloud_billing_checkout,
+            cloud::cloud_billing_portal,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { emit } from "@tauri-apps/api/event";
 import { act } from "react";
-import { CloudError, cloudApi, type CloudAnswer, type CloudConnections, type CloudSession } from "../cloud";
+import { CloudError, cloudApi, type CloudAnswer, type CloudConnections, type CloudMe, type CloudPlan, type CloudSession } from "../cloud";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { CloudPage } from "./Cloud";
 
@@ -20,6 +20,31 @@ const lists: CloudConnections = {
     { slug: "slack", name: "Slack", logo: null, connectable: false },
   ],
 };
+
+const ent = (plan: string, name: string, smart: number) => ({
+  plan, name, max_connections: plan === "heed" ? 10 : null, sync_interval_minutes: 30, history_days: null, smart_asks_per_month: smart,
+  default_model: plan === "heed" ? "fast" : "smart", devices: 1, ghost_text: true, needs_you_inbox: true, daily_brief: true,
+  actions_with_approval: true, agent_tasks: false, computer_use: false, priority_support: false,
+});
+const plans: { plans: CloudPlan[] } = {
+  plans: [
+    { id: "heed", name: "Heed", monthly_gbp: 39, annual_gbp: 390, trial_days: 14, entitlements: ent("heed", "Heed", 300) },
+    { id: "heed_max", name: "Heed Max", monthly_gbp: 99, annual_gbp: 990, trial_days: 14, entitlements: ent("heed_max", "Heed Max", 900) },
+  ],
+};
+const unsubscribed: CloudMe = {
+  user_id: "u1", email: "me@example.com", plan: null, embeddings: false, subscription: null, entitlements: null,
+  usage: { month_cost_micros: 0, smart_asks_used: 0 },
+};
+const trialing: CloudMe = {
+  ...unsubscribed,
+  plan: "heed",
+  subscription: { plan: "heed", status: "trialing", interval: "month", trial_end: "2026-11-16T12:00:00Z", current_period_end: "2026-11-16T12:00:00Z", cancel_at_period_end: false },
+  entitlements: ent("heed", "Heed", 300),
+  usage: { month_cost_micros: 1200, smart_asks_used: 7 },
+};
+/** The account and plans every signed-in page loads. */
+const billing = { cloud_me: trialing, cloud_billing_plans: plans };
 
 const answer: CloudAnswer = {
   conversation_id: "c1",
@@ -73,7 +98,7 @@ describe("CloudPage", () => {
 
   it("shows a failed sign-in from the session event, then the signed-in page after a success", async () => {
     let session = signedOut;
-    mockDaemon({ cloud_session: () => session, cloud_connections_list: lists });
+    mockDaemon({ cloud_session: () => session, cloud_connections_list: lists, ...billing });
     const { container } = await render(<CloudPage />);
     await act(async () => {
       await emit("nugget:cloud-session", { signed_in: false, error: "User cancelled" });
@@ -95,6 +120,7 @@ describe("CloudPage", () => {
       return r;
     };
     mockDaemon({
+      ...billing,
       cloud_session: signedIn,
       cloud_connections_list: lists,
       cloud_connect: log("connect", null),
@@ -132,6 +158,7 @@ describe("CloudPage", () => {
     let quota = false;
     const opened: unknown[] = [];
     mockDaemon({
+      ...billing,
       cloud_session: signedIn,
       cloud_connections_list: lists,
       cloud_ask: (args: unknown) => {
@@ -166,6 +193,124 @@ describe("CloudPage", () => {
     await submit(form);
     expect(asks).toEqual([{ question: "When is my flight?" }, { question: "And the return?", conversationId: "c1" }]);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("You've used this month's AI allowance.");
+  });
+});
+
+describe("Plan & billing", () => {
+  const section = (c: HTMLElement) => c.querySelector<HTMLElement>('section[aria-labelledby="cloud-billing"]')!;
+
+  it("offers both plans with a trial when there is no subscription, and reloads after checkout", async () => {
+    const calls: unknown[] = [];
+    let me = unsubscribed;
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_connections_list: lists,
+      cloud_me: () => me,
+      cloud_billing_plans: plans,
+      cloud_billing_checkout: (args: unknown) => {
+        calls.push(args);
+        return null;
+      },
+    });
+    const { container } = await render(<CloudPage />);
+    const s = section(container);
+    expect(s.querySelector("h2")?.textContent).toBe("Plan & billing");
+    const items = s.querySelectorAll(".cloud-plans li");
+    expect(items).toHaveLength(2);
+    expect(items[0]!.textContent).toContain("£39 a month or £390 a year");
+    expect(items[1]!.textContent).toContain("£99 a month or £990 a year");
+    expect(items[1]!.textContent).toContain("14-day free trial");
+    expect(byText(s, "button", "Manage billing")).toBeUndefined();
+
+    await click(items[1]!.querySelector('[aria-label="Start a Heed Max trial, billed annually"]'));
+    await click(items[0]!.querySelector('[aria-label="Start a Heed trial, billed monthly"]'));
+    expect(calls).toEqual([
+      { plan: "heed_max", interval: "year" },
+      { plan: "heed", interval: "month" },
+    ]);
+    expect(s.textContent).toContain("Finish in your browser");
+
+    me = trialing;
+    await act(async () => {
+      await emit("nugget:cloud-billing", null);
+    });
+    await flush();
+    expect(s.querySelector(".cloud-plans")).toBeNull();
+    expect(s.textContent).toContain("Heed");
+  });
+
+  it("shows the subscription, smart asks and the portal; Max upgrades through the portal", async () => {
+    let portals = 0;
+    let me: CloudMe = trialing;
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_connections_list: lists,
+      cloud_me: () => me,
+      cloud_billing_plans: plans,
+      cloud_billing_portal: () => {
+        portals++;
+        return null;
+      },
+    });
+    const { container } = await render(<CloudPage />);
+    let s = section(container);
+    expect(s.textContent).toMatch(/Trial until .*2026/);
+    expect(s.textContent).toContain("Smart asks this month: 7 of 300");
+    await click(byText(s, "button", "Manage billing"));
+    await click(byText(s, "button", "Upgrade to Heed Max"));
+    expect(portals).toBe(2);
+    cleanup();
+
+    me = { ...trialing, plan: "heed_max", entitlements: ent("heed_max", "Heed Max", 900), subscription: { ...trialing.subscription!, plan: "heed_max", status: "past_due" } };
+    mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: () => me, cloud_billing_plans: plans });
+    s = section((await render(<CloudPage />)).container);
+    expect(s.textContent).toContain("Heed Max");
+    expect(s.textContent).toContain("Payment past due");
+    expect(byText(s, "button", "Upgrade to Heed Max")).toBeUndefined();
+    cleanup();
+
+    me = { ...trialing, subscription: { ...trialing.subscription!, status: "active", cancel_at_period_end: true } };
+    mockDaemon({ cloud_session: signedIn, cloud_connections_list: lists, cloud_me: () => me, cloud_billing_plans: plans });
+    s = section((await render(<CloudPage />)).container);
+    expect(s.textContent).toMatch(/Cancels on .*2026/);
+  });
+
+  it("points gated calls at billing and explains plan limits", async () => {
+    const fail = (cloud: string) => () => {
+      throw { kind: "rpc", message: "server says no", code: null, cloud };
+    };
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_connections_list: lists,
+      cloud_me: unsubscribed,
+      cloud_billing_plans: plans,
+      cloud_sync: fail("subscription_required"),
+      cloud_connect: fail("connection_limit_reached"),
+      cloud_ask: fail("device_limit_reached"),
+    });
+    const { container } = await render(<CloudPage />);
+    await click(byText(container, "button", "Sync now"));
+    const prompt = container.querySelector('section[aria-labelledby="cloud-connections"] [role="alert"]')!;
+    expect(prompt.textContent).toContain("This needs a Heed subscription");
+    await click(byText(prompt as HTMLElement, "button", "See plans"));
+    expect(document.activeElement?.id).toBe("cloud-billing");
+
+    await click(byText(container.querySelector(".cloud-apps")!, "button", "Connect"));
+    expect(container.textContent).toContain("Your plan's limit of connected apps is reached");
+
+    const input = container.querySelector<HTMLInputElement>("#cloud-question")!;
+    await type(input, "q");
+    await submit(input.closest("form")!);
+    expect(container.querySelector('section[aria-labelledby="cloud-ask"] [role="alert"]')?.textContent).toContain("Your plan's device limit is reached");
+  });
+
+  it("says when a smart ask fell back to the fast model", async () => {
+    mockDaemon({ ...billing, cloud_session: signedIn, cloud_connections_list: lists, cloud_ask: { ...answer, model_tier: "fast", downgraded: true } });
+    const { container } = await render(<CloudPage />);
+    const input = container.querySelector<HTMLInputElement>("#cloud-question")!;
+    await type(input, "q");
+    await submit(input.closest("form")!);
+    expect(container.querySelector(".cloud-answer")?.textContent).toContain("this month's smart asks are used up");
   });
 });
 

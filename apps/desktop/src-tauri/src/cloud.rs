@@ -1,5 +1,6 @@
 //! Nugget Cloud from the shell (docs/architecture-cloud.md, section 4): sign-in, the session,
-//! Composio connections, sync and ask, through `nugget-cloud-client`.
+//! Composio connections, sync and ask, and billing (Stripe Checkout and portal), through
+//! `nugget-cloud-client`.
 //!
 //! Tokens never reach the webview: the PKCE verifier, the access token and the refresh token
 //! (keychain) stay in Rust. The sign-in deep link (`nugget://auth/callback`) is exchanged here
@@ -9,8 +10,8 @@
 use std::sync::Arc;
 
 use nugget_cloud_client::{
-    Answer, Api, AskRequest, Callback, CloudConfig, CloudError, Connections, KeychainStore,
-    Provider, Session, SyncReport, SystemClock,
+    Answer, Api, AskRequest, Callback, CloudConfig, CloudError, Connections, Interval,
+    KeychainStore, Me, ModelTier, Plans, Provider, Session, SyncReport, SystemClock,
 };
 use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -22,6 +23,9 @@ use crate::open;
 pub const SESSION_EVENT: &str = "nugget:cloud-session";
 /// No payload: Composio sent the browser back; the Connections page reloads its list.
 pub const CONNECTIONS_EVENT: &str = "nugget:cloud-connections";
+/// No payload: Stripe Checkout sent the browser back (`nugget://billing/done`); the page reloads
+/// the account and the plans.
+pub const BILLING_EVENT: &str = "nugget:cloud-billing";
 
 const MAX_QUESTION_LEN: usize = 4_000;
 const MAX_ID_LEN: usize = 128;
@@ -255,6 +259,7 @@ pub async fn cloud_ask(
     cloud: State<'_, Cloud>,
     question: String,
     conversation_id: Option<String>,
+    model: Option<String>,
 ) -> Result<Answer> {
     let question = question.trim().to_owned();
     if question.is_empty() || question.chars().count() > MAX_QUESTION_LEN {
@@ -266,15 +271,58 @@ pub async fn cloud_ask(
     {
         return Err(CloudError::Invalid("not a valid conversation".into()).into());
     }
+    let model = match model.as_deref() {
+        None => None,
+        Some("fast") => Some(ModelTier::Fast),
+        Some("smart") => Some(ModelTier::Smart),
+        Some(_) => return Err(CloudError::Invalid("not a known model".into()).into()),
+    };
     let api = cloud.api()?;
     checked(
         &app,
         api.ask(&AskRequest {
             question,
             conversation_id,
+            model,
         })
         .await,
     )
+}
+
+/// The account: plan, subscription, entitlements and this month's usage.
+#[tauri::command]
+pub async fn cloud_me(app: AppHandle, cloud: State<'_, Cloud>) -> Result<Me> {
+    let api = cloud.api()?;
+    checked(&app, api.me().await)
+}
+
+#[tauri::command]
+pub async fn cloud_billing_plans(app: AppHandle, cloud: State<'_, Cloud>) -> Result<Plans> {
+    let api = cloud.api()?;
+    checked(&app, api.plans().await)
+}
+
+/// Start a trial: opens Stripe Checkout in the browser. It comes back to
+/// `nugget://billing/done` (see [`BILLING_EVENT`]).
+#[tauri::command]
+pub async fn cloud_billing_checkout(
+    app: AppHandle,
+    cloud: State<'_, Cloud>,
+    plan: String,
+    interval: String,
+) -> Result<()> {
+    let interval = Interval::parse(&interval)?;
+    let api = cloud.api()?;
+    let link = checked(&app, api.checkout(&plan, interval).await)?;
+    open_web(link.url).await
+}
+
+/// Opens the Stripe customer portal (card, invoices, plan changes, cancel) in the browser.
+#[tauri::command]
+pub async fn cloud_billing_portal(app: AppHandle, cloud: State<'_, Cloud>) -> Result<()> {
+    let api = cloud.api()?;
+    let link = checked(&app, api.portal().await)?;
+    open_web(link.url).await
 }
 
 #[cfg(test)]
