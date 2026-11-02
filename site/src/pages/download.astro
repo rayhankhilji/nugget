@@ -1,14 +1,14 @@
 ---
 import Base from "../layouts/Base.astro";
-import { config, notifyHref } from "../lib/config";
+import { config } from "../lib/config";
 import { GITHUB_URL } from "../lib/plans";
+import WaitlistForm from "../components/WaitlistForm.astro";
 
 // Direct downloads appear only once a release exists: set NEXT_PUBLIC_DOWNLOAD_MAC_ARM_URL and/or
 // NEXT_PUBLIC_DOWNLOAD_MAC_INTEL_URL. Until then the page says so plainly and explains how to build it.
 const arm = config.downloadMacArm;
 const intel = config.downloadMacIntel;
 const ready = Boolean(arm || intel);
-const notify = notifyHref("Tell me when Heed for Mac is released", "Please email me when the first signed build of Heed for Mac is out.");
 const INSTALL_GUIDE = `${GITHUB_URL}/blob/HEAD/docs/book/src/guide/install.md`;
 ---
 <Base
@@ -45,10 +45,8 @@ const INSTALL_GUIDE = `${GITHUB_URL}/blob/HEAD/docs/book/src/guide/install.md`;
             There's no signed release yet. You can build the app from source today with one script, or we can email you
             when the first release is ready.
           </p>
-          <div class="btns">
-            <a class="btn btn-primary btn-lg" href={notify}>Notify me</a>
-            <a class="btn btn-secondary btn-lg" href={GITHUB_URL} rel="noopener">View on GitHub</a>
-          </div>
+          <WaitlistForm source="download" label="Email me when Heed for Mac is released" button="Notify me" />
+          <p class="small">Or build it today: <a href={GITHUB_URL} rel="noopener">view the source on GitHub</a>.</p>
         </>
       )
     }
@@ -160,6 +158,10 @@ open /Applications/Heed.app</code></pre>
     max-width: 36em;
     font-size: clamp(17px, 1.5vw, 19px);
     color: var(--text-2);
+  }
+  .top .small a {
+    color: var(--text);
+    text-underline-offset: 3px;
   }
   .btns {
     display: flex;
