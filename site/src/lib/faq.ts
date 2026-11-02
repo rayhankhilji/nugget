@@ -7,7 +7,7 @@ export const FAQ: { q: string; a: string; link?: { href: string; text: string } 
   },
   {
     q: "Does my data leave my Mac?",
-    a: "With the free app, your synced data stays on your Mac. Your questions and the relevant snippets go only to the AI you chose, or nowhere at all if you use a local model through Ollama. With Heed Cloud, yes, and we'd rather be upfront about it: the apps you connect sync to your account in our London data centre, and the relevant snippets go to our AI provider (Anthropic, or OpenAI as a fallback) to produce each answer.",
+    a: "With the free app, your synced data stays on your Mac. Your questions and the relevant snippets go only to the AI you chose, or nowhere at all if you use a local model through Ollama. With Heed Cloud, yes, and we'd rather be upfront about it: the apps you connect sync to your account in our data centre (planned for London), and the relevant snippets go to our AI provider (Anthropic, or OpenAI as a fallback) to produce each answer.",
   },
   {
     q: "Do you sell my data or use it to train AI?",

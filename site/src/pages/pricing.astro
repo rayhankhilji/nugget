@@ -15,7 +15,7 @@ const rows: [string, string, string, string][] = [
   ["Sync", "While your Mac is awake", sync(a.entitlements).replace("Sync every", "Always on, every"), sync(b.entitlements).replace("Sync every", "Always on, every")],
   ["Morning brief while your Mac sleeps", "–", "Yes", "Yes"],
   ["History", "What you sync", history(a.entitlements).replace(" of history", ""), history(b.entitlements).replace(" of history", "").replace("Full history", "Everything")],
-  ["Where your data lives", "On your Mac", "Your account, in London", "Your account, in London"],
+  ["Where your data lives", "On your Mac", "Your account, in London (planned)", "Your account, in London (planned)"],
   ["Ghost text anywhere on your Mac", "Yes, with your AI", yes(a.entitlements.ghost_text), yes(b.entitlements.ghost_text)],
   ["Needs you and the daily brief", "Yes, while your Mac is awake", yes(a.entitlements.needs_you_inbox && a.entitlements.daily_brief), yes(b.entitlements.needs_you_inbox && b.entitlements.daily_brief)],
   ["Actions with your approval", "Yes, through your own connections", yes(a.entitlements.actions_with_approval), yes(b.entitlements.actions_with_approval)],
