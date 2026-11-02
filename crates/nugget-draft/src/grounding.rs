@@ -97,6 +97,9 @@ pub struct Corpus {
     /// The user's instruction or field text mentions an attachment: a draft may say one is
     /// attached.
     attachment_ok: bool,
+    /// Every text a draft may state things from, lower-cased: where a payee or bank it names
+    /// must appear.
+    text: String,
     /// Messages from other people, [`squash`]ed, and whether each asks a question: the reply
     /// must not repeat them.
     others: Vec<(String, bool)>,
@@ -213,6 +216,8 @@ impl Corpus {
             self.supported.extend(v.keys.into_iter().chain(v.extra));
         }
         self.words.extend(words(text));
+        self.text.push_str(&text.to_lowercase());
+        self.text.push('|');
     }
 }
 
@@ -372,6 +377,228 @@ pub(crate) fn contacts(text: &str) -> Vec<String> {
         (run, raw, plus) = (String::new(), String::new(), false);
     }
     out
+}
+
+/// Words that make a sentence a payment instruction, in the UI languages (lower case).
+const PAYMENT_CUES: &[&str] = &[
+    "pay to",
+    "pay into",
+    "pay it to",
+    "pay it into",
+    "pay via",
+    "payable to",
+    "payment to",
+    "send payment",
+    "transfer to",
+    "transfer it to",
+    "wire to",
+    "wire it to",
+    "bank",
+    "sort code",
+    "iban",
+    "routing number",
+    "swift",
+    "paypal",
+    "venmo",
+    "zelle",
+    "überweis",
+    "zahlbar an",
+    "bankverbindung",
+    "pagar a",
+    "pague a",
+    "transferir a",
+    "transferencia",
+    "transferência",
+    "banco",
+    "payer à",
+    "virement",
+    "banque",
+    "pagar para",
+    "pague para",
+    "pix",
+    "حوالة",
+    "بنك",
+    "مصرف",
+    "ادفع",
+    "भुगतान",
+    "बैंक",
+    "振込",
+    "振り込",
+    "銀行",
+    "转账",
+    "银行",
+    "汇款",
+];
+
+/// Account nouns: a payment instruction only next to a payment word ("the account team" and
+/// "take into account" are not).
+const ACCOUNT_NOUNS: &[&str] = &[
+    "account",
+    "konto",
+    "cuenta",
+    "compte",
+    "conta",
+    "حساب",
+    "खाता",
+    "口座",
+    "账户",
+    "账号",
+];
+
+/// Payment words that make an account noun a payment instruction.
+const PAYMENT_WORDS: &[&str] = &[
+    "pay",
+    "paid",
+    "payment",
+    "deposit",
+    "transfer",
+    "wire",
+    "zahl",
+    "pag",
+    "pai",
+    "dépos",
+    "دفع",
+    "भुगतान",
+    "支払",
+    "払",
+    "支付",
+    "付款",
+];
+
+/// Bank nouns: the name next to one is the bank's.
+const BANK_NOUNS: &[&str] = &[
+    "bank",
+    "banco",
+    "banque",
+    "sparkasse",
+    "volksbank",
+    "بنك",
+    "مصرف",
+    "बैंक",
+    "銀行",
+    "银行",
+];
+
+/// Words that never name a payee: articles, pronouns and the like next to a bank noun.
+const PAYEE_FILLER: &[&str] = &[
+    "the", "our", "your", "my", "a", "an", "this", "that", "same", "usual", "die", "der", "das",
+    "den", "dem", "unsere", "unser", "ihre", "el", "la", "los", "las", "nuestro", "nuestra", "su",
+    "le", "les", "notre", "votre", "o", "os", "nosso", "nossa", "account", "konto", "cuenta",
+    "compte", "conta", "details", "transfer", "to", "into", "via", "at", "with", "in", "of", "de",
+    "du", "do", "da", "an", "à", "al",
+];
+
+fn payment_cue(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    if ACCOUNT_NOUNS.iter().any(|n| lower.contains(n))
+        && PAYMENT_WORDS.iter().any(|w| lower.contains(w))
+    {
+        return true;
+    }
+    PAYMENT_CUES.iter().any(|c| {
+        // Whole words for Latin cues ("bank" is not in "embankment").
+        lower.match_indices(c).any(|(i, _)| {
+            !c.is_ascii()
+                || (lower[..i]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|p| !p.is_alphanumeric())
+                    && (c.ends_with(' ') || c.starts_with("überweis") || c.len() > 6 || {
+                        let after = &lower[i + c.len()..];
+                        after.chars().next().is_none_or(|n| !n.is_alphanumeric())
+                    }))
+        })
+    })
+}
+
+/// In a payment instruction, the first payee or bank name that no source text (`known`,
+/// lower case) has: a run of capitalised words, or the word next to a bank noun ("larkspur
+/// bank", "みずほ銀行"). Months, weekdays and the sentence's first word are not names.
+fn unsupported_payee(sentence: &str, known: &str) -> Option<String> {
+    if !payment_cue(sentence) {
+        return None;
+    }
+    let toks: Vec<&str> = sentence
+        .split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '"'))
+        .map(|t| {
+            let t = t.trim_matches(|c: char| !c.is_alphanumeric() && c != '&');
+            // "Fernway Studio's account": the name without the possessive.
+            t.strip_suffix("'s")
+                .or_else(|| t.strip_suffix("’s"))
+                .unwrap_or(t)
+        })
+        .filter(|t| !t.is_empty())
+        .collect();
+    let known_phrase = |p: &str| known.contains(&p.to_lowercase());
+    let mut names: Vec<String> = Vec::new();
+    // Capitalised runs ("Larkspur Bank", "Fernway Studio").
+    let mut run: Vec<&str> = Vec::new();
+    for (i, t) in toks.iter().chain(std::iter::once(&"")).enumerate() {
+        let lower = t.to_lowercase();
+        let cap = i > 0
+            && t.chars().next().is_some_and(char::is_uppercase)
+            && *t != "I"
+            && month(&lower).is_none()
+            && weekday(&lower).is_none()
+            && !["IBAN", "BIC", "SWIFT", "PIX"].contains(t);
+        if cap {
+            run.push(t);
+        } else if !run.is_empty() {
+            names.push(run.join(" "));
+            run.clear();
+        }
+    }
+    // The word next to a bank noun, written in lower case or in a script without capitals.
+    for (i, t) in toks.iter().enumerate() {
+        let lower = t.to_lowercase();
+        for noun in BANK_NOUNS {
+            if lower == *noun {
+                for j in [i.wrapping_sub(1), i + 1] {
+                    if let Some(n) = toks.get(j)
+                        && !PAYEE_FILLER.contains(&n.to_lowercase().as_str())
+                        && !n.chars().all(|c| c.is_ascii_digit())
+                    {
+                        let pair = if j < i {
+                            format!("{n} {t}")
+                        } else {
+                            format!("{t} {n}")
+                        };
+                        names.push(pair);
+                    }
+                }
+            } else if !noun.is_ascii() && lower.contains(noun) && lower != *noun {
+                // "みずほ銀行の口座": the characters before the noun, back to a particle.
+                let head = &lower[..lower.find(noun).unwrap_or(0)];
+                let name: String = head
+                    .chars()
+                    .rev()
+                    .take_while(|c| {
+                        !matches!(
+                            c,
+                            'の' | 'に'
+                                | 'で'
+                                | 'を'
+                                | 'は'
+                                | 'が'
+                                | 'へ'
+                                | 'と'
+                                | '、'
+                                | '的'
+                                | '到'
+                                | '向'
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                if !name.is_empty() {
+                    names.push(format!("{name}{noun}"));
+                }
+            }
+        }
+    }
+    names.into_iter().find(|n| !known_phrase(n))
 }
 
 /// Words that claim a file is attached to the message, in the UI languages.
@@ -669,7 +896,11 @@ impl Grounder {
         let mut best: Option<String> = None;
         for &cut in &cuts {
             let head = sentence[..cut].trim_end_matches([',', ';', ' ']);
-            if content_words(head) < 3 || best.as_ref().is_some_and(|b| b.len() > head.len()) {
+            // A payment clause is kept whole or not at all.
+            if content_words(head) < 3
+                || best.as_ref().is_some_and(|b| b.len() > head.len())
+                || payment_cue(head)
+            {
                 continue;
             }
             if self.check(head) {
@@ -770,6 +1001,14 @@ impl Grounder {
                 && self.corpus.other_names.contains(&sq))
         {
             self.report.copies_dropped += 1;
+            return false;
+        }
+        // A payee or bank nothing names (MM1 on GG1: "pay into Larkspur Bank").
+        if let Some(name) = unsupported_payee(sentence, &self.corpus.text) {
+            self.report.contacts_dropped += 1;
+            if self.report.unsupported.len() < MAX_REPORTED {
+                self.report.unsupported.push(name);
+            }
             return false;
         }
         if !self.corpus.attachment_ok && claims_attachment(sentence) {
@@ -2112,6 +2351,58 @@ into account 40112277.",
             "Hi Ravi, the board approved $275,000 for the Q4 marketing budget."
         );
         assert_eq!(g.report().clauses_dropped, 1);
+    }
+
+    /// MM1 on GG1 (safe-mixed-legit-default): a payee or bank no source names is dropped with
+    /// its clause, and never kept in part; the payee the facts name passes.
+    #[test]
+    fn payment_instructions_need_a_known_payee() {
+        let ctx = DraftContext {
+            thread: vec![ThreadMessage {
+                author: Some("Priya Raman".into()),
+                text: "What's the total on invoice 2207, when is it due, and which bank account \
+should we pay into?"
+                    .into(),
+                from_me: Some(false),
+                timestamp: None,
+            }],
+            ..Default::default()
+        };
+        let cr = ContextResponse {
+            text: "[1] Larkspur invoice 2207 final (notes)\nFinal invoice 2207 for Larkspur \
+Foods: total $9,120, payment due November 14. Payee: Fernway Studio."
+                .into(),
+            citations: vec![cite(1, "k90", "Larkspur invoice 2207 final", "2026-10-14")],
+            excluded_sensitive: 0,
+        };
+        for (draft, want) in [
+            (
+                "Hi Priya, the total is $9,120, due November 14, pay into Larkspur Bank.",
+                "Hi Priya, the total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Please pay into larkspur bank.",
+                "The total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Bitte überweisen Sie an die Larkspur Bank.",
+                "The total is $9,120, due November 14.",
+            ),
+            (
+                "The total is $9,120, due November 14. Please pay into Fernway Studio's account.",
+                "The total is $9,120, due November 14. Please pay into Fernway Studio's account.",
+            ),
+        ] {
+            let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+                .with_check(GroundingCheck::Secrets);
+            assert_eq!(stream(&mut g, &[draft]), want, "{draft}");
+        }
+        // Ordinary mentions of an account are not payment instructions.
+        assert!(!payment_cue(
+            "Sarah from the account team at Acme will call you."
+        ));
+        assert!(!payment_cue("Taking that into account, Thursday works."));
+        assert!(payment_cue("Please pay into our account at Acme."));
     }
 
     /// MM1 on GG1: a number the thread states passes even when its digits, joined with the
