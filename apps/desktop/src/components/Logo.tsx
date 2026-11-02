@@ -1,14 +1,25 @@
+import { MARK_H, MARK_TILE, WORDMARK, WORDMARK_VIEWBOX } from "../brand/marks";
+
 /**
- * The Heed mark: an attention dot above a line, on a graphite tile. With `pulse` the dot breathes
- * gently (something needs you); reduced motion keeps it still.
+ * The Heed mark: a soft serif "h" on an ultramarine squircle. With `pulse` a quiet ring breathes
+ * around it (something needs you); reduced motion keeps it still.
  */
 export function Logo({ size = 22, pulse = false }: { size?: number; pulse?: boolean }) {
   return (
     <svg className={pulse ? "mark mark-pulse" : "mark"} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-      <rect width="64" height="64" rx="15" className="mark-tile" />
-      <circle cx="32" cy="25" r="12" className="mark-halo" />
-      <circle cx="32" cy="25" r="7.5" className="mark-dot" />
-      <rect x="19" y="39" width="26" height="5.5" rx="2.75" className="mark-line" />
+      <path d={MARK_TILE} className="mark-tile" />
+      <path d={MARK_H} className="mark-line" />
+      <circle cx="54" cy="10" r="7" className="mark-halo" />
+    </svg>
+  );
+}
+
+/** The lowercase "heed" wordmark in the current text colour. */
+export function Wordmark({ height = 20 }: { height?: number }) {
+  const [, , w, h] = WORDMARK_VIEWBOX.split(" ").map(Number);
+  return (
+    <svg className="wordmark-svg" height={height} width={(height * w!) / h!} viewBox={WORDMARK_VIEWBOX} aria-hidden="true" focusable="false">
+      <path d={WORDMARK} fill="currentColor" />
     </svg>
   );
 }

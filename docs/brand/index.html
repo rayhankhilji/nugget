@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heed brand</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<!-- The same files the desktop app and the website use: copy them verbatim. -->
+<link rel="stylesheet" href="../../apps/desktop/src/brand/fonts.css">
+<link rel="stylesheet" href="../../apps/desktop/src/brand/tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--heed-canvas); color: var(--heed-ink); font: 400 15px/1.55 var(--heed-font-ui); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
+  header.hero { background: var(--heed-signal); color: #fff; padding: 72px 0 64px; position: relative; overflow: hidden; }
+  header.hero::after { content: ""; position: absolute; inset: 0; background-image: radial-gradient(rgb(255 255 255 / .22) 1.2px, transparent 1.4px); background-size: 14px 14px; mask-image: linear-gradient(transparent 40%, #000); pointer-events: none; }
+  .display { font-family: var(--heed-font-display); font-variation-settings: var(--heed-display-settings); font-weight: var(--heed-display-weight); letter-spacing: var(--heed-display-tracking); line-height: 1.02; margin: 0; }
+  header .display { font-size: 80px; max-width: 14ch; }
+  header p { max-width: 52ch; color: rgb(255 255 255 / .86); font-size: 17px; }
+  header img { height: 44px; filter: brightness(0) invert(1); margin-bottom: 40px; }
+  section { padding: 64px 0; border-top: 1px solid var(--heed-line); }
+  h2 { font-family: var(--heed-font-display); font-variation-settings: var(--heed-display-settings); font-weight: 380; font-size: 40px; letter-spacing: -.02em; margin: 0 0 8px; }
+  h3 { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--heed-ink-quiet); margin: 32px 0 12px; font-family: var(--heed-font-mono); }
+  .lead { color: var(--heed-ink-2); max-width: 64ch; margin: 0 0 24px; }
+  .grid { display: grid; gap: 16px; }
+  .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .card { background: var(--heed-surface); border-radius: 16px; box-shadow: var(--heed-shadow-2); padding: 24px; }
+  .tile { border-radius: 16px; display: grid; place-items: center; min-height: 200px; }
+  .mono { font-family: var(--heed-font-mono); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .dock { background: linear-gradient(#c9d3ff, #9fb0ff 60%, #e7dccb); border-radius: 16px; min-height: 220px; display: grid; align-items: end; justify-items: center; padding: 24px; }
+  .dock .bar { display: flex; gap: 14px; align-items: end; padding: 10px 14px; border-radius: 22px; background: rgb(255 255 255 / .45); backdrop-filter: blur(20px); box-shadow: 0 10px 30px rgb(7 7 152 / .2); }
+  .dock .bar i { width: 56px; height: 56px; border-radius: 13px; background: rgb(255 255 255 / .7); display: block; }
+  .dock .bar img { width: 64px; height: 64px; }
+  .tab { display: inline-flex; align-items: center; gap: 8px; background: var(--heed-surface); border-radius: 10px 10px 0 0; padding: 10px 16px; box-shadow: var(--heed-shadow-1); font-size: 13px; }
+  .tab img { width: 16px; height: 16px; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .sw { border-radius: 12px; overflow: hidden; background: var(--heed-surface); box-shadow: var(--heed-shadow-1); }
+  .sw b { display: block; height: 84px; }
+  .sw div { padding: 10px 12px; font-size: 13px; }
+  .sw small { display: block; color: var(--heed-ink-quiet); font-family: var(--heed-font-mono); font-size: 12px; }
+  .bar-field { height: 140px; border-radius: 16px; background: var(--heed-signal); color: #fff; display: flex; align-items: end; padding: 24px; font-family: var(--heed-font-display); font-variation-settings: var(--heed-display-settings); font-weight: 340; font-size: 40px; letter-spacing: -.02em; }
+  .night { background: #0b0b1a; color: #f3f1ec; border-radius: 16px; padding: 24px; }
+  .night .sw { background: #131327; } .night .sw small { color: #9a97ad; }
+  .spec .display { margin-bottom: 12px; }
+  .scale { display: grid; gap: 6px; }
+  .scale span { display: flex; align-items: baseline; gap: 16px; } .scale span small { width: 48px; }
+  .do, .dont { border-radius: 12px; padding: 16px 18px; background: var(--heed-surface); box-shadow: var(--heed-shadow-1); }
+  .do b { color: var(--heed-ok-ink); } .dont b { color: var(--heed-danger-ink); }
+  .motion-demo { display: flex; gap: 12px; flex-wrap: wrap; }
+  .motion-demo .card { width: 200px; animation: rise var(--heed-dur-panel) var(--heed-ease-enter) both; }
+  .motion-demo .card:nth-child(2) { animation-delay: var(--heed-stagger); } .motion-demo .card:nth-child(3) { animation-delay: calc(var(--heed-stagger) * 2); }
+  @keyframes rise { from { opacity: 0; transform: translateY(var(--heed-rise)); } }
+  .meter { height: 6px; border-radius: 3px; background: var(--heed-signal-wash); overflow: hidden; } .meter b { display: block; height: 100%; width: 62%; background: var(--heed-signal); }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .steps li { display: flex; align-items: center; gap: 10px; }
+  .steps i { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-style: normal; font-size: 11px; }
+  .steps .done i { background: var(--heed-signal); color: #fff; } .steps .now i { border: 2px solid var(--heed-signal); border-top-color: transparent; animation: spin 1s linear infinite; } .steps .todo i { border: 1.5px solid var(--heed-ink-3); }
+  .steps .todo { color: var(--heed-ink-quiet); }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .imagery img { width: 100%; height: 220px; object-fit: cover; border-radius: 16px; display: block; }
+  .imagery figcaption { font-size: 12px; color: var(--heed-ink-quiet); margin-top: 6px; }
+  @media (max-width: 760px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } header .display { font-size: 48px; } }
+  @media (prefers-reduced-motion: reduce) { .steps .now i { animation: none; } }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <img src="assets/heed-wordmark-mono.svg" alt="heed">
+    <h1 class="display">Let it run. We’ll cover the rest.</h1>
+    <p>The Heed brand: cream canvases, warm ink and one confident ultramarine. This page is the source of truth for the desktop app and the website; both use the same token file, fonts and logo.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <section id="logo">
+    <h2>Logo</h2>
+    <p class="lead">The wordmark is a lowercase “heed” in Fraunces, soft and a little wonky (SOFT 100, WONK 1, about 400 weight), drawn as outlines so it needs no font. The mark is a soft serif “h” on an ultramarine squircle. Keep clear space of one “e” height around both.</p>
+    <div class="grid g2">
+      <div class="card tile"><img src="assets/heed-wordmark.svg" alt="heed wordmark" style="height:96px"></div>
+      <div class="tile" style="background:var(--heed-signal)"><img src="assets/heed-wordmark-light.svg" alt="heed wordmark on ultramarine" style="height:96px"></div>
+    </div>
+    <h3>Mark, at size</h3>
+    <div class="card" style="display:flex;gap:32px;align-items:end;flex-wrap:wrap">
+      <img src="assets/heed-app-icon.svg" alt="App icon" width="180">
+      <img src="assets/heed-mark.svg" alt="Mark" width="64">
+      <img src="assets/heed-mark.svg" alt="Mark at 32px" width="32">
+      <img src="assets/heed-mark.svg" alt="Mark at 16px" width="16">
+      <span style="color:var(--heed-ink)"><img src="assets/heed-mark-mono.svg" alt="Mono mark" width="48"></span>
+      <span class="mono">heed-app-icon.svg (1024 master) · heed-mark.svg · heed-mark-mono.svg · favicon.svg</span>
+    </div>
+    <h3>In the dock and the browser</h3>
+    <div class="grid g2">
+      <div class="dock"><div class="bar"><i></i><i></i><img src="assets/heed-app-icon.svg" alt="Heed in the macOS dock"><i></i></div></div>
+      <div class="card" style="background:var(--heed-surface-2)"><span class="tab"><img src="assets/favicon.svg" alt="">Heed · Your mornings back</span></div>
+    </div>
+  </section>
+
+  <section id="colour">
+    <h2>Colour</h2>
+    <p class="lead">Ultramarine is used in big, confident fields (a full-bleed panel, a feature band), not as a 2px accent. Everything else is cream and warm ink. Status colours carry meaning only. Every text pair meets WCAG AA; Ink 3 is for icons and rules, never text.</p>
+    <div class="grid g3" style="margin-bottom:16px">
+      <div class="bar-field">Signal</div>
+      <div class="bar-field" style="background:var(--heed-signal-deep)">Deep</div>
+      <div class="bar-field" style="background:var(--heed-signal-wash);color:var(--heed-signal-deep)">Wash</div>
+    </div>
+    <div class="swatches">
+      <div class="sw"><b style="background:#F6F3EC"></b><div>Canvas<small>#F6F3EC</small></div></div>
+      <div class="sw"><b style="background:#FFFFFF"></b><div>Surface<small>#FFFFFF</small></div></div>
+      <div class="sw"><b style="background:#FBF9F4"></b><div>Surface 2<small>#FBF9F4</small></div></div>
+      <div class="sw"><b style="background:#14110F"></b><div>Ink<small>#14110F</small></div></div>
+      <div class="sw"><b style="background:#4A4540"></b><div>Ink 2<small>#4A4540</small></div></div>
+      <div class="sw"><b style="background:#6E6860"></b><div>Ink quiet<small>#6E6860 · text</small></div></div>
+      <div class="sw"><b style="background:#8A847C"></b><div>Ink 3<small>#8A847C · no text</small></div></div>
+      <div class="sw"><b style="background:#1F3BFF"></b><div>Signal<small>#1F3BFF</small></div></div>
+      <div class="sw"><b style="background:#1830D6"></b><div>Signal hover<small>#1830D6</small></div></div>
+      <div class="sw"><b style="background:#070798"></b><div>Signal deep<small>#070798</small></div></div>
+      <div class="sw"><b style="background:#E9ECFF"></b><div>Signal wash<small>#E9ECFF</small></div></div>
+      <div class="sw"><b style="background:#E8E3FF"></b><div>Lilac<small>#E8E3FF</small></div></div>
+      <div class="sw"><b style="background:#1E8E5A"></b><div>OK<small>#1E8E5A · text #17744B</small></div></div>
+      <div class="sw"><b style="background:#C77700"></b><div>Warn<small>#C77700 · text #995B00</small></div></div>
+      <div class="sw"><b style="background:#D93A2B"></b><div>Danger<small>#D93A2B · text #B83224</small></div></div>
+    </div>
+    <h3>Dark: a deep ink-blue night, not inverted cream</h3>
+    <div class="night swatches">
+      <div class="sw"><b style="background:#0B0B1A"></b><div>Canvas<small>#0B0B1A</small></div></div>
+      <div class="sw"><b style="background:#131327"></b><div>Surface<small>#131327</small></div></div>
+      <div class="sw"><b style="background:#1A1A33"></b><div>Surface 2<small>#1A1A33</small></div></div>
+      <div class="sw"><b style="background:#F3F1EC"></b><div>Ink<small>#F3F1EC</small></div></div>
+      <div class="sw"><b style="background:#B9B6C8"></b><div>Ink 2<small>#B9B6C8</small></div></div>
+      <div class="sw"><b style="background:#7D7A92"></b><div>Ink 3<small>#7D7A92 · no text</small></div></div>
+      <div class="sw"><b style="background:#5A6CFF"></b><div>Signal<small>#5A6CFF · text #8A97FF</small></div></div>
+      <div class="sw"><b style="background:#4A5CFF"></b><div>Signal fill<small>#4A5CFF · white text</small></div></div>
+      <div class="sw"><b style="background:#070798"></b><div>Signal deep<small>#070798</small></div></div>
+    </div>
+  </section>
+
+  <section id="type" class="spec">
+    <h2>Type</h2>
+    <p class="lead">Fraunces for display only (28px and up): soft, a little wonky, light (300–400), tracked tight. Geist for the interface at 13–15px. Geist Mono for numerals, times, counts, shortcuts and IDs, always with tabular figures. All three are under the SIL Open Font License and bundled. Arabic, Devanagari and CJK use the system fonts.</p>
+    <div class="grid g2">
+      <div class="card">
+        <p class="display" style="font-size:80px">Your mornings, back.</p>
+        <p class="display" style="font-size:40px">Give your team their mornings back</p>
+        <p class="mono">Fraunces · SOFT 100 · WONK 1 · 300–400 · −1.5% to −2.5%</p>
+      </div>
+      <div class="card">
+        <p style="font-size:15px;font-weight:500;margin:0 0 6px">Reply to Margaret Thistlewood: Moorland sync</p>
+        <p style="font-size:14px;color:var(--heed-ink-2);margin:0 0 14px">Margaret asked whether Thursday works and hasn’t heard back. Nothing is sent until you approve it.</p>
+        <p class="mono" style="font-size:20px;margin:0">12,480 items · 09:41 · ⌘K · 2,318 tokens</p>
+        <p class="mono">Geist 400/500 · Geist Mono, tabular</p>
+      </div>
+    </div>
+    <h3>Scale</h3>
+    <div class="card scale">
+      <span><small class="mono">96</small><span class="display" style="font-size:96px">heed</span></span>
+      <span><small class="mono">80</small><span class="display" style="font-size:80px">Let it run.</span></span>
+      <span><small class="mono">56</small><span class="display" style="font-size:56px">What needs you today</span></span>
+      <span><small class="mono">40</small><span class="display" style="font-size:40px">Good morning, Sam</span></span>
+      <span><small class="mono">28</small><span class="display" style="font-size:28px">Morning brief</span></span>
+      <span><small class="mono">20</small><span style="font-size:20px;font-weight:500">Section title</span></span>
+      <span><small class="mono">16</small><span style="font-size:16px">Reading text in answers and briefs</span></span>
+      <span><small class="mono">14</small><span style="font-size:14px">Interface text, buttons and lists</span></span>
+      <span><small class="mono">13</small><span style="font-size:13px">Secondary text and labels</span></span>
+      <span><small class="mono">12</small><span class="mono">META · 12:04 · 1,284</span></span>
+    </div>
+  </section>
+
+  <section id="imagery">
+    <h2>Imagery</h2>
+    <p class="lead">Only original or public-domain images. Original procedural ultramarine dither and engraving textures (the code is in <span class="mono">docs/brand/tools</span>); CC0 landscape paintings duotoned to ultramarine on cream, credited in <span class="mono">CREDITS.md</span>; and a generated sky behind floating product cards. No stock photos, no other brands’ illustrations.</p>
+    <div class="grid g3 imagery" id="imagery-grid"></div>
+  </section>
+
+  <section id="ui">
+    <h2>Product UI</h2>
+    <p class="lead">Calm and light: white cards with soft, low shadows and 12–16px radii, floating over sky or painterly imagery. One primary action per card. Agent work shows as a step list with check, spinner and pending states, a thin progress meter and mono counts.</p>
+    <div class="grid g2">
+      <div class="card">
+        <p style="margin:0 0 4px;font-weight:500">Reply to Margaret · Gmail</p>
+        <p class="mono" style="color:var(--heed-ink-quiet);margin:0 0 16px">STEP 2 OF 3 · 0:04 · 812 TOKENS</p>
+        <ul class="steps">
+          <li class="done"><i>✓</i>Read the thread and your calendar</li>
+          <li class="now"><i></i>Drafting a reply in your voice</li>
+          <li class="todo"><i></i>Waiting for your approval</li>
+        </ul>
+        <div class="meter" style="margin:18px 0"><b></b></div>
+        <div style="display:flex;gap:8px"><button style="font:500 14px var(--heed-font-ui);background:var(--heed-signal-fill);color:#fff;border:0;border-radius:8px;padding:8px 14px">View draft</button><button style="font:500 14px var(--heed-font-ui);background:none;border:0;color:var(--heed-ink-2);padding:8px 10px">Pause</button></div>
+      </div>
+      <div class="card" style="background:var(--heed-surface-2)">
+        <p class="mono" style="margin:0 0 8px;color:var(--heed-ink-quiet)">PLAN · HEED MAX</p>
+        <p class="display" style="font-size:56px">£99<span style="font-size:20px">/mo</span></p>
+        <p style="margin:8px 0 14px;color:var(--heed-ink-2)">Smart asks this month</p>
+        <div class="meter"><b style="width:38%"></b></div>
+        <p class="mono" style="margin:8px 0 0">114 / 300</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="motion">
+    <h2>Motion</h2>
+    <p class="lead">Quick, quiet and never blocking. Cards rise 8px and fade in; lists stagger by 30ms (at most 8 items); agent steps tick to a check with a 180ms draw; ghost text fades in over 80ms and never slides. Brand moments only: a slow dither drift (20–40s) and sky parallax of at most 12px. With reduced motion: fades only.</p>
+    <div class="grid g2">
+      <div class="card mono" style="font-size:13px;line-height:1.9">
+        enter&nbsp;&nbsp;&nbsp;&nbsp;cubic-bezier(.2,.8,.2,1)<br>
+        standard cubic-bezier(.4,0,.2,1)<br>
+        micro&nbsp;&nbsp;&nbsp;&nbsp;120ms · ui 200ms · panel 320ms<br>
+        brand&nbsp;&nbsp;&nbsp;&nbsp;600–900ms
+      </div>
+      <div class="motion-demo"><div class="card">Rise</div><div class="card">and</div><div class="card">stagger</div></div>
+    </div>
+  </section>
+
+  <section id="dos">
+    <h2>Do and don’t</h2>
+    <div class="grid g2">
+      <div class="do"><b>Do</b> use ultramarine as a field: a panel, a band, the app icon.</div>
+      <div class="dont"><b>Don’t</b> sprinkle ultramarine as thin borders and tiny accents everywhere.</div>
+      <div class="do"><b>Do</b> set headlines in Fraunces, large and light, in short punchy lines.</div>
+      <div class="dont"><b>Don’t</b> use Fraunces in buttons, tables, forms or below 28px.</div>
+      <div class="do"><b>Do</b> put numbers, times and shortcuts in Geist Mono.</div>
+      <div class="dont"><b>Don’t</b> recolour, stretch, outline or rotate the mark.</div>
+      <div class="do"><b>Do</b> use the dark theme’s ink-blue night.</div>
+      <div class="dont"><b>Don’t</b> invert the cream for dark mode or put signal text below 18px on the canvas.</div>
+    </div>
+  </section>
+</main>
+<script>
+  // Imagery examples, listed in docs/brand/assets/imagery.json once generated.
+  fetch("assets/imagery.json").then((r) => r.json()).then((list) => {
+    const grid = document.getElementById("imagery-grid");
+    for (const it of list) {
+      const f = document.createElement("figure"); f.style.margin = "0";
+      const img = document.createElement("img"); img.src = it.src; img.alt = it.alt; img.loading = "lazy";
+      const c = document.createElement("figcaption"); c.textContent = it.caption;
+      f.append(img, c); grid.append(f);
+    }
+  }).catch(() => {});
+</script>
+</body>
+</html>

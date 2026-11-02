@@ -1,166 +1,123 @@
-/* Heed design tokens: the one place for colour, type, space, radius, depth and motion. Light and
-   dark follow the OS. Every text pair is AA (4.5:1) and every control edge 3:1 in both themes.
-   The brand lives in two tokens: --brand (signal coral, for the mark and the ghost-text shimmer)
-   and --accent (the coral used for actions; deeper in light mode so white text on it stays AA). */
+/* The app's design tokens: the names the components use, mapped onto the Heed brand tokens
+   (brand/tokens.css, shared verbatim with the website). Light is cream and ink; dark is an ink-blue
+   night. Change colours, type and motion in brand/tokens.css, not here. */
 
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/inter-latin-opsz-normal.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: swap;
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
-    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-
-@font-face {
-  font-family: "Inter";
-  src: url("./fonts/inter-latin-ext-opsz-normal.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: swap;
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
-    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-
-/* The wordmark only. */
-@font-face {
-  font-family: "Geist";
-  src: url("./fonts/geist-latin-wght-normal.woff2") format("woff2");
-  font-weight: 100 900;
-  font-display: block;
-}
+@import "./brand/fonts.css";
+@import "./brand/tokens.css";
 
 :root {
   color-scheme: light dark;
-  /* Inter for Latin; other scripts fall to the OS's own UI font for that script. */
-  --font: "Inter", system-ui, -apple-system, "Segoe UI", "Noto Sans", "Noto Sans Arabic", "Noto Sans Devanagari",
-    "Hiragino Sans", "PingFang SC", "Microsoft YaHei", "Yu Gothic UI", sans-serif;
-  --font-brand: "Geist", var(--font);
-  --mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  --font: var(--heed-font-ui);
+  --font-display: var(--heed-font-display);
+  --font-brand: var(--heed-font-display);
+  --mono: var(--heed-font-mono);
 
-  /* Graphite · Chalk · Signal coral · Mist */
-  --bg: #f7f7f5;
-  --surface: #ffffff;
-  --sidebar: #eeeeeb;
-  --raised: #f0f0ee;
-  --border: #e3e3df;
-  --text: #16171b;
-  --muted: #5a616b;
-  --brand: #ff5a3c;
-  --accent: #bc3416;
-  --accent-strong: #9e2a10;
-  --accent-soft: #ffe9e4;
-  --accent-contrast: #ffffff;
-  --good: #1a7a4a;
-  --good-soft: #e3f3ea;
-  --warn: #8a5a00;
-  --warn-soft: #fbefd6;
-  --bad: #b3261e;
-  --bad-soft: #fbe5e3;
-  --focus: #bc3416;
-  --link: #b4361a;
-  --control-border: #7b818a;
-  --backdrop: rgb(22 23 27 / 0.32);
-  --user-bubble: #efefec;
-  --hover: rgb(22 23 27 / 0.05);
-  --selected: rgb(22 23 27 / 0.07);
-  --hairline: rgb(22 23 27 / 0.08);
+  --bg: var(--heed-canvas);
+  --surface: var(--heed-surface);
+  --surface-2: var(--heed-surface-2);
+  --sidebar: color-mix(in srgb, var(--heed-ink) 4%, var(--heed-canvas));
+  --raised: color-mix(in srgb, var(--heed-ink) 5%, var(--heed-surface));
+  --border: var(--heed-line-strong);
+  --hairline: var(--heed-line);
+  --text: var(--heed-ink);
+  --text-2: var(--heed-ink-2);
+  --muted: var(--heed-ink-quiet);
+  --brand: var(--heed-signal);
+  --accent: var(--heed-signal-fill);
+  --accent-strong: var(--heed-signal-hover);
+  --accent-soft: var(--heed-signal-wash);
+  --accent-contrast: var(--heed-on-signal);
+  --accent-text: var(--heed-signal-ink);
+  --good: var(--heed-ok-ink);
+  --good-soft: color-mix(in srgb, var(--heed-ok) 12%, var(--heed-surface));
+  --warn: var(--heed-warn-ink);
+  --warn-soft: color-mix(in srgb, var(--heed-warn) 13%, var(--heed-surface));
+  --bad: var(--heed-danger-ink);
+  --bad-soft: color-mix(in srgb, var(--heed-danger) 11%, var(--heed-surface));
+  --focus: var(--heed-signal);
+  --link: var(--heed-signal-ink);
+  --control-border: var(--heed-ink-3);
+  --backdrop: rgb(20 17 15 / 0.28);
+  --user-bubble: var(--heed-signal-wash);
+  --hover: color-mix(in srgb, var(--heed-ink) 5%, transparent);
+  --selected: color-mix(in srgb, var(--heed-ink) 8%, transparent);
   --highlight: inset 0 1px 0 rgb(255 255 255 / 0.9);
-  --btn-face: linear-gradient(#ffffff, #f8f8f6);
+  --btn-face: var(--heed-surface);
 
   --btn-border: var(--control-border);
-  --danger-bg: var(--bad);
+  --danger-bg: var(--heed-danger-ink);
   --danger-text: #ffffff;
-  --dialog-border: var(--border);
+  --dialog-border: var(--heed-line-strong);
 
-  /* Depth: an edge plus soft blur, in three steps (controls, cards, popovers). */
-  --shadow: 0 0 0 0.5px rgb(22 23 27 / 0.1), 0 1px 2px rgb(22 23 27 / 0.06);
-  --shadow-2: 0 0 0 0.5px rgb(22 23 27 / 0.08), 0 2px 4px rgb(22 23 27 / 0.04), 0 8px 24px rgb(22 23 27 / 0.06);
-  --shadow-3: 0 0 0 0.5px rgb(22 23 27 / 0.12), 0 4px 12px rgb(22 23 27 / 0.08), 0 24px 60px rgb(22 23 27 / 0.18);
-  --overlay-shadow: var(--shadow-3);
+  --shadow: var(--heed-shadow-1);
+  --shadow-2: var(--heed-shadow-2);
+  --shadow-3: var(--heed-shadow-3);
+  --overlay-shadow: var(--heed-shadow-3);
 
-  --radius-small: 7px;
-  --radius: 10px;
-  --radius-large: 14px;
-  --radius-xl: 18px;
+  --radius-small: var(--heed-radius-s);
+  --radius: var(--heed-radius-m);
+  --radius-large: var(--heed-radius-l);
+  --radius-xl: var(--heed-radius-xl);
 
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
+  --space-1: var(--heed-space-1);
+  --space-2: var(--heed-space-2);
+  --space-3: var(--heed-space-3);
+  --space-4: var(--heed-space-4);
+  --space-5: var(--heed-space-5);
+  --space-6: var(--heed-space-6);
+  --space-7: var(--heed-space-7);
 
-  /* 13px UI, tight leading; tracking tightens as size grows. */
-  --fs-xs: 12px;
-  --fs-sm: 12px;
-  --fs-md: 13px;
-  --fs-lg: 15px;
-  --fs-xl: 22px;
-  --fs-2xl: 28px;
-  --fs-3xl: 40px;
+  /* Geist for the UI at 13–14px; Fraunces only for display text (28px and up, never controls). */
+  --fs-xs: var(--heed-size-12);
+  --fs-sm: var(--heed-size-13);
+  --fs-md: var(--heed-size-14);
+  --fs-lg: var(--heed-size-16);
+  --fs-xl: var(--heed-size-20);
+  --fs-2xl: var(--heed-size-28);
+  --fs-3xl: var(--heed-size-40);
+  --fs-4xl: var(--heed-size-56);
   --lh: 1.45;
 
-  --control-h: 30px;
-  --control-h-small: 24px;
-  --sidebar-w: 232px;
+  --control-h: 32px;
+  --control-h-small: 26px;
+  --sidebar-w: 236px;
 
-  /* Motion: short, never blocking input. Reduced motion zeroes the durations (below). */
-  --dur-1: 120ms;
-  --dur-2: 180ms;
-  --dur-3: 240ms;
-  --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  --ease-in: cubic-bezier(0.4, 0, 1, 1);
-  --rise: 6px;
+  --dur-1: var(--heed-dur-micro);
+  --dur-2: var(--heed-dur-ui);
+  --dur-3: var(--heed-dur-panel);
+  --ease-out: var(--heed-ease-enter);
+  --ease-in: var(--heed-ease-standard);
+  --rise: var(--heed-rise);
+
+  /* The mark: an ultramarine squircle with a cream "h". */
+  --mark-tile: var(--heed-signal);
+  --mark-line: var(--heed-canvas);
+  /* App logos sit on a white tile in both themes, as their owners draw them. */
+  --logo-tile: #ffffff;
+  --logo-ink: rgb(20 17 15 / 0.78);
 
   /* Knowledge graph: one colour per entity kind (also read by the canvas), each >= 3:1. */
-  --kind-person: #1f5fd6;
+  --kind-person: #1f3bff;
   --kind-organization: #7d3fc8;
-  --kind-project: #6b7f00;
+  --kind-project: #5f7300;
   --kind-commitment: #c4281c;
-  --kind-preference: #008b9a;
+  --kind-preference: #00808e;
   --kind-event: #b85400;
   --kind-place: #1e8e3e;
   --kind-topic: #c0308f;
-  --graph-edge: rgb(22 23 27 / 0.24);
+  --graph-edge: rgb(20 17 15 / 0.22);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #16171b;
-    --surface: #1d1e23;
-    --sidebar: #1a1b1f;
-    --raised: #24252b;
-    --border: #2c2d33;
-    --text: #f2f2f0;
-    --muted: #9aa3ae;
-    --accent: #ff5a3c;
-    --accent-strong: #ff7b62;
-    --accent-soft: #3a1f19;
-    --accent-contrast: #16171b;
-    --good: #5ccb92;
-    --good-soft: #16301f;
-    --warn: #f0c062;
-    --warn-soft: #362812;
-    --bad: #ff8a80;
-    --bad-soft: #3b1a17;
-    --focus: #ff7b62;
-    --link: #ff8d76;
-    --control-border: #6e747d;
-    --backdrop: rgb(0 0 0 / 0.5);
-    --user-bubble: #26272d;
-    --hover: rgb(255 255 255 / 0.05);
-    --selected: rgb(255 255 255 / 0.09);
-    --hairline: rgb(255 255 255 / 0.08);
-    --highlight: inset 0 1px 0 rgb(255 255 255 / 0.06);
-    --btn-face: linear-gradient(#2c2d33, #26272c);
-    --danger-bg: #cf4436;
-    --dialog-border: #3a3b42;
-    --shadow: 0 0 0 0.5px rgb(0 0 0 / 0.6), 0 1px 2px rgb(0 0 0 / 0.3);
-    --shadow-2: 0 0 0 0.5px rgb(0 0 0 / 0.6), 0 2px 4px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.3);
-    --shadow-3: 0 0 0 0.5px rgb(0 0 0 / 0.7), 0 4px 12px rgb(0 0 0 / 0.3), 0 24px 60px rgb(0 0 0 / 0.5);
+    --sidebar: color-mix(in srgb, #000 22%, var(--heed-canvas));
+    --raised: color-mix(in srgb, #fff 6%, var(--heed-surface));
+    --backdrop: rgb(4 4 14 / 0.6);
+    --highlight: inset 0 1px 0 rgb(255 255 255 / 0.05);
+    --danger-bg: #c8392b;
+    --mark-line: #f3f1ec;
 
-    --kind-person: #7aa7ff;
+    --kind-person: #8a97ff;
     --kind-organization: #b48cf0;
     --kind-project: #c2d14a;
     --kind-commitment: #ff7a7a;
@@ -168,27 +125,6 @@
     --kind-event: #ffa04d;
     --kind-place: #6fd27a;
     --kind-topic: #f08ac8;
-    --graph-edge: rgb(242 242 240 / 0.22);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --dur-1: 0ms;
-    --dur-2: 0ms;
-    --dur-3: 0ms;
-    --rise: 0px;
-  }
-}
-
-/* The mark keeps its graphite tile in both themes, a step lighter on dark backgrounds. */
-:root {
-  --mark-tile: #16171b;
-  --mark-line: #f7f7f5;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --mark-tile: #2c2d34;
+    --graph-edge: rgb(243 241 236 / 0.2);
   }
 }

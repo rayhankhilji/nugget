@@ -4,7 +4,7 @@ import { useEvent } from "./hooks";
 import { requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
-import { Logo } from "./components/Logo";
+import { Logo, Wordmark } from "./components/Logo";
 import { Icon, type IconName } from "./components/Icon";
 import { cloudApi } from "./cloud";
 import { useCloudSignedIn } from "./cloudSignedIn";
@@ -367,7 +367,8 @@ export function App() {
         <div className="titlebar" data-tauri-drag-region aria-hidden="true" />
         <div className="brand">
           <Logo pulse={needsCount > 0} />
-          <span className="wordmark">{t("app.name").toLowerCase()}</span>
+          <Wordmark height={19} />
+          <span className="visually-hidden">{t("app.name")}</span>
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
           <Icon name="search" size={14} />
