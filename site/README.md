@@ -34,6 +34,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
 | `/checkout?plan=heed\|heed_max&interval=month\|year` | Sends you to sign up if you're signed out, then starts Stripe Checkout. |
+| `/docs/self-host` | The book's self-hosting guide (`docs/book/src/guide/self-host.md`), copied into `src/content/docs/` by `npm run docs` and rendered with a sticky contents list. The smoke test fails if the copy is stale. |
 | `/legal/privacy`, `/legal/terms` | **Drafts that need legal review**. Each one is marked at the top, and its placeholders are in `[brackets]`. |
 
 The `account` and `checkout` pages are `noindex` and left out of the sitemap. They're also disallowed
