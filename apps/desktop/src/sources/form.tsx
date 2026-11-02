@@ -192,6 +192,31 @@ export interface FormProps<K extends string = string> {
   onBack: () => void;
   onClose: () => void;
   onAdded: (s: SourceInfo) => void;
+  /** Providers with Nugget's own OAuth client in this build (`sources.oauth.builtin`). */
+  builtin?: readonly string[];
+}
+
+/**
+ * The fields of the user's own OAuth client: behind a closed "Advanced" disclosure when Nugget
+ * has a built-in client (filled in, they win), else shown with a note that they are needed.
+ */
+export function OwnClient({ builtin, provider, children }: { builtin: boolean; provider: string; children: ReactNode }) {
+  const t = useT();
+  if (builtin) {
+    return (
+      <details className="help own-client">
+        <summary>{t("addSource.oauth.ownClient")}</summary>
+        <p className="small muted">{t("addSource.oauth.ownClientHint")}</p>
+        {children}
+      </details>
+    );
+  }
+  return (
+    <>
+      <p className="note small">{t("addSource.oauth.noBuiltin", { provider })}</p>
+      {children}
+    </>
+  );
 }
 
 /** Tags allowed in translated help text: `<b>…</b>` and `<code>…</code>`. */

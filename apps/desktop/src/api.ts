@@ -1084,6 +1084,18 @@ export const api = {
   sourcesSync: (request: SourceSync) => call<void>("sources_sync", { request }),
   /** Open the returned URL with `openUrl`; completion arrives as `sources.changed`. */
   sourcesAuthBegin: (request: SourceRef) => call<AuthBegin>("sources_auth_begin", { request }),
+  /** Disconnect: revoke the OAuth grant where the provider allows, delete stored tokens; the source goes to `needs_auth`. */
+  sourcesAuthRevoke: (request: SourceRef) => call<void>("sources_auth_revoke", { request }),
+  /** Providers this build has Nugget's own OAuth client for; `[]` from a daemon without the method. */
+  sourcesOauthBuiltin: async (): Promise<string[]> => {
+    try {
+      const r = await call<{ providers?: unknown } | null>("sources_oauth_builtin");
+      return isStringArray(r?.providers) ? r.providers : [];
+    } catch (e) {
+      if (isCommandMissing(e)) return [];
+      throw e;
+    }
+  },
   /** Write-only. Callers should drop the secret from their state right after this resolves. */
   sourcesSecretSet: (request: SourceSecret) => call<void>("sources_secret_set", { request }),
   ingestStatus: () => call<IngestStatus>("ingest_status"),

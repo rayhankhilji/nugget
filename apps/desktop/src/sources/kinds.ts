@@ -39,8 +39,9 @@ export const isGoogleKind = (k: string): k is GoogleKind => (GOOGLE_KINDS as rea
 
 /**
  * How an existing source (re)connects:
- * - `browser`: `sources.auth.begin` returns a URL to open (Google, Microsoft, Linear with `client_id`)
- * - `device`: same, plus a user code to enter on that page (GitHub with `client_id`)
+ * - `browser`: `sources.auth.begin` returns a URL to open (Google, Microsoft; Linear and Slack
+ *   with `client_id` or Nugget's built-in client)
+ * - `device`: same, plus a user code to enter on that page (GitHub, likewise)
  * - `password`: a password through `sources.secret.set` (IMAP, CalDAV)
  * - `token`: a pasted API token through `sources.secret.set` (Slack, Notion, GitHub, Linear)
  * - `env`: the token comes from an environment variable (`token_env`); nothing to do here
@@ -53,18 +54,44 @@ const hasString = (settings: SourceSettings | undefined, key: string) => {
   return typeof v === "string" && v.trim() !== "";
 };
 
-export function connectMode(kind: string, settings?: SourceSettings): ConnectMode {
+/** `builtin`: the providers this build has Nugget's own OAuth client for (`sources.oauth.builtin`). */
+export function connectMode(kind: string, settings?: SourceSettings, builtin: readonly string[] = []): ConnectMode {
   if (isGoogleKind(kind) || isMicrosoftKind(kind)) return "browser";
   if (kind === "imap" || kind === "caldav") return "password";
   if (isSaasKind(kind)) {
     if (hasString(settings, "token_env")) return "env";
-    if ((kind === "github" || kind === "linear") && hasString(settings, "client_id")) {
+    const provider = oauthProvider(kind);
+    if (provider && (hasString(settings, "client_id") || builtin.includes(provider))) {
       return kind === "github" ? "device" : "browser";
     }
     return "token";
   }
   return "none";
 }
+
+/** Who signs the user in for this kind (as named by `sources.oauth.builtin`); null without OAuth. */
+export type OAuthProvider = "google" | "microsoft" | "github" | "linear" | "slack";
+
+export function oauthProvider(kind: string): OAuthProvider | null {
+  if (isGoogleKind(kind)) return "google";
+  if (isMicrosoftKind(kind)) return "microsoft";
+  return kind === "github" || kind === "linear" || kind === "slack" ? kind : null;
+}
+
+/** Brand names, the same in every language. */
+export const OAUTH_PROVIDER_NAME: Record<OAuthProvider, string> = {
+  google: "Google",
+  microsoft: "Microsoft",
+  github: "GitHub",
+  linear: "Linear",
+  slack: "Slack",
+};
+
+/** Whether this build signs in to `kind`'s provider with Nugget's own client. */
+export const hasBuiltin = (kind: string, builtin: readonly string[] | undefined) => {
+  const p = oauthProvider(kind);
+  return p !== null && (builtin ?? []).includes(p);
+};
 
 // ---- Google ----
 
@@ -90,9 +117,13 @@ export interface GoogleForm {
 
 export const EMPTY_GOOGLE: GoogleForm = { clientId: "", includeSharedWithMe: false, includeSharedDrives: false };
 
-/** `client_id`, plus Drive's two opt-ins (sent explicitly for `gdrive` only). The secret goes through `sources.secret.set`. */
+/**
+ * `client_id` (left out when blank: Nugget's built-in client), plus Drive's two opt-ins (sent
+ * explicitly for `gdrive` only). The secret goes through `sources.secret.set`.
+ */
 export function googleSettings(kind: GoogleKind, f: GoogleForm): SourceSettings {
-  const out: SourceSettings = { client_id: f.clientId.trim() };
+  const out: SourceSettings = {};
+  if (f.clientId.trim()) out.client_id = f.clientId.trim();
   if (kind === "gdrive") {
     out.include_shared_with_me = f.includeSharedWithMe;
     out.include_shared_drives = f.includeSharedDrives;
@@ -148,8 +179,10 @@ export const EMPTY_MICROSOFT: MicrosoftForm = {
   excludeFolders: "",
 };
 
+/** `client_id` is left out when blank (Nugget's built-in client). */
 export function microsoftSettings(kind: MicrosoftKind, f: MicrosoftForm): SourceSettings {
-  const out: SourceSettings = { client_id: f.clientId.trim() };
+  const out: SourceSettings = {};
+  if (f.clientId.trim()) out.client_id = f.clientId.trim();
   if (f.tenant.trim()) out.tenant = f.tenant.trim();
   if (f.accountHint.trim()) out.account_hint = f.accountHint.trim();
   if (kind === "outlook") {
@@ -167,9 +200,12 @@ export function microsoftSettings(kind: MicrosoftKind, f: MicrosoftForm): Source
 
 export type MicrosoftErrors = Partial<Record<"clientId" | "tenant" | "folders" | "includeFolders" | "excludeFolders", MessageKey>>;
 
-export function microsoftErrors(kind: MicrosoftKind, f: MicrosoftForm): MicrosoftErrors {
+/** `builtin`: the client ID may be left blank (Nugget's own client signs in). */
+export function microsoftErrors(kind: MicrosoftKind, f: MicrosoftForm, builtin = false): MicrosoftErrors {
   const e: MicrosoftErrors = {};
-  if (!f.clientId.trim()) e.clientId = "addSource.microsoft.clientIdMissing";
+  if (!f.clientId.trim()) {
+    if (!builtin) e.clientId = "addSource.microsoft.clientIdMissing";
+  }
   else if (!isGuid(f.clientId)) e.clientId = "addSource.microsoft.clientIdInvalid";
   if (f.tenant.trim() && !isValidTenant(f.tenant)) e.tenant = "addSource.microsoft.tenantInvalid";
   if (kind === "outlook" && !splitList(f.folders).every(isOutlookFolder)) e.folders = "addSource.microsoft.foldersInvalid";
@@ -189,7 +225,7 @@ export const MICROSOFT_SCOPE: Record<MicrosoftKind, string> = {
 
 // ---- SaaS ----
 
-/** `token`: paste a token. `oauth`: the user's own OAuth app (`client_id`). */
+/** `token`: paste a token. `oauth`: sign in, with Nugget's built-in client or the user's own (`client_id`). */
 export type SaasMethod = "token" | "oauth";
 
 export interface SaasForm {
@@ -227,10 +263,13 @@ export const EMPTY_SAAS: SaasForm = {
   teams: "",
 };
 
-/** Kinds that can connect through the user's own OAuth app instead of a pasted token. */
-export const supportsOAuth = (kind: SaasKind) => kind === "github" || kind === "linear";
+/**
+ * Kinds that can sign in instead of taking a pasted token. Slack only offers it with a built-in
+ * client (the wizard has no guide for a Slack app of the user's own).
+ */
+export const supportsOAuth = (kind: SaasKind, builtin = false) => kind === "github" || kind === "linear" || (kind === "slack" && builtin);
 
-const usesOAuth = (kind: SaasKind, f: SaasForm) => supportsOAuth(kind) && f.method === "oauth";
+const usesOAuth = (kind: SaasKind, f: SaasForm) => supportsOAuth(kind, true) && f.method === "oauth";
 
 export const isRepo = (s: string) => /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(s) && !s.split("/").some((p) => p === "." || p === "..");
 export const isTeamKey = (s: string) => /^[A-Za-z0-9_]+$/.test(s);
@@ -274,12 +313,14 @@ export type SaasErrors = Partial<Record<"clientId" | "token" | "conversations" |
 
 /**
  * Form errors. `token` is the pasted value (checked only in token mode, and only when nothing
- * was saved yet); it is read here and never kept.
+ * was saved yet); it is read here and never kept. With `builtin`, the client ID may be blank.
  */
-export function saasErrors(kind: SaasKind, f: SaasForm, token: string, tokenSaved: boolean): SaasErrors {
+export function saasErrors(kind: SaasKind, f: SaasForm, token: string, tokenSaved: boolean, builtin = false): SaasErrors {
   const e: SaasErrors = {};
   if (usesOAuth(kind, f)) {
-    if (!f.clientId.trim()) e.clientId = "addSource.saas.clientIdMissing";
+    if (!f.clientId.trim()) {
+      if (!builtin) e.clientId = "addSource.saas.clientIdMissing";
+    }
     else if (/[\s\u0000-\u001f]/.test(f.clientId.trim()) || f.clientId.trim().length > 512) e.clientId = "addSource.saas.clientIdInvalid";
   } else if (!token.trim() && !tokenSaved) {
     e.token = "addSource.saas.tokenMissing";

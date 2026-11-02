@@ -4,10 +4,11 @@ import { t as tGlobal, Trans, useT, type MessageKey, type TagRenderer } from "..
 import { baseName, sourceKindLabel, splitList } from "../format";
 import { KindPicker } from "../sources/KindPicker";
 import { NEW_KIND_TITLE, NewKindForm, isNewKind } from "../sources/forms";
-import { Actions, Check, Done, Field, FormError, NameField, useAutofocus, useSaveSource, type FormProps as BaseFormProps } from "../sources/form";
-import { ConnectWait, useAuthWait } from "../sources/auth";
-import { EMPTY_GOOGLE, GDRIVE_SCOPE, GOOGLE_API, googleSettings, type GoogleKind } from "../sources/kinds";
+import { Actions, Check, Done, Field, FormError, NameField, OwnClient, useAutofocus, useSaveSource, type FormProps as BaseFormProps } from "../sources/form";
+import { ConnectWait, useAuthWait, useOAuthBuiltin } from "../sources/auth";
+import { EMPTY_GOOGLE, GDRIVE_SCOPE, GOOGLE_API, googleSettings, hasBuiltin, OAUTH_PROVIDER_NAME, oauthProvider, type GoogleKind } from "../sources/kinds";
 import { Dialog } from "./Dialog";
+import { Spinner } from "./ui";
 
 type FormProps = BaseFormProps<SourceKind>;
 
@@ -40,6 +41,7 @@ export function AddSourceWizard({
   const t = useT();
   const [kind, setKind] = useState<ConnectorKind>(initialKind ?? "files");
   const [step, setStep] = useState<"kind" | "form">(initialKind ? "form" : "kind");
+  const builtin = useOAuthBuiltin();
 
   const title = step === "kind" ? t("addSource.title") : t(isNewKind(kind) ? NEW_KIND_TITLE[kind] : ADD_TITLE[kind]);
 
@@ -47,10 +49,13 @@ export function AddSourceWizard({
     <Dialog title={title} onClose={onClose} wide>
       {step === "kind" ? (
         <KindPicker value={kind} onChange={setKind} onNext={() => setStep("form")} onCancel={onClose} blurb={KIND_BLURB} />
+      ) : builtin === null && oauthProvider(kind) ? (
+        // Which sign-in this build offers decides the form; it is known almost at once.
+        <Spinner label={t("common.loading")} />
       ) : isNewKind(kind) ? (
-        <NewKindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} />
+        <NewKindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} builtin={builtin ?? []} />
       ) : (
-        <KindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} />
+        <KindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} builtin={builtin ?? []} />
       )}
     </Dialog>
   );
@@ -317,10 +322,12 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
 
 // -- Google (Gmail, Calendar, Drive) --
 
-function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> & { kind: GoogleKind }) {
+function GoogleForm({ kind, onBack, onClose, onAdded, builtin: providers }: Omit<FormProps, "kind"> & { kind: GoogleKind }) {
   const t = useT();
   const label = sourceKindLabel(kind);
   const apiName = GOOGLE_API[kind];
+  // With Nugget's own client the user's client is optional (and wins when filled in).
+  const builtin = hasBuiltin(kind, providers);
   const [clientId, setClientId] = useState("");
   const [includeSharedWithMe, setIncludeSharedWithMe] = useState(EMPTY_GOOGLE.includeSharedWithMe);
   const [includeSharedDrives, setIncludeSharedDrives] = useState(EMPTY_GOOGLE.includeSharedDrives);
@@ -340,9 +347,10 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
     const id = clientId.trim();
     const secret = secretRef.current?.value ?? "";
     const errs: typeof fieldErrors = {};
-    if (!id) errs.clientId = t("addSource.google.clientIdMissing");
-    else if (!/\.apps\.googleusercontent\.com$/.test(id)) errs.clientId = t("addSource.google.clientIdInvalid");
-    if (!secret && !secretSaved) errs.secret = t("addSource.google.secretMissing");
+    if (!id) {
+      if (!builtin) errs.clientId = t("addSource.google.clientIdMissing");
+    } else if (!/\.apps\.googleusercontent\.com$/.test(id)) errs.clientId = t("addSource.google.clientIdInvalid");
+    if (id && !secret && !secretSaved) errs.secret = t("addSource.google.secretMissing");
     setFieldErrors(errs);
     if (errs.clientId || errs.secret) return;
 
@@ -363,29 +371,15 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
     }
   };
 
-  const { phase, source } = auth;
-  if (phase === "waiting" && source) {
-    return (
-      <ConnectWait
-        label={label}
-        text={t("addSource.wait.text", { label })}
-        source={source}
-        flow={auth.flow}
-        note={auth.note}
-        onOpen={(url) => void auth.open(url)}
-        onClose={() => {
-          onAdded(source);
-          onClose();
-        }}
-      />
-    );
-  }
-  if (phase === "done" && source) {
-    return <Done text={t("addSource.google.connected", { label })} onClose={onClose} />;
-  }
+  const driveOptions = (
+    <div className="field">
+      <Check checked={includeSharedWithMe} onChange={setIncludeSharedWithMe} label={t("addSource.gdrive.sharedWithMe")} hint={t("addSource.gdrive.sharedWithMeHint")} />
+      <Check checked={includeSharedDrives} onChange={setIncludeSharedDrives} label={t("addSource.gdrive.sharedDrives")} hint={t("addSource.gdrive.sharedDrivesHint")} />
+    </div>
+  );
 
-  return (
-    <form onSubmit={connect} noValidate>
+  const ownClient = (
+    <OwnClient builtin={builtin} provider={OAUTH_PROVIDER_NAME.google}>
       <details className="help">
         <summary>{t("addSource.google.howTo")}</summary>
         <ol className="small">
@@ -417,12 +411,12 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
           {t("addSource.google.openConsole")}
         </button>
       </details>
-      <Field label={t("addSource.google.clientId")} error={fieldErrors.clientId}>
+      <Field label={t("addSource.google.clientId")} error={fieldErrors.clientId} optional={builtin}>
         {(a) => (
           <input
             {...a}
-            ref={clientIdRef}
-            data-autofocus=""
+            ref={builtin ? undefined : clientIdRef}
+            data-autofocus={builtin ? undefined : ""}
             type="text"
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
@@ -436,20 +430,44 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> 
       <Field
         label={t("addSource.google.clientSecret")}
         error={fieldErrors.secret}
-        optional={secretSaved}
+        optional={builtin || secretSaved}
         hint={secretSaved ? t("addSource.savedKeepIt") : t("addSource.google.secretHint")}
       >
         {(a) => <input {...a} ref={secretRef} type="password" autoComplete="off" spellCheck={false} />}
       </Field>
-      {kind === "gdrive" && (
-        <div className="field">
-          <Check checked={includeSharedWithMe} onChange={setIncludeSharedWithMe} label={t("addSource.gdrive.sharedWithMe")} hint={t("addSource.gdrive.sharedWithMeHint")} />
-          <Check checked={includeSharedDrives} onChange={setIncludeSharedDrives} label={t("addSource.gdrive.sharedDrives")} hint={t("addSource.gdrive.sharedDrivesHint")} />
-        </div>
-      )}
+    </OwnClient>
+  );
+
+  const { phase, source } = auth;
+  if (phase === "waiting" && source) {
+    return (
+      <ConnectWait
+        label={label}
+        text={t("addSource.wait.text", { label })}
+        source={source}
+        flow={auth.flow}
+        note={auth.note}
+        onOpen={(url) => void auth.open(url)}
+        onClose={() => {
+          onAdded(source);
+          onClose();
+        }}
+      />
+    );
+  }
+  if (phase === "done" && source) {
+    return <Done text={t("addSource.google.connected", { label })} onClose={onClose} />;
+  }
+
+  return (
+    <form onSubmit={connect} noValidate>
+      {builtin && <p className="muted small">{t("addSource.oauth.builtinHint", { provider: OAUTH_PROVIDER_NAME.google })}</p>}
+      {!builtin && ownClient}
+      {kind === "gdrive" && driveOptions}
       <NameField value={name} onChange={setName} placeholder={label} />
+      {builtin && ownClient}
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.google.submit")} />
+      <Actions onBack={onBack} busy={busy} submitLabel={builtin ? t("addSource.oauth.connect", { provider: OAUTH_PROVIDER_NAME.google }) : t("addSource.google.submit")} />
     </form>
   );
 }

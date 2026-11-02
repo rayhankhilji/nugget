@@ -14,6 +14,25 @@ import { Done, FormError, HELP_TAGS, useAutofocus } from "./form";
 
 export type AuthPhase = "form" | "waiting" | "done";
 
+/**
+ * The providers this build has Nugget's own OAuth client for (`sources.oauth.builtin`); null
+ * until known. Any failure counts as none: the forms then ask for the user's own client.
+ */
+export function useOAuthBuiltin(): readonly string[] | null {
+  const [providers, setProviders] = useState<readonly string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .sourcesOauthBuiltin()
+      .catch(() => [])
+      .then((p) => alive && setProviders(p));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return providers;
+}
+
 /** A sign-in is finished once the source left `needs_auth` (and isn't failing). */
 export const isConnected = (s: SourceInfo) => s.state !== "needs_auth" && s.state !== "error";
 

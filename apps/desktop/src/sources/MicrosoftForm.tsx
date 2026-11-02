@@ -1,11 +1,23 @@
-/** Outlook mail, Outlook calendar and OneDrive: the user's own Entra app registration, then browser sign-in. */
+/**
+ * Outlook mail, Outlook calendar and OneDrive: browser sign-in with Nugget's built-in Microsoft
+ * client, or the user's own Entra app registration (required when this build has none).
+ */
 import { useRef, useState, type FormEvent } from "react";
 import { api, type MicrosoftKind } from "../api";
 import { sourceKindLabel } from "../format";
 import { Trans, useT } from "../i18n";
 import { ConnectWait, useAuthWait } from "./auth";
-import { Actions, Done, Field, FormError, HELP_TAGS, NameField, useAutofocus, useSaveSource, type FormProps } from "./form";
-import { EMPTY_MICROSOFT, MICROSOFT_SCOPE, microsoftErrors, microsoftSettings, type MicrosoftErrors, type MicrosoftForm as Form } from "./kinds";
+import { Actions, Done, Field, FormError, HELP_TAGS, NameField, OwnClient, useAutofocus, useSaveSource, type FormProps } from "./form";
+import {
+  EMPTY_MICROSOFT,
+  hasBuiltin,
+  MICROSOFT_SCOPE,
+  microsoftErrors,
+  microsoftSettings,
+  OAUTH_PROVIDER_NAME,
+  type MicrosoftErrors,
+  type MicrosoftForm as Form,
+} from "./kinds";
 
 const ENTRA_APPS_URL = "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade";
 
@@ -41,9 +53,11 @@ export function MicrosoftGuide({ kind }: { kind: MicrosoftKind }) {
   );
 }
 
-export function MicrosoftForm({ kind, onBack, onClose, onAdded }: FormProps<MicrosoftKind>) {
+export function MicrosoftForm({ kind, onBack, onClose, onAdded, builtin: providers }: FormProps<MicrosoftKind>) {
   const t = useT();
   const label = sourceKindLabel(kind);
+  const builtin = hasBuiltin(kind, providers);
+  const provider = OAUTH_PROVIDER_NAME.microsoft;
   const [form, setForm] = useState<Form>(EMPTY_MICROSOFT);
   const [name, setName] = useState("");
   const [errs, setErrs] = useState<MicrosoftErrors>({});
@@ -60,7 +74,7 @@ export function MicrosoftForm({ kind, onBack, onClose, onAdded }: FormProps<Micr
 
   const connect = async (e: FormEvent) => {
     e.preventDefault();
-    const next = microsoftErrors(kind, form);
+    const next = microsoftErrors(kind, form, builtin);
     setErrs(next);
     if (Object.keys(next).length > 0) return;
     setBusy(true);
@@ -101,15 +115,23 @@ export function MicrosoftForm({ kind, onBack, onClose, onAdded }: FormProps<Micr
 
   const err = (k: keyof MicrosoftErrors) => (errs[k] ? t(errs[k]) : null);
 
-  return (
-    <form onSubmit={connect} noValidate>
+  const secretField = (
+    <Field label={t("addSource.google.clientSecret")} optional hint={secretSaved ? t("addSource.savedKeepIt") : t("addSource.microsoft.secretHint")}>
+      {(a) => <input {...a} ref={secretRef} type="password" autoComplete="off" spellCheck={false} />}
+    </Field>
+  );
+
+  // Without a built-in client: the guide and the client ID come first, the secret under Advanced.
+  // With one: all of it under "use your own OAuth client".
+  const ownClient = (
+    <OwnClient builtin={builtin} provider={provider}>
       <MicrosoftGuide kind={kind} />
-      <Field label={t("addSource.microsoft.clientId")} error={err("clientId")} hint={t("addSource.microsoft.clientIdHint")}>
+      <Field label={t("addSource.microsoft.clientId")} optional={builtin} error={err("clientId")} hint={t("addSource.microsoft.clientIdHint")}>
         {(a) => (
           <input
             {...a}
-            ref={clientIdRef}
-            data-autofocus=""
+            ref={builtin ? undefined : clientIdRef}
+            data-autofocus={builtin ? undefined : ""}
             type="text"
             value={form.clientId}
             onChange={(e) => set("clientId")(e.target.value)}
@@ -120,6 +142,13 @@ export function MicrosoftForm({ kind, onBack, onClose, onAdded }: FormProps<Micr
           />
         )}
       </Field>
+      {builtin && secretField}
+    </OwnClient>
+  );
+
+  return (
+    <form onSubmit={connect} noValidate>
+      {builtin ? <p className="muted small">{t("addSource.oauth.builtinHint", { provider })}</p> : ownClient}
       <Field label={t("addSource.microsoft.tenant")} optional error={err("tenant")} hint={t("addSource.microsoft.tenantHint")}>
         {(a) => (
           <input
@@ -160,19 +189,16 @@ export function MicrosoftForm({ kind, onBack, onClose, onAdded }: FormProps<Micr
           </Field>
         </>
       )}
-      <details className="help">
-        <summary>{t("addSource.advanced")}</summary>
-        <Field
-          label={t("addSource.google.clientSecret")}
-          optional
-          hint={secretSaved ? t("addSource.savedKeepIt") : t("addSource.microsoft.secretHint")}
-        >
-          {(a) => <input {...a} ref={secretRef} type="password" autoComplete="off" spellCheck={false} />}
-        </Field>
-      </details>
+      {!builtin && (
+        <details className="help">
+          <summary>{t("addSource.advanced")}</summary>
+          {secretField}
+        </details>
+      )}
       <NameField value={name} onChange={setName} placeholder={label} />
+      {builtin && ownClient}
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.microsoft.submit")} />
+      <Actions onBack={onBack} busy={busy} submitLabel={builtin ? t("addSource.oauth.connect", { provider }) : t("addSource.microsoft.submit")} />
     </form>
   );
 }
