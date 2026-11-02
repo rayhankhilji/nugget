@@ -2,8 +2,10 @@
 import Logo from "./Logo.astro";
 interface Props {
   minimal?: boolean;
+  /** The closing "Let Heed keep watch" line; the landing page has its own get-it block instead. */
+  cta?: boolean;
 }
-const { minimal = false } = Astro.props;
+const { minimal = false, cta = true } = Astro.props;
 const year = new Date().getFullYear();
 const cols = [
   {
@@ -33,14 +35,32 @@ const cols = [
   },
 ];
 ---
-<footer class="ftr">
-  <div class="wrap">
+<footer class:list={["ftr", { minimal }]}>
+  {
+    !minimal && (
+      <div class:list={["horizon", { bare: !cta }]}>
+        {cta && (
+          <div class="wrap horizon-copy">
+            <p class="h-line">Let Heed keep watch.</p>
+            <p class="h-sub">14-day free trial. A card is needed, and you can cancel any time before you're charged.</p>
+            <div class="h-cta">
+              <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
+              <a class="btn btn-secondary btn-lg" href="/download">Download for Mac</a>
+            </div>
+          </div>
+        )}
+        <div class="land" data-bg aria-hidden="true" />
+      </div>
+    )
+  }
+  <div class="wrap foot">
+    {!minimal && <div class="giant" aria-hidden="true" />}
     {
       !minimal && (
         <div class="top">
           <div class="brand">
-            <Logo size={20} pulse={false} />
-            <p class="muted">Your always-on chief of staff. Made in the UK.</p>
+            <Logo size={22} />
+            <p class="muted">The assistant that pays attention for you. Made in the UK.</p>
           </div>
           {cols.map((c) => (
             <nav aria-label={c.title}>
@@ -97,9 +117,64 @@ const cols = [
 
 <style>
   .ftr {
-    border-top: 1px solid var(--line);
-    padding: 56px 0 32px;
+    padding: 0 0 32px;
     font-size: 14px;
+  }
+  .ftr.minimal {
+    padding-top: 32px;
+    border-top: 1px solid var(--line);
+  }
+  .horizon {
+    position: relative;
+    padding-top: clamp(80px, 11vw, 140px);
+    margin-bottom: 56px;
+    border-top: 1px solid var(--line);
+  }
+  .horizon.bare {
+    padding-top: 0;
+    border-top: 0;
+  }
+  .horizon-copy {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    text-align: center;
+  }
+  .h-line {
+    font-family: var(--display);
+    font-weight: 330;
+    font-variation-settings: var(--heed-display-settings);
+    font-size: clamp(40px, 7vw, 88px);
+    letter-spacing: -0.025em;
+    line-height: 1;
+  }
+  .h-sub {
+    color: var(--text-2);
+    font-size: 17px;
+  }
+  .h-cta {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  /* The landscape loads once the footer is near (html.js adds .near); without JS it loads straight away. */
+  .land {
+    height: clamp(180px, 28vw, 380px);
+    margin-top: clamp(-40px, -3vw, -16px);
+    --bg-img: url("/art/landscape-light.webp");
+    background: center bottom / cover no-repeat;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .land {
+      --bg-img: url("/art/landscape-dark.webp");
+    }
+  }
+  :global(:root[data-theme="dark"]) .land {
+    --bg-img: url("/art/landscape-dark.webp");
   }
   .top {
     display: grid;
@@ -107,16 +182,23 @@ const cols = [
     gap: 32px;
     padding-bottom: 48px;
   }
+  .brand :global(.logo) {
+    font-size: 22px;
+  }
   .brand {
     display: grid;
     gap: 14px;
     align-content: start;
   }
   h2 {
+    font-family: var(--font);
+    font-variation-settings: normal;
+    word-spacing: normal;
+    line-height: 1.3;
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0;
-    color: var(--text-3);
+    color: var(--text-2);
     margin-bottom: 14px;
   }
   ul {
@@ -126,11 +208,11 @@ const cols = [
     display: grid;
     gap: 10px;
   }
-  a {
+  .top a {
     color: var(--text-2);
     text-decoration: none;
   }
-  a:hover {
+  .top a:hover {
     color: var(--text);
   }
   .bottom {
@@ -146,6 +228,31 @@ const cols = [
   .bottom:first-child {
     border-top: 0;
     padding-top: 0;
+  }
+  /* A giant, faint wordmark behind the footer. */
+  .foot {
+    position: relative;
+  }
+  .foot > :not(.giant) {
+    position: relative;
+    z-index: 1;
+  }
+  .giant {
+    position: absolute;
+    left: var(--gutter);
+    right: var(--gutter);
+    bottom: -24px;
+    z-index: 0;
+    color: var(--text);
+    opacity: 0.05;
+    line-height: 0;
+    pointer-events: none;
+  }
+  .giant {
+    aspect-ratio: 178.4 / 78.5;
+    background: currentColor;
+    -webkit-mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
+    mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
   }
   .theme {
     display: inline-flex;

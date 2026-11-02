@@ -2,7 +2,7 @@
 import { createRequire } from "node:module";
 import sharp from "sharp";
 import { mkdir } from "node:fs/promises";
-import { buildTestSite, signedIn, CLOUD } from "./mocks.mjs";
+import { buildTestSite, signedIn, CLOUD, ME } from "./mocks.mjs";
 
 await buildTestSite();
 const { serve, ROUTES } = await import("./serve.mjs");
@@ -32,7 +32,9 @@ for (const v of VIEWS) {
     // Account and checkout are shown signed in; checkout is caught mid-redirect to Stripe.
     const authed = await browser.newContext(opts);
     await signedIn(authed);
-    await authed.route(`${CLOUD}/**`, () => new Promise(() => {}));
+    await authed.route(`${CLOUD}/**`, (route) =>
+      new URL(route.request().url()).pathname === "/v1/me" ? route.fulfill({ json: ME }) : new Promise(() => {}),
+    );
     const pages = { anon: await anon.newPage(), authed: await authed.newPage() };
     for (const r of routes) {
       const name = `${r === "/" ? "home" : r.slice(1).replace(/\//g, "-")}-${v.name}-${scheme}`;
@@ -41,11 +43,21 @@ for (const v of VIEWS) {
       const page = priv ? pages.authed : pages.anon;
       const url = r === "/checkout" ? "/checkout?plan=heed_max&interval=year" : r;
       await page.goto(base + url, { waitUntil: r === "/checkout" ? "load" : "networkidle" });
-      await page.waitForTimeout(300);
+      // Scroll through once so scroll-triggered reveals have run, then return to the top.
+      await page.evaluate(async () => {
+        for (let y = 0; y < document.body.scrollHeight; y += 500) {
+          window.scrollTo(0, y);
+          await new Promise((r) => setTimeout(r, 40));
+        }
+        window.scrollTo(0, 0);
+      });
+      // Checkout's API call is held open on purpose (to catch the redirect state), so it never goes idle.
+      if (r !== "/checkout") await page.waitForLoadState("networkidle");
+      await page.waitForTimeout(900);
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
       const file = new URL(`${name}.webp`, OUT);
-      await sharp(png).resize({ width: v.out }).webp({ quality: v.name === "mobile" ? 62 : 72 }).toFile(file.pathname);
+      await sharp(png).resize({ width: r === "/" ? (v.name === "desktop" ? 1040 : 420) : v.out }).webp({ quality: r === "/" ? (v.name === "mobile" ? 26 : 40) : r === "/pricing" ? 56 : v.name === "mobile" ? 62 : 70 }).toFile(file.pathname);
       console.log(name);
     }
     await anon.close();

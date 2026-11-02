@@ -37,6 +37,13 @@ export const PLANS_API = {
   ],
 };
 
+/** GET /v1/me for the signed-in test user: Heed Max, 720 of 900 deep answers used. */
+export const ME = {
+  plan: "heed_max",
+  entitlements: { smart_asks_per_month: 900, default_model: "smart" },
+  usage: { smart_asks_used: 720, month_cost_micros: 4200000 },
+};
+
 /** Builds the site with test settings into dist-test/, with the plans API served locally. */
 export async function buildTestSite() {
   process.env.ASTRO_OUT_DIR = OUT;

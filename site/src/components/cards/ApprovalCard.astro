@@ -1,0 +1,114 @@
+---
+/**
+ * HTML recreation of v4 Needs you: a one-line queue row, then the email exactly as it will be sent,
+ * with Approve, Edit and Reject pinned at the bottom. Nothing is sent until you approve.
+ */
+import AppIcon from "../AppIcon.astro";
+---
+<article class="card approve" aria-label="Example: a Needs you item waiting for approval">
+  <div class="row">
+    <span class="dot" aria-hidden="true"></span>
+    <AppIcon slug="gmail" size={14} tile />
+    <span class="who">Margaret Osei</span>
+    <span class="what">Reply about kickoff</span>
+    <span class="age">2d</span>
+  </div>
+  <div class="pane">
+    <dl>
+      <div><dt>To</dt><dd>margaret@moorland.test</dd></div>
+      <div><dt>Subject</dt><dd>Re: Moorland kickoff</dd></div>
+    </dl>
+    <p class="body">
+      Hi Margaret,<br />Thursday at 2pm works. I've moved the design review to Friday, so we get the full hour. Agenda to
+      follow tonight.<br />Ada
+    </p>
+    <p class="why">Why: waiting 2 days · your calendar is free Thu 14:00</p>
+  </div>
+  <footer>
+    <span class="btn btn-primary btn-sm">Approve</span>
+    <span class="btn btn-secondary btn-sm">Edit</span>
+    <span class="btn btn-ghost btn-sm reject">Reject</span>
+  </footer>
+</article>
+
+<style>
+  .approve {
+    width: 330px;
+    max-width: 100%;
+    border-radius: var(--heed-radius-l);
+    background: var(--surface);
+    box-shadow: var(--shadow-3);
+    font-size: 13px;
+    overflow: hidden;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 6px 14px auto 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--accent-soft);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .row .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand);
+  }
+  .who {
+    font-weight: 600;
+  }
+  .what {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-2);
+  }
+  .age {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .pane {
+    padding: 4px 16px 12px;
+  }
+  dl {
+    margin: 0 0 10px;
+  }
+  dl div {
+    display: flex;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  dt {
+    width: 52px;
+    color: var(--text-3);
+  }
+  dd {
+    margin: 0;
+  }
+  .body {
+    line-height: 1.55;
+    font-size: 13.5px;
+  }
+  .why {
+    margin-top: 10px;
+    font-size: 11.5px;
+    color: var(--text-3);
+  }
+  footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  footer .btn {
+    pointer-events: none;
+  }
+  .reject {
+    margin-left: auto;
+  }
+</style>

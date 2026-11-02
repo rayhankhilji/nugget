@@ -1,14 +1,22 @@
 ---
 import Base from "../layouts/Base.astro";
 import Panel from "../components/Panel.astro";
+import CloudClosed from "../components/CloudClosed.astro";
+import { cloudOpen } from "../lib/config";
 ---
 <Base title="Checkout" description="Start your Heed trial." noindex minimal>
-  <Panel title="Starting your trial" lede="Taking you to our payment provider, Stripe…">
-    <div class="progress" aria-hidden="true" data-progress><i></i></div>
-    <p class="status" role="status" aria-live="polite" data-msg hidden></p>
-    <p class="small" data-actions hidden><a href="/pricing">Back to pricing</a> · <a href="/account">Your account</a></p>
-    <noscript><p class="status err">Checkout needs JavaScript.</p></noscript>
-  </Panel>
+  {
+    cloudOpen ? (
+      <Panel title="Starting your trial" lede="Taking you to our payment provider, Stripe…">
+        <div class="progress" aria-hidden="true" data-progress><i></i></div>
+        <p class="status" role="status" aria-live="polite" data-msg hidden></p>
+        <p class="small" data-actions hidden><a href="/pricing">Back to pricing</a> · <a href="/account">Your account</a></p>
+        <noscript><p class="status err">Checkout needs JavaScript.</p></noscript>
+      </Panel>
+    ) : (
+      <CloudClosed />
+    )
+  }
 </Base>
 
 <script>
@@ -16,8 +24,9 @@ import Panel from "../components/Panel.astro";
   import { billingCheckout, CloudError } from "../lib/cloud";
   import { isInterval, isPlanId, planName } from "../lib/plans";
 
-  const msg = document.querySelector<HTMLElement>("[data-msg]")!;
+  const msg = document.querySelector<HTMLElement>("[data-msg]");
   const fail = (text: string) => {
+    if (!msg) return;
     msg.textContent = text;
     msg.classList.add("err");
     msg.hidden = false;
@@ -28,6 +37,7 @@ import Panel from "../components/Panel.astro";
   };
 
   (async () => {
+    if (!msg) return; // Heed Cloud isn't configured for this build
     const params = new URLSearchParams(location.search);
     const plan = params.get("plan");
     const interval = params.get("interval") ?? "month";

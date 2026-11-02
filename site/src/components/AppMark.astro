@@ -1,0 +1,37 @@
+---
+/**
+ * A connectable app's logo for the "Connects to" strip. Uses Simple Icons (CC0) where the app is
+ * there; Outlook, Microsoft Teams and Slack aren't on Simple Icons (trademark requests), so they get
+ * a neutral line glyph next to their name instead of a logo.
+ */
+import AppIcon from "./AppIcon.astro";
+
+interface Props {
+  slug: string;
+  size?: number;
+}
+const { slug, size = 20 } = Astro.props;
+const SIMPLE: Record<string, string> = {
+  gmail: "gmail",
+  googlecalendar: "googlecalendar",
+  googledrive: "googledrive",
+  notion: "notion",
+};
+const GLYPH: Record<string, string> = {
+  // envelope
+  outlook: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3.5 7l8.5 6 8.5-6"/>',
+  // two speech bubbles
+  microsoft_teams: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h7A2.5 2.5 0 0 1 16 6.5v4a2.5 2.5 0 0 1-2.5 2.5H9l-3.5 3v-3A2.5 2.5 0 0 1 4 10.5z"/><path d="M18.5 9.5A2 2 0 0 1 20 11.5v3.5a2 2 0 0 1-2 2v2.5L15.5 17H12"/>',
+  // hash
+  slack: '<path d="M9.5 3.5l-2 17M16.5 3.5l-2 17M4 8.5h16.5M3.5 15.5H20"/>',
+};
+const si = SIMPLE[slug];
+const glyph = GLYPH[slug] ?? '<circle cx="12" cy="12" r="8"/>';
+---
+{
+  si ? (
+    <AppIcon slug={si} size={size} mono />
+  ) : (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" set:html={glyph} />
+  )
+}

@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import { config } from "../lib/config";
+import { GITHUB_URL } from "../lib/plans";
 
 const arm = config.downloadMacArm;
 const intel = config.downloadMacIntel;
@@ -11,7 +12,7 @@ const ready = Boolean(arm || intel);
     <div class="copy">
       <p class="eyebrow">Download</p>
       <h1>Heed for Mac</h1>
-      <p class="lede">macOS 11 Big Sur or later. Sign in with the account you started your trial with.</p>
+      <p class="lede">For macOS 11 Big Sur or later. The app is free and open source: bring your own AI, or sign in to Heed Cloud to have it done for you.</p>
       {
         ready ? (
           <div class="btns">
@@ -31,19 +32,20 @@ const ready = Boolean(arm || intel);
             <span class="btn btn-secondary btn-lg" aria-disabled="true">
               Download opens at launch
             </span>
-            <a class="btn btn-primary btn-lg" href="/pricing">
-              Start your trial
+            <a class="btn btn-primary btn-lg" href={GITHUB_URL} rel="noopener">
+              View on GitHub
             </a>
           </div>
         )
       }
       {ready && <p class="small hint" data-hint>Not sure which? Open the Apple menu, then About This Mac. "Apple M…" means Apple silicon.</p>}
-      {!ready && <p class="small hint">We'll email your download link as soon as the first release is signed and notarised.</p>}
+      {!ready && <p class="small hint">Signed builds arrive with the first release. Until then you can build it from the source on GitHub.</p>}
+      <p class="small oss">Open source · Apache-2.0 · <a href={GITHUB_URL} rel="noopener">github.com/rayhankhilji/nugget</a></p>
     </div>
 
     <ol class="steps" aria-label="Getting started">
       <li><span>1</span><div><b>Open the download</b> and drag Heed to Applications.</div></li>
-      <li><span>2</span><div><b>Sign in</b> with your email link or Google.</div></li>
+      <li><span>2</span><div><b>Choose your AI:</b> Sign in with ChatGPT, add an API key or a local model, or sign in to Heed Cloud.</div></li>
       <li><span>3</span><div><b>Connect your apps</b> and allow Accessibility so ghost text can follow your cursor.</div></li>
     </ol>
   </section>
@@ -139,7 +141,7 @@ const ready = Boolean(arm || intel);
     border-radius: 8px;
     font-family: var(--mono);
     font-size: 13px;
-    color: var(--accent-ink);
+    color: var(--text);
     background: var(--accent-soft);
   }
   .other {

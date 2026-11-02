@@ -1,67 +1,39 @@
 ---
 /**
- * The Heed mark (from packaging/icons/nugget.svg on ds/brand: a coral attention dot above a chalk
- * line on a graphite tile) and the wordmark, Geist 600 at -0.04em, as in the app.
- * The dot's glow pulses; reduced motion stops it.
+ * The Heed logo from DS1's brand assets (public/brand, copied from docs/brand/assets): the ultramarine
+ * squircle mark and the outline wordmark. Both are cached files rather than inline SVG, to keep pages
+ * light; the wordmark is a CSS mask filled with currentColor, so it follows the theme.
  */
 interface Props {
   size?: number;
-  pulse?: boolean;
 }
-const { size = 22, pulse = true } = Astro.props;
+const { size = 24 } = Astro.props;
 ---
 <span class="logo" style={`--s:${size}px`}>
-  <svg class:list={["mark", { pulse }]} viewBox="2 2 60 60" aria-hidden="true">
-    <rect x="2" y="2" width="60" height="60" rx="14" class="tile"></rect>
-    <rect x="2.5" y="2.5" width="59" height="59" rx="13.5" fill="none" stroke="#fff" stroke-opacity="0.08"></rect>
-    <circle cx="32" cy="25" r="13" class="glow"></circle>
-    <circle cx="32" cy="25" r="7.5" fill="#ff5a3c"></circle>
-    <rect x="19" y="39" width="26" height="5.5" rx="2.75" fill="#f7f7f5"></rect>
-  </svg>
-  <span class="word">heed</span>
+  <img class="mark" src="/brand/heed-mark.svg" alt="" width={size} height={size} />
+  <span class="word" role="img" aria-label="heed"></span>
 </span>
 
 <style>
   .logo {
     display: inline-flex;
     align-items: center;
-    gap: calc(var(--s) * 0.4);
-    font-size: var(--s);
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    line-height: 1;
-    color: var(--text);
+    gap: calc(var(--s) * 0.32);
+    color: currentColor;
+    line-height: 0;
   }
   .mark {
-    width: calc(var(--s) * 1.2);
-    height: calc(var(--s) * 1.2);
+    width: var(--s);
+    height: var(--s);
     flex: none;
-    overflow: visible;
   }
-  .tile {
-    fill: var(--mark-tile);
-  }
-  .glow {
-    fill: #ff5a3c;
-    opacity: 0.28;
-    transform-box: fill-box;
-    transform-origin: center;
-  }
-  .pulse .glow {
-    animation: mark-pulse 2.6s var(--ease) infinite;
-  }
-  @keyframes mark-pulse {
-    0% {
-      transform: scale(0.6);
-      opacity: 0.5;
-    }
-    70%,
-    100% {
-      transform: scale(1.25);
-      opacity: 0;
-    }
-  }
+  /* heed-wordmark-mono.svg has a 178.4 x 78.5 viewBox. */
   .word {
-    transform: translateY(-0.05em);
+    display: block;
+    height: calc(var(--s) * 0.98);
+    aspect-ratio: 178.4 / 78.5;
+    background: currentColor;
+    -webkit-mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
+    mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
   }
 </style>
