@@ -276,6 +276,7 @@ fn main() {
             cloud::cloud_billing_plans,
             cloud::cloud_billing_checkout,
             cloud::cloud_billing_portal,
+            cloud::cloud_delete_account,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])

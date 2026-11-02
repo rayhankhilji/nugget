@@ -4,12 +4,13 @@ import { CloudError, cloudApi, type BillingInterval, type CloudAnswer, type Clou
 import { formatRelative, formatTime } from "../format";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { AppLogo } from "../components/AppLogo";
+import { requestPage } from "../hooks.nav";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatDate, formatNumber, useT, type TFunction } from "../i18n";
 import { SignIn } from "./SignIn";
 
 /**
- * Nugget Cloud: Sign-in when signed out, else connected accounts, available apps, sync and a
+ * Heed cloud: Sign-in when signed out, else connected accounts, available apps, sync and a
  * cloud Ask. Works without the local background service. Markup is structural on purpose.
  */
 export function CloudPage() {
@@ -39,37 +40,14 @@ export function CloudPage() {
     );
   }
   if (!s.signed_in) return <SignIn failure={failure} />;
-  return <SignedIn email={s.email} onSignedOut={session.reload} />;
+  return <SignedIn email={s.email} />;
 }
 
-function SignedIn({ email, onSignedOut }: { email: string | null; onSignedOut: () => void }) {
+function SignedIn({ email }: { email: string | null }) {
   const t = useT();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>(null);
-  const signOut = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await cloudApi.signOut();
-      onSignedOut();
-    } catch (e) {
-      setError(e);
-      setBusy(false);
-    }
-  };
   return (
     <div className="page">
-      <PageHeader
-        title={t("cloud.title")}
-        description={email ? t("cloud.signedInAs", { email }) : t("cloud.signedIn")}
-        actions={
-          <button type="button" className="btn" onClick={() => void signOut()} disabled={busy}>
-            {busy ? <Spinner /> : t("cloud.signOut")}
-          </button>
-        }
-      />
-      <ErrorNote error={error} />
-      <Billing />
+      <PageHeader title={t("cloud.title")} description={email ? t("cloud.signedInAs", { email }) : t("cloud.signedIn")} />
       <Connections />
       <CloudAsk />
     </div>
@@ -151,47 +129,39 @@ function Connections() {
         {list.loading && !data && <Loading lines={2} />}
         {data && data.connections.length === 0 && <EmptyState title={t("cloud.connections.empty")}>{t("cloud.connections.emptyBody")}</EmptyState>}
         {data && data.connections.length > 0 && (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">{t("cloud.col.app")}</th>
-                  <th scope="col">{t("cloud.col.status")}</th>
-                  <th scope="col">{t("cloud.col.lastSync")}</th>
-                  <th scope="col">
-                    <span className="visually-hidden">{t("cloud.col.actions")}</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.connections.map((c) => (
-                  <tr key={c.id}>
-                    <th scope="row">{nameOf(c.toolkit)}</th>
-                    <td>
-                      <Badge tone={isActive(c.status) ? "good" : c.status.toLowerCase() === "initiated" ? "neutral" : "bad"}>{isActive(c.status) ? t("cloud.connected") : c.status}</Badge>
-                      {c.last_error && (
-                        <div className="small muted" dir="auto">
-                          {c.last_error}
-                        </div>
-                      )}
-                    </td>
-                    <td title={c.last_synced_at ? formatTime(c.last_synced_at) : undefined}>
-                      {c.syncing ? (
-                        <span role="status">{t("cloud.importing", { count: formatNumber(c.items_synced ?? 0) })}</span>
-                      ) : (
-                        formatRelative(c.last_synced_at, now)
-                      )}
-                    </td>
-                    <td>
-                      <button type="button" className="btn btn-small btn-danger-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: nameOf(c.toolkit) })}>
-                        {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="cloud-conns">
+            {data.connections.map((c) => {
+              const active = isActive(c.status);
+              const app = data.available.find((a) => a.slug === c.toolkit) ?? { name: c.toolkit, logo: null };
+              return (
+                <li key={c.id} className="card cloud-conn">
+                  <div className="cloud-conn-head">
+                    <AppLogo app={app} />
+                    <span className="cloud-conn-name">{app.name}</span>
+                    <Badge tone={active ? "good" : c.status.toLowerCase() === "initiated" ? "neutral" : "bad"}>{active ? t("cloud.connected") : c.status}</Badge>
+                  </div>
+                  <p className="small muted cloud-conn-sync" title={c.last_synced_at ? formatTime(c.last_synced_at) : undefined}>
+                    {c.syncing ? (
+                      <span role="status">{t("cloud.importing", { count: formatNumber(c.items_synced ?? 0) })}</span>
+                    ) : active && c.backfill_done === false ? (
+                      t("cloud.backfilling", { count: formatNumber(c.items_synced ?? 0) })
+                    ) : (
+                      t("cloud.lastSynced", { when: formatRelative(c.last_synced_at, now) })
+                    )}
+                  </p>
+                  {c.syncing && <span className="cloud-conn-meter" aria-hidden="true" />}
+                  {c.last_error && (
+                    <p className="small note-error" dir="auto">
+                      {c.last_error}
+                    </p>
+                  )}
+                  <button type="button" className="btn btn-small btn-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: app.name })}>
+                    {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
         {data && data.connections.length > 0 && (
           <p>
@@ -343,14 +313,15 @@ function CloudAsk() {
 const BILLING_HEADING = "cloud-billing";
 
 /** Plan errors get their own sentence; `subscription_required` points at Plan & billing. */
-function CloudErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+export function CloudErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const t = useT();
   const code = error instanceof CloudError ? error.cloud : null;
   if (code === "subscription_required") {
     const go = () => {
       const h = document.getElementById(BILLING_HEADING);
-      h?.scrollIntoView?.();
-      h?.focus();
+      if (!h) return requestPage("account");
+      h.scrollIntoView?.();
+      h.focus();
     };
     return (
       <div className="note" role="alert">
@@ -388,7 +359,7 @@ function statusText(s: CloudSubscription, t: TFunction): string {
   return s.status;
 }
 
-function Billing() {
+export function Billing() {
   const t = useT();
   const me = useAsync(cloudApi.me);
   const plans = useAsync(cloudApi.plans);

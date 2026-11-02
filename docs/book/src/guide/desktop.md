@@ -74,7 +74,7 @@ On sway, for example: `bindsym Ctrl+Shift+space exec nugget-desktop --quick-ask`
 
 | Link | What it does |
 |---|---|
-| `heed://open/today` | Opens a page: `today` (Home), `needs`, `chat`, `search`, `knowledge`, `sources`, `connections`, `apps`, `plugins`, `agent`, `safety`, `doubletap`, `models`, `privacy` or `status`. |
+| `heed://open/today` | Opens a page: `today` (Home), `needs`, `chat`, `search`, `knowledge`, `sources`, `connections`, `apps`, `plugins`, `agent`, `safety`, `doubletap`, `models`, `privacy`, `status` or `account`. |
 | `heed://search?q=quarterly%20report` | Opens Search with the text typed in, not run: press Enter to search. |
 | `heed://ask?q=When%20is%20my%20flight%3F` | Opens quick ask with the question typed in, not sent. |
 | `heed://item?source=<source id>&key=<item key>` | Asks whether to open that item in its own app. |

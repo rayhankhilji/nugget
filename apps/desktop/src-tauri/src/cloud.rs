@@ -477,6 +477,16 @@ pub async fn cloud_billing_portal(app: AppHandle, cloud: State<'_, Cloud>) -> Re
     open_web(link.url).await
 }
 
+/// Delete the account and everything the cloud holds for it (connections, synced items, cards,
+/// the subscription's link), then forget the session on this computer. Not undoable.
+#[tauri::command]
+pub async fn cloud_delete_account(app: AppHandle, cloud: State<'_, Cloud>) -> Result<()> {
+    let api = cloud.api()?;
+    checked(&app, api.delete_account().await)?;
+    emit_session(&app, false, None);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

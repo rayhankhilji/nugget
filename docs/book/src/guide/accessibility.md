@@ -22,7 +22,7 @@ On macOS, "Ctrl" is ⌘. Shortcuts without a modifier work when you are not typi
 | --- | --- |
 | Ctrl+K | Open the command palette (pages, actions, search) |
 | Ctrl+1 … Ctrl+9 | Go to a page: 1 Home, 2 Needs you, 3 Search, 4 Connections, 5 Chat, then the first Settings pages (Knowledge, Sources, Connected apps, Plugins) |
-| Ctrl+, | Open Settings (at Status) |
+| Ctrl+, | Open Settings (at Account: plan, billing and devices) |
 | `?` or Ctrl+/ | Show the keyboard shortcuts |
 | Escape | Close a dialog or the palette; in Chat, stop a reply |
 | ↑ ↓ | Move between sidebar items, palette results and entity lists |
