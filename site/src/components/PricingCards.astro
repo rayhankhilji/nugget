@@ -22,7 +22,7 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     >
   </fieldset>
 
-  <div class="cards">
+  <div class="cards" style={`--n:${plans.length}`}>
     {
       plans.map((p) => (
         <article class:list={["plan", { hl: p.highlight }]} aria-labelledby={`plan-${p.id}`}>
@@ -130,12 +130,18 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     outline-offset: 2px;
   }
 
+  /* One column per plan from the API, so a third tier (e.g. a free bring-your-own-key plan) just appears. */
   .cards {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr));
     gap: 20px;
     width: 100%;
-    max-width: 880px;
+    max-width: calc(var(--n, 2) * 440px);
+  }
+  @media (max-width: 1080px) {
+    .cards {
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
   }
   .plan {
     position: relative;

@@ -1,22 +1,17 @@
 ---
 /**
- * The Heed logo from DS1's brand assets (docs/brand/assets, copied to public/brand): the ultramarine
- * squircle mark with a cream "h", and the Fraunces wordmark drawn from outlines. The wordmark uses
- * currentColor, so it follows the theme.
+ * The Heed logo from DS1's brand assets (public/brand, copied from docs/brand/assets): the ultramarine
+ * squircle mark and the outline wordmark. Both are cached files rather than inline SVG, to keep pages
+ * light; the wordmark is a CSS mask filled with currentColor, so it follows the theme.
  */
-import markSvg from "../../public/brand/heed-mark.svg?raw";
-import wordSvg from "../../public/brand/heed-wordmark-mono.svg?raw";
-
 interface Props {
   size?: number;
 }
 const { size = 24 } = Astro.props;
-const mark = markSvg.replace(/\srole="img"/, "").replace(/\saria-label="[^"]*"/, ' aria-hidden="true"');
-const word = wordSvg;
 ---
 <span class="logo" style={`--s:${size}px`}>
-  <span class="mark" set:html={mark} />
-  <span class="word" set:html={word} />
+  <img class="mark" src="/brand/heed-mark.svg" alt="" width={size} height={size} />
+  <span class="word" role="img" aria-label="heed"></span>
 </span>
 
 <style>
@@ -27,15 +22,18 @@ const word = wordSvg;
     color: currentColor;
     line-height: 0;
   }
-  .mark,
-  .mark :global(svg) {
+  .mark {
     width: var(--s);
     height: var(--s);
     flex: none;
   }
-  .word :global(svg) {
-    height: calc(var(--s) * 0.98);
-    width: auto;
+  /* heed-wordmark-mono.svg has a 184.1 x 78.6 viewBox. */
+  .word {
     display: block;
+    height: calc(var(--s) * 0.98);
+    aspect-ratio: 184.1 / 78.6;
+    background: currentColor;
+    -webkit-mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
+    mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
   }
 </style>

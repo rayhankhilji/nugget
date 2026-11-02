@@ -28,8 +28,8 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 
 | Route | What it does |
 | --- | --- |
-| `/` | A Fraunces hero over a drifting dithered sky, with floating product cards: the brief, ghost text in an email, and a Needs-you approval. Then the app logos; an ultramarine feature band with three features; "What Heed did for you this week" with dotted charts (labelled as an example week); how it works, as three cream agent-progress cards; privacy in plain English; a pricing teaser; the FAQ; a footer with the engraved landscape and an oversized wordmark. There are no testimonials, on purpose. |
-| `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. |
+| `/` | A full-bleed ultramarine hero with one huge Fraunces line and one large print (El Greco, duotoned) over the drifting dithered sky. Directly under it, one big recreation of the v4 Home screen set into a duotone painting, then a quiet line of the 7 connectable apps. Six editorial feature blocks follow: a mono tag, a Fraunces title, two lines of copy and a large image tile, using paintings, dither and engraving, three of them with a real UI detail. Then how it works on hairlines, privacy (the Oxbow block and a plain-English list), a "Get Heed for Mac" block with system requirements in mono, the FAQ, and a footer with the engraved landscape and a giant faint wordmark. There are no invented metrics and no testimonials. |
+| `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. The card grid has one column per plan, so a third tier fits. Note that `loadPlans` still only accepts the `heed` and `heed_max` ids. |
 | `/download` | The macOS builds, from env vars. It leads with the Intel build when the browser reports x86. Windows and Linux show as "Coming soon". |
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |
 | `/account` | The plan and status, read from `subscriptions` under RLS. Also: devices (list and remove), **Manage billing** (Stripe portal), download, sign out, and delete account. |
@@ -210,6 +210,14 @@ The footer's theme switch can force dark on a light system. To support that, `Ba
 
 The landing page also uses HTML recreations of the product cards. Real v4 app screenshots replace
 them once they exist. Sources and licences are in `CREDITS.md`.
+
+**Performance:**
+- CSS background art is lazy: `[data-bg]` elements apply their `--bg-img` only when they come within
+  200px of the viewport.
+- The logo and wordmark are cached SVG files, drawn as an `img` and a CSS mask, rather than inline
+  SVG.
+- The hero print has a 720w variant for phones.
+- `tests/serve.mjs` gzips text like the production host does.
 
 **Motion:**
 - Easing is `cubic-bezier(.2,.8,.2,1)`. UI transitions take 200ms; brand moments take 600–900ms.

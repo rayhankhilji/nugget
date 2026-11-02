@@ -18,8 +18,10 @@ interface Props {
   noindex?: boolean;
   /** Pages whose content is centred and short (auth, checkout) get a quieter chrome. */
   minimal?: boolean;
+  /** Show the footer's closing call to action (default true). */
+  footerCta?: boolean;
 }
-const { title, description, noindex = false, minimal = false } = Astro.props;
+const { title, description, noindex = false, minimal = false, footerCta = true } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const fullTitle = title === "Heed" ? "Heed: your always-on chief of staff" : `${title} · Heed`;
 const og = new URL("/og.png", Astro.site);
@@ -62,9 +64,26 @@ const og = new URL("/og.png", Astro.site);
     <main id="main">
       <slot />
     </main>
-    <Footer minimal={minimal} />
+    <Footer minimal={minimal} cta={footerCta} />
     <script>
       // Reveal [data-reveal] elements as they scroll into view (rise and fade; fade only under reduced motion).
+      const lazy = document.querySelectorAll<HTMLElement>("[data-bg]");
+      if ("IntersectionObserver" in window) {
+        const near = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                e.target.classList.add("near");
+                near.unobserve(e.target);
+              }
+            }
+          },
+          { rootMargin: "200px 0px" },
+        );
+        lazy.forEach((el) => near.observe(el));
+      } else {
+        lazy.forEach((el) => el.classList.add("near"));
+      }
       const els = document.querySelectorAll<HTMLElement>("[data-reveal]");
       if ("IntersectionObserver" in window) {
         const io = new IntersectionObserver(

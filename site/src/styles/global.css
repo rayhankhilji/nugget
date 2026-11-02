@@ -500,3 +500,10 @@ html:not(.js) [data-reveal] {
 .section-head p.eyebrow {
   font-size: 12px;
 }
+
+/* Lazy background art: [data-bg] elements set --bg-img; it's applied once they're near the viewport
+   (Base.astro adds .near), or straight away without JS. CSS backgrounds otherwise all load eagerly. */
+html [data-bg].near,
+html:not(.js) [data-bg] {
+  background-image: var(--bg-img); /* outranks component background shorthands */
+}

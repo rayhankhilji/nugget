@@ -1,0 +1,345 @@
+---
+/**
+ * One large, real-size recreation of the v4 Home screen, shown as a Mac window. It stands in until
+ * DS1's real screenshots land in docs/brand/screens/. Names and data are fictional.
+ */
+import AppIcon from "./AppIcon.astro";
+---
+<figure class="win" aria-label="The Heed Home screen (recreation, with fictional data)">
+  <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="body">
+    <aside class="side" aria-hidden="true">
+      <div class="brand"><img class="m" src="/brand/heed-mark.svg" alt="" width="20" height="20" /><span>heed</span></div>
+      <div class="search">Jump to… <kbd>⌘K</kbd></div>
+      <nav>
+        <span class="on">Home</span>
+        <span>Needs you <b>5</b></span>
+        <span>Search</span>
+        <span>Connections</span>
+      </nav>
+      <p class="lbl">Recent</p>
+      <nav class="recent">
+        <span>Driftwood pagination</span>
+        <span>Q4 board notes</span>
+        <span>Moorland kickoff</span>
+      </nav>
+      <p class="synced"><i></i>Synced 2 min ago</p>
+    </aside>
+
+    <div class="main">
+      <p class="date">Tuesday 4 November</p>
+      <p class="hello">Good morning, Ada.</p>
+      <p class="focus"><span>Focus for today</span> the Driftwood API decision</p>
+
+      <div class="ask">
+        <span>Ask anything about your mail, calendar, docs and chats</span>
+        <kbd>↵</kbd>
+      </div>
+
+      <p class="prose">
+        Ines wants a call on cursor pagination before the 11:00 review
+        <span class="chip"><AppIcon slug="notion" size={12} tile />Pagination RFC</span>. Margaret is still waiting on a
+        kickoff time and proposed Thursday <span class="chip"><AppIcon slug="gmail" size={12} tile />Re: Moorland</span>,
+        and you're free from 14:00 <span class="chip"><AppIcon slug="googlecalendar" size={12} tile />Thu</span>.
+      </p>
+
+      <p class="lbl">Recommended</p>
+      <ol class="acts">
+        <li><span class="k">1</span><span>Prep for the Driftwood review</span><span class="t">11:00</span></li>
+        <li><span class="k">2</span><span>Reply to Margaret with Thursday 2pm</span><span class="t">draft ready</span></li>
+        <li><span class="k">3</span><span>Skim 3 edits to the Q4 board notes</span><span class="t">4 min</span></li>
+      </ol>
+    </div>
+
+    <aside class="rail" aria-hidden="true">
+      <p class="lbl">Needs you · 5</p>
+      <ul>
+        <li class="sel"><AppIcon slug="gmail" size={14} tile /><span><b>Margaret Osei</b>Reply about kickoff</span><em>2d</em></li>
+        <li><AppIcon slug="googledrive" size={14} tile /><span><b>Lumen contract</b>Signature by Friday</span><em>1d</em></li>
+        <li><AppIcon slug="notion" size={14} tile /><span><b>Ines Halloran</b>Pagination decision</span><em>5h</em></li>
+        <li><AppIcon slug="googlecalendar" size={14} tile /><span><b>Hiring panel</b>Prep notes</span><em>1d</em></li>
+      </ul>
+    </aside>
+  </div>
+</figure>
+
+<style>
+  .win {
+    margin: 0;
+    width: 100%;
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow:
+      0 0 0 1px rgb(20 17 15 / 0.12),
+      0 40px 90px -30px rgb(7 7 50 / 0.55),
+      0 10px 24px -10px rgb(7 7 50 / 0.3);
+    font-size: 14px;
+    text-align: left;
+  }
+  .bar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    height: 38px;
+    padding: 0 16px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar i {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--line-2);
+  }
+  .body {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr) 260px;
+    min-height: 560px;
+  }
+  .side {
+    padding: 16px 12px;
+    background: var(--surface-2);
+    border-right: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 8px 10px;
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .m {
+    width: 20px;
+    height: 20px;
+    display: block;
+  }
+  .search {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-3);
+    background: var(--surface);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+  nav {
+    display: grid;
+    gap: 2px;
+  }
+  nav span {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 8px;
+    color: var(--text-2);
+  }
+  nav span.on {
+    background: var(--accent-soft);
+    color: var(--text);
+    font-weight: 560;
+  }
+  nav b {
+    font-family: var(--mono);
+    font-weight: 450;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .recent span {
+    font-size: 13px;
+    padding: 5px 10px;
+  }
+  .lbl {
+    margin: 14px 10px 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+  }
+  .synced {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .synced i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--brand);
+  }
+  .main {
+    padding: 36px 40px;
+  }
+  .date {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .hello {
+    margin: 6px 0 4px;
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    letter-spacing: var(--heed-display-tracking);
+    font-size: 40px;
+    line-height: 1.05;
+  }
+  .focus {
+    color: var(--text);
+  }
+  .focus span {
+    color: var(--text-3);
+    margin-right: 6px;
+  }
+  .ask {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 22px 0;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--line-2), var(--heed-shadow-1);
+    color: var(--text-3);
+  }
+  .prose {
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--text-2);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px 0 4px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 22px;
+    color: var(--text-2);
+    background: var(--surface-2);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    vertical-align: 0.08em;
+    white-space: nowrap;
+  }
+  .main .lbl {
+    margin: 24px 0 6px;
+  }
+  .acts {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .acts li {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 11px 8px;
+    border-bottom: 1px dashed var(--line-2);
+  }
+  .acts li:first-child {
+    background: var(--accent-soft);
+    border-radius: 8px;
+    border-bottom-color: transparent;
+  }
+  .k {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-2);
+    box-shadow: inset 0 0 0 1px var(--line-2);
+  }
+  .t {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .rail {
+    padding: 20px 16px;
+    border-left: 1px solid var(--line);
+  }
+  .rail .lbl {
+    margin: 0 4px 8px;
+  }
+  .rail ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 2px;
+  }
+  .rail li {
+    display: grid;
+    grid-template-columns: 14px 1fr auto;
+    gap: 10px;
+    align-items: start;
+    padding: 9px 8px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .rail li.sel {
+    background: var(--accent-soft);
+  }
+  .rail li :global(.app) {
+    margin-top: 2px;
+  }
+  .rail span {
+    display: grid;
+    color: var(--text-2);
+  }
+  .rail b {
+    color: var(--text);
+    font-weight: 560;
+  }
+  .rail em {
+    font-style: normal;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  @media (max-width: 1100px) {
+    .body {
+      grid-template-columns: 190px minmax(0, 1fr);
+    }
+    .rail {
+      display: none;
+    }
+  }
+  @media (max-width: 720px) {
+    .body {
+      grid-template-columns: minmax(0, 1fr);
+      min-height: 0;
+    }
+    .side {
+      display: none;
+    }
+    .main {
+      padding: 24px 20px;
+    }
+    .hello {
+      font-size: 32px;
+    }
+    .prose {
+      font-size: 15px;
+    }
+  }
+</style>

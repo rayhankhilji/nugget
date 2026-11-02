@@ -1,11 +1,11 @@
 ---
 import Logo from "./Logo.astro";
-import wordSvg from "../../public/brand/heed-wordmark-mono.svg?raw";
-const bigWord = wordSvg.replace(/\srole="img"/, "").replace(/\saria-label="[^"]*"/, ' aria-hidden="true"');
 interface Props {
   minimal?: boolean;
+  /** The closing "Let Heed keep watch" line; the landing page has its own get-it block instead. */
+  cta?: boolean;
 }
-const { minimal = false } = Astro.props;
+const { minimal = false, cta = true } = Astro.props;
 const year = new Date().getFullYear();
 const cols = [
   {
@@ -38,20 +38,23 @@ const cols = [
 <footer class:list={["ftr", { minimal }]}>
   {
     !minimal && (
-      <div class="horizon">
-        <div class="wrap horizon-copy">
-          <p class="h-line">Let Heed keep watch.</p>
-          <p class="h-sub">14-day free trial. A card is needed, and you can cancel any time before you're charged.</p>
-          <div class="h-cta">
-            <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
-            <a class="btn btn-secondary btn-lg" href="/download">Download for Mac</a>
+      <div class:list={["horizon", { bare: !cta }]}>
+        {cta && (
+          <div class="wrap horizon-copy">
+            <p class="h-line">Let Heed keep watch.</p>
+            <p class="h-sub">14-day free trial. A card is needed, and you can cancel any time before you're charged.</p>
+            <div class="h-cta">
+              <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
+              <a class="btn btn-secondary btn-lg" href="/download">Download for Mac</a>
+            </div>
           </div>
-        </div>
-        <div class="land" aria-hidden="true" />
+        )}
+        <div class="land" data-bg aria-hidden="true" />
       </div>
     )
   }
-  <div class="wrap">
+  <div class="wrap foot">
+    {!minimal && <div class="giant" aria-hidden="true" />}
     {
       !minimal && (
         <div class="top">
@@ -82,7 +85,6 @@ const cols = [
         <button type="button" role="radio" data-theme-set="dark" aria-checked="false">Dark</button>
       </div>
     </div>
-    {!minimal && <div class="giant" set:html={bigWord} />}
   </div>
 </footer>
 
@@ -128,6 +130,10 @@ const cols = [
     margin-bottom: 56px;
     border-top: 1px solid var(--line);
   }
+  .horizon.bare {
+    padding-top: 0;
+    border-top: 0;
+  }
   .horizon-copy {
     position: relative;
     z-index: 1;
@@ -155,18 +161,20 @@ const cols = [
     gap: 12px;
     margin-top: 8px;
   }
+  /* The landscape loads once the footer is near (html.js adds .near); without JS it loads straight away. */
   .land {
     height: clamp(180px, 28vw, 380px);
     margin-top: clamp(-40px, -3vw, -16px);
-    background: url("/art/landscape-light.webp") center bottom / cover no-repeat;
+    --bg-img: url("/art/landscape-light.webp");
+    background: center bottom / cover no-repeat;
   }
   @media (prefers-color-scheme: dark) {
     :global(:root:not([data-theme="light"])) .land {
-      background-image: url("/art/landscape-dark.webp");
+      --bg-img: url("/art/landscape-dark.webp");
     }
   }
   :global(:root[data-theme="dark"]) .land {
-    background-image: url("/art/landscape-dark.webp");
+    --bg-img: url("/art/landscape-dark.webp");
   }
   .top {
     display: grid;
@@ -190,7 +198,7 @@ const cols = [
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0;
-    color: var(--text-3);
+    color: var(--text-2);
     margin-bottom: 14px;
   }
   ul {
@@ -221,17 +229,30 @@ const cols = [
     border-top: 0;
     padding-top: 0;
   }
-  /* An oversized wordmark across the full width, cut by the page edge. */
-  .giant {
-    margin-top: 40px;
-    margin-bottom: -40px;
-    color: var(--text);
-    line-height: 0;
+  /* A giant, faint wordmark behind the footer. */
+  .foot {
+    position: relative;
   }
-  .giant :global(svg) {
-    display: block;
-    width: 100%;
-    height: auto;
+  .foot > :not(.giant) {
+    position: relative;
+    z-index: 1;
+  }
+  .giant {
+    position: absolute;
+    left: var(--gutter);
+    right: var(--gutter);
+    bottom: -24px;
+    z-index: 0;
+    color: var(--text);
+    opacity: 0.05;
+    line-height: 0;
+    pointer-events: none;
+  }
+  .giant {
+    aspect-ratio: 184.1 / 78.6;
+    background: currentColor;
+    -webkit-mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
+    mask: url("/brand/heed-wordmark-mono.svg") center / contain no-repeat;
   }
   .theme {
     display: inline-flex;

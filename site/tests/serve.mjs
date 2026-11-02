@@ -1,5 +1,6 @@
 // A tiny static server for dist/, resolving /path to /path.html like Cloudflare Pages does.
 import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,8 +39,15 @@ export function serve(port = 4173) {
     const body = await readFile(file ?? join(DIST, "404.html"));
     const type = file ? (TYPES[extname(file)] ?? "application/octet-stream") : TYPES[".html"];
     const cache = file && /\/(_astro|fonts)\//.test(file) ? "public, max-age=31536000, immutable" : "no-cache";
-    res.writeHead(file ? 200 : 404, { "Content-Type": type, "Cache-Control": cache });
-    res.end(body);
+    // Compress text like the production host (Cloudflare Pages) does, so Lighthouse sees real transfer sizes.
+    const text = /^(text\/|application\/(json|xml)|image\/svg)/.test(type);
+    const gz = text && /\bgzip\b/.test(String(req.headers["accept-encoding"] ?? ""));
+    res.writeHead(file ? 200 : 404, {
+      "Content-Type": type,
+      "Cache-Control": cache,
+      ...(gz ? { "Content-Encoding": "gzip", Vary: "Accept-Encoding" } : {}),
+    });
+    res.end(gz ? gzipSync(body) : body);
   });
   return new Promise((r) => server.listen(port, "127.0.0.1", () => r({ server, base: `http://127.0.0.1:${port}` })));
 }
