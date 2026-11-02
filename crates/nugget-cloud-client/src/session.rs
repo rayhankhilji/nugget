@@ -17,6 +17,7 @@ pub const REFRESH_MARGIN_SECS: i64 = 60;
 
 const KEYCHAIN_SERVICE: &str = "nugget";
 const KEYCHAIN_ENTRY: &str = "cloud-session";
+const KEYCHAIN_DEVICE_ENTRY: &str = "cloud-device";
 
 /// What persists across launches. The email is kept so the app can say who is signed in
 /// without a network call.
@@ -40,16 +41,26 @@ pub trait SessionStore: Send + Sync {
     fn load(&self) -> Result<Option<StoredSession>>;
     fn save(&self, session: &StoredSession) -> Result<()>;
     fn clear(&self) -> Result<()>;
+    /// This install's device id (see [`Session::device_id`]). Kept across sign-outs.
+    fn load_device_id(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
+    fn save_device_id(&self, _id: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
-/// The OS keychain: service `nugget`, entry `cloud-session`.
+/// The OS keychain: service `nugget`, entries `cloud-session` and `cloud-device`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeychainStore;
 
 impl KeychainStore {
     fn entry() -> Result<keyring::Entry> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ENTRY)
-            .map_err(|e| CloudError::Keychain(e.to_string()))
+        Self::named(KEYCHAIN_ENTRY)
+    }
+
+    fn named(name: &str) -> Result<keyring::Entry> {
+        keyring::Entry::new(KEYCHAIN_SERVICE, name).map_err(|e| CloudError::Keychain(e.to_string()))
     }
 }
 
@@ -78,15 +89,36 @@ impl SessionStore for KeychainStore {
             Err(e) => Err(CloudError::Keychain(e.to_string())),
         }
     }
+
+    fn load_device_id(&self) -> Result<Option<String>> {
+        match Self::named(KEYCHAIN_DEVICE_ENTRY)?.get_password() {
+            Ok(id) => Ok(Some(id)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(CloudError::Keychain(e.to_string())),
+        }
+    }
+
+    fn save_device_id(&self, id: &str) -> Result<()> {
+        Self::named(KEYCHAIN_DEVICE_ENTRY)?
+            .set_password(id)
+            .map_err(|e| CloudError::Keychain(e.to_string()))
+    }
 }
 
 /// In memory, for tests.
 #[derive(Debug, Default)]
-pub struct MemoryStore(Mutex<Option<StoredSession>>);
+pub struct MemoryStore(Mutex<Option<StoredSession>>, Mutex<Option<String>>);
 
 impl MemoryStore {
     pub fn with(session: StoredSession) -> Self {
-        Self(Mutex::new(Some(session)))
+        Self(Mutex::new(Some(session)), Mutex::default())
+    }
+
+    pub fn device(&self) -> Option<String> {
+        self.1
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub fn get(&self) -> Option<StoredSession> {
@@ -107,6 +139,13 @@ impl SessionStore for MemoryStore {
     }
     fn clear(&self) -> Result<()> {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        Ok(())
+    }
+    fn load_device_id(&self) -> Result<Option<String>> {
+        Ok(self.device())
+    }
+    fn save_device_id(&self, id: &str) -> Result<()> {
+        *self.1.lock().unwrap_or_else(PoisonError::into_inner) = Some(id.to_owned());
         Ok(())
     }
 }
@@ -151,6 +190,7 @@ struct Inner {
     access: Option<Access>,
     stored: Option<StoredSession>,
     loaded: bool,
+    device: Option<String>,
 }
 
 pub struct Session {
@@ -226,22 +266,29 @@ impl Session {
     }
 
     /// Finish a sign-in from the deep link. Refused unless a sign-in started in this process in
-    /// the last 10 minutes; either way the pending sign-in is used up.
+    /// the last 10 minutes. The pending sign-in is used up by success, expiry or an error
+    /// callback, but NOT by a code Supabase refuses: any web page can open the deep link, and a
+    /// forged code must not cancel the real sign-in that is still on its way (PKCE already
+    /// stops a forged code from signing anyone in).
     pub async fn complete(&self, callback: Callback) -> Result<SessionStatus> {
         let mut inner = self.inner.lock().await;
-        let pending = inner.pending.take().ok_or(CloudError::NoPendingSignIn)?;
+        let pending = inner.pending.as_ref().ok_or(CloudError::NoPendingSignIn)?;
         if self.clock.now() - pending.started > PENDING_TTL_SECS {
+            inner.pending = None;
             return Err(CloudError::SignInExpired);
         }
+        let verifier = pending.verifier.clone();
         let code = match callback {
             Callback::Code(code) => code,
             err @ Callback::Error { .. } => {
+                inner.pending = None;
                 return Err(CloudError::SignInFailed(
                     err.error_message().unwrap_or_default(),
                 ));
             }
         };
-        let tokens = self.auth.exchange(&code, &pending.verifier).await?;
+        let tokens = self.auth.exchange(&code, &verifier).await?;
+        inner.pending = None;
         inner.loaded = true;
         self.apply(&mut inner, tokens);
         Ok(status_of(&inner))
@@ -305,6 +352,34 @@ impl Session {
         }
     }
 
+    /// A random id for this install (32 hex characters), made once and kept in the store. If the
+    /// store can't keep it, this launch still uses one id throughout.
+    pub async fn device_id(&self) -> String {
+        let mut inner = self.inner.lock().await;
+        if let Some(id) = &inner.device {
+            return id.clone();
+        }
+        let saved = match self.store.load_device_id() {
+            Ok(id) => id.filter(|id| valid_device_id(id)),
+            Err(e) => {
+                tracing::warn!(error = %e, "couldn't read the device id");
+                None
+            }
+        };
+        let id = match saved {
+            Some(id) => id,
+            None => {
+                let id = new_device_id();
+                if let Err(e) = self.store.save_device_id(&id) {
+                    tracing::warn!(error = %e, "couldn't save the device id");
+                }
+                id
+            }
+        };
+        inner.device = Some(id.clone());
+        id
+    }
+
     /// The server refused the access token: drop it, so the next call refreshes.
     pub async fn invalidate_access(&self) {
         self.inner.lock().await.access = None;
@@ -351,6 +426,23 @@ fn status_of(inner: &Inner) -> SessionStatus {
         signed_in: inner.stored.is_some() || inner.access.is_some(),
         email: inner.stored.as_ref().and_then(|s| s.email.clone()),
     }
+}
+
+fn valid_device_id(id: &str) -> bool {
+    id.len() == 32 && id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
+}
+
+fn new_device_id() -> String {
+    let mut bytes = [0u8; 16];
+    if getrandom::fill(&mut bytes).is_err() {
+        // No OS randomness: still distinct per install in practice.
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        bytes = (t ^ u128::from(std::process::id())).to_le_bytes();
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A plausible address (Supabase does the real check): one `@`, no spaces or control characters.
@@ -440,6 +532,32 @@ pub(crate) mod tests {
             s.complete(Callback::Code("c".into())).await,
             Err(CloudError::NoPendingSignIn)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_forged_code_does_not_cancel_the_real_sign_in() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/v1/token"))
+            .and(wiremock::matchers::body_partial_json(
+                serde_json::json!({"auth_code": "forged"}),
+            ))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "code": 404, "error_code": "flow_state_not_found", "msg": "invalid flow state"
+            })))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        mount_pkce(&server, 10_000).await;
+        let clock = Arc::new(FakeClock::default());
+        clock.set(1_000);
+        let s = session(&server.uri(), Default::default(), clock);
+        s.begin_oauth(Provider::Google).await.unwrap();
+        // A web page opens heed://auth/callback?code=forged before the real redirect lands.
+        assert!(s.complete(Callback::Code("forged".into())).await.is_err());
+        assert!(!s.status().await.signed_in);
+        let st = s.complete(Callback::Code("c".into())).await.unwrap();
+        assert!(st.signed_in, "the real callback still completes");
     }
 
     #[tokio::test]
@@ -556,6 +674,25 @@ pub(crate) mod tests {
             s.access_token().await,
             Err(CloudError::NotSignedIn)
         ));
+    }
+
+    #[tokio::test]
+    async fn the_device_id_is_made_once_and_kept() {
+        let store = Arc::new(MemoryStore::default());
+        let s = session("http://127.0.0.1:1", store.clone(), Default::default());
+        let id = s.device_id().await;
+        assert!(valid_device_id(&id), "{id}");
+        assert_eq!(s.device_id().await, id);
+        assert_eq!(store.device().as_deref(), Some(id.as_str()));
+        // A new launch reads it back; sign-out keeps it.
+        s.sign_out().await.unwrap();
+        let again = session("http://127.0.0.1:1", store.clone(), Default::default());
+        assert_eq!(again.device_id().await, id);
+        // A damaged value is replaced.
+        store.save_device_id("nope").unwrap();
+        let fresh = session("http://127.0.0.1:1", store.clone(), Default::default());
+        let other = fresh.device_id().await;
+        assert!(valid_device_id(&other) && other != id);
     }
 
     #[tokio::test]

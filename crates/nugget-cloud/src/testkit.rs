@@ -44,6 +44,48 @@ pub struct FakeComposio {
     pub data: Mutex<HashMap<String, Value>>,
     pub calls: Mutex<Vec<(String, String, Value)>>,
     pub deleted: Mutex<Vec<String>>,
+    /// (user, account, trigger slug) of enabled triggers.
+    pub triggers: Mutex<Vec<(String, String, String)>>,
+    /// Scripted responses, checked before `data`: (tool, required argument, response).
+    pub script: Mutex<Vec<Scripted>>,
+    /// Tools that fail with this error.
+    pub fail: Mutex<HashMap<String, String>>,
+    /// Delay per tool call (slow-backfill tests).
+    pub delay_ms: std::sync::atomic::AtomicU64,
+}
+
+/// A recorded response for `tool`, used when the call's arguments contain `when` (every key
+/// with an equal value; `None` matches any call).
+#[derive(Clone)]
+pub struct Scripted {
+    pub tool: String,
+    pub when: Option<Value>,
+    pub data: Value,
+}
+
+impl Scripted {
+    pub fn matches(&self, tool: &str, args: &Value) -> bool {
+        self.tool == tool
+            && match &self.when {
+                None => true,
+                Some(Value::Object(want)) => want.iter().all(|(k, v)| args.get(k) == Some(v)),
+                Some(_) => false,
+            }
+    }
+}
+
+/// The most specific scripted response for a call (most keys matched).
+pub fn scripted(script: &[Scripted], tool: &str, args: &Value) -> Option<Value> {
+    script
+        .iter()
+        .filter(|s| s.matches(tool, args))
+        .max_by_key(|s| {
+            s.when
+                .as_ref()
+                .and_then(Value::as_object)
+                .map_or(0, |m| m.len())
+        })
+        .map(|s| s.data.clone())
 }
 
 #[async_trait]
@@ -73,10 +115,10 @@ impl Composio for FakeComposio {
         auth_config: &str,
         _cb: &str,
     ) -> Result<Link, ComposioError> {
-        let toolkit = if auth_config == "ac_gmail" {
-            "gmail"
-        } else {
-            "googlecalendar"
+        // `ac_<toolkit>`; `ac_cal` is Google Calendar (as in the M1 tests).
+        let toolkit = match auth_config {
+            "ac_cal" => "googlecalendar",
+            other => other.strip_prefix("ac_").unwrap_or(other),
         };
         let id = format!("ca_{}_{toolkit}", &user[..8]);
         self.accounts
@@ -110,6 +152,17 @@ impl Composio for FakeComposio {
         }
         Ok(())
     }
+    async fn upsert_trigger(
+        &self,
+        user: &str,
+        account: &str,
+        trigger: &str,
+        _config: Value,
+    ) -> Result<String, ComposioError> {
+        let mut t = self.triggers.lock().unwrap();
+        t.push((user.into(), account.into(), trigger.into()));
+        Ok(format!("ti_{}", t.len()))
+    }
     async fn execute(
         &self,
         user: &str,
@@ -117,15 +170,28 @@ impl Composio for FakeComposio {
         tool: &str,
         args: Value,
     ) -> Result<Value, ComposioError> {
+        let delay = self.delay_ms.load(std::sync::atomic::Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
         self.calls
             .lock()
             .unwrap()
-            .push((user.into(), tool.into(), args));
+            .push((user.into(), tool.into(), args.clone()));
+        if let Some(m) = self.fail.lock().unwrap().get(tool) {
+            return Err(ComposioError::Tool {
+                tool: tool.into(),
+                message: m.clone(),
+            });
+        }
         if !account.starts_with(&format!("ca_{}", &user[..8])) {
             return Err(ComposioError::Tool {
                 tool: tool.into(),
                 message: "account not owned".into(),
             });
+        }
+        if let Some(v) = scripted(&self.script.lock().unwrap(), tool, &args) {
+            return Ok(v);
         }
         Ok(self
             .data
@@ -161,7 +227,11 @@ impl Llm for FakeLlm {
 }
 
 /// Deterministic bag-of-words vectors, so similar texts are near each other.
-pub struct FakeEmbedder;
+#[derive(Default)]
+pub struct FakeEmbedder {
+    /// Provider calls made (batching check).
+    pub calls: std::sync::atomic::AtomicUsize,
+}
 
 #[async_trait]
 impl Embedder for FakeEmbedder {
@@ -172,6 +242,7 @@ impl Embedder for FakeEmbedder {
         1536
     }
     async fn embed(&self, texts: &[String]) -> Result<(Vec<Vec<f32>>, u32), GatewayError> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let vecs = texts
             .iter()
             .map(|t| {
@@ -300,4 +371,91 @@ pub fn fakes() -> (Arc<FakeAuth>, Arc<FakeComposio>, Arc<FakeLlm>) {
             prompts: Mutex::new(Vec::new()),
         }),
     )
+}
+
+/// Stripe with in-memory subscriptions; records checkouts and subscription fetches.
+#[derive(Default)]
+pub struct FakeStripe {
+    pub subs: Mutex<HashMap<String, crate::stripe::Subscription>>,
+    /// (customer, price, trial_days)
+    pub checkouts: Mutex<Vec<(String, String, Option<u32>)>>,
+    pub customers: Mutex<Vec<String>>,
+    pub fetches: Mutex<u32>,
+    pub deleted_customers: Mutex<Vec<String>>,
+    pub fail_delete: std::sync::atomic::AtomicBool,
+}
+
+#[async_trait]
+impl crate::stripe::Stripe for FakeStripe {
+    async fn create_customer(
+        &self,
+        _email: Option<&str>,
+        user_id: &str,
+    ) -> Result<String, crate::stripe::StripeError> {
+        let id = format!("cus_{}", &user_id[..8]);
+        self.customers.lock().unwrap().push(id.clone());
+        Ok(id)
+    }
+    async fn checkout(
+        &self,
+        r: &crate::stripe::CheckoutRequest<'_>,
+    ) -> Result<String, crate::stripe::StripeError> {
+        self.checkouts
+            .lock()
+            .unwrap()
+            .push((r.customer.into(), r.price.into(), r.trial_days));
+        Ok(format!("https://checkout.stripe.test/{}", r.price))
+    }
+    async fn portal(
+        &self,
+        customer: &str,
+        _return_url: &str,
+    ) -> Result<String, crate::stripe::StripeError> {
+        Ok(format!("https://billing.stripe.test/{customer}"))
+    }
+    async fn subscription(
+        &self,
+        id: &str,
+    ) -> Result<crate::stripe::Subscription, crate::stripe::StripeError> {
+        *self.fetches.lock().unwrap() += 1;
+        self.subs
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| crate::stripe::StripeError::Http("no such subscription".into()))
+    }
+    async fn delete_customer(&self, id: &str) -> Result<(), crate::stripe::StripeError> {
+        if self.fail_delete.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(crate::stripe::StripeError::Http(
+                "stripe down (secret detail)".into(),
+            ));
+        }
+        self.deleted_customers.lock().unwrap().push(id.into());
+        Ok(())
+    }
+}
+
+/// Test price ids for the default plans.
+pub fn test_prices(k: &str) -> Option<String> {
+    match k {
+        "STRIPE_PRICE_HEED_MONTHLY" => Some("price_hm".into()),
+        "STRIPE_PRICE_HEED_ANNUAL" => Some("price_ha".into()),
+        "STRIPE_PRICE_HEED_MAX_MONTHLY" => Some("price_xm".into()),
+        "STRIPE_PRICE_HEED_MAX_ANNUAL" => Some("price_xa".into()),
+        _ => None,
+    }
+}
+
+/// A user with an active subscription to `plan`, written directly (as a webhook would).
+pub async fn subscriber(pool: &Pg, plan: &str) -> Uuid {
+    let id = add_user(pool).await;
+    pool.execute(
+        "insert into public.subscriptions (id, user_id, plan, interval, status, stripe_price_id)
+         values ($1, $2, $3, 'month', 'active', 'price_test')",
+        &[&format!("sub_{}", id.simple()), &id, &plan],
+    )
+    .await
+    .unwrap();
+    id
 }

@@ -1,0 +1,53 @@
+# Heed plans and entitlements. Edit this file (or point NUGGET_PLANS_FILE at a copy) to change
+# prices, limits or features without touching code; the service validates it at startup.
+# Prices are what the customer pays (GBP, VAT included). Stripe price ids come from the
+# environment variables named here, so test and live mode can differ.
+# Sizing of the AI budgets: docs/architecture-cloud.md, "Plans, cost and margin".
+
+trial_days = 14
+
+[plans.heed]
+name = "Heed"
+monthly_gbp = 39
+annual_gbp = 390
+stripe_price_monthly_env = "STRIPE_PRICE_HEED_MONTHLY"
+stripe_price_annual_env = "STRIPE_PRICE_HEED_ANNUAL"
+default_model = "fast"
+smart_asks_per_month = 300
+# Fair use, in USD of model cost per month: past the budget, answers use the fast model;
+# past the hard cap, AI requests are refused until the month ends.
+ai_budget_usd = 8
+ai_hard_cap_usd = 12
+max_connections = 10
+sync_interval_minutes = 30
+history_days = 365
+devices = 1
+ghost_text = true
+needs_you_inbox = true
+daily_brief = true
+actions_with_approval = true
+agent_tasks = false
+computer_use = false
+priority_support = false
+
+[plans.heed_max]
+name = "Heed Max"
+monthly_gbp = 99
+annual_gbp = 990
+stripe_price_monthly_env = "STRIPE_PRICE_HEED_MAX_MONTHLY"
+stripe_price_annual_env = "STRIPE_PRICE_HEED_MAX_ANNUAL"
+default_model = "smart"
+smart_asks_per_month = 900
+ai_budget_usd = 18
+ai_hard_cap_usd = 25
+# max_connections and history_days left out = unlimited.
+# Mail and calendar; other apps sync at most every 15 minutes (see ingest::SyncPolicy).
+sync_interval_minutes = 5
+devices = 3
+ghost_text = true
+needs_you_inbox = true
+daily_brief = true
+actions_with_approval = true
+agent_tasks = true
+computer_use = true
+priority_support = true

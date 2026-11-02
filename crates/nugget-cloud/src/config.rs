@@ -24,6 +24,27 @@ pub struct Config {
     pub model_smart: Option<String>,
     /// Where Composio sends the browser after consent.
     pub connect_callback: String,
+    /// `json` (default) or `text` log lines.
+    pub log_format: String,
+    /// Internal listener for `/metrics` (not exposed publicly; Fly scrapes it).
+    pub metrics_bind: Option<String>,
+    pub sentry_dsn: Option<String>,
+    pub sentry_environment: String,
+    pub shutdown_grace_secs: u64,
+    pub pool: crate::db::PoolOptions,
+    pub limits: crate::ratelimit::Limits,
+    /// Header carrying the real client IP from the edge proxy (`fly-client-ip`); empty means
+    /// use the TCP peer address.
+    pub client_ip_header: Option<String>,
+    pub stripe_secret_key: Option<String>,
+    pub stripe_webhook_secret: Option<String>,
+    pub stripe_base: String,
+    /// The service's public https base URL (Stripe returns the browser to `/billing/done`).
+    pub public_url: Option<String>,
+    /// Scheme of the desktop app's deep links (`nugget`, or `heed` after the rename).
+    pub app_scheme: String,
+    /// Website origins (`https://heed.app`) allowed for CORS and billing return URLs.
+    pub site_origins: Vec<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -36,6 +57,8 @@ impl std::fmt::Debug for Config {
             .field("composio", &self.composio_api_key.is_some())
             .field("anthropic", &self.anthropic_api_key.is_some())
             .field("openai", &self.openai_api_key.is_some())
+            .field("stripe", &self.stripe_secret_key.is_some())
+            .field("public_url", &self.public_url)
             .finish_non_exhaustive()
     }
 }
@@ -81,8 +104,68 @@ impl Config {
             model_smart: opt("NUGGET_MODEL_SMART"),
             connect_callback: opt("NUGGET_CONNECT_CALLBACK")
                 .unwrap_or_else(|| "nugget://connections/callback".into()),
+            log_format: opt("NUGGET_LOG_FORMAT").unwrap_or_else(|| "json".into()),
+            metrics_bind: match opt("NUGGET_METRICS_BIND").as_deref() {
+                Some("off") => None,
+                Some(b) => Some(b.to_owned()),
+                None => Some("0.0.0.0:9091".into()),
+            },
+            sentry_dsn: opt("SENTRY_DSN"),
+            sentry_environment: opt("SENTRY_ENVIRONMENT").unwrap_or_else(|| "production".into()),
+            shutdown_grace_secs: num(&opt, "NUGGET_SHUTDOWN_GRACE_SECS", 25),
+            pool: crate::db::PoolOptions {
+                max_size: num(&opt, "DATABASE_POOL_MAX", 8).max(1) as usize,
+                timeout_secs: num(&opt, "DATABASE_POOL_TIMEOUT_SECS", 5).max(1),
+                statement_timeout_ms: num(&opt, "DATABASE_STATEMENT_TIMEOUT_MS", 15_000),
+            },
+            limits: {
+                let d = crate::ratelimit::Limits::default();
+                let n = |k, v: u32| num(&opt, k, u64::from(v)).min(u64::from(u32::MAX)) as u32;
+                crate::ratelimit::Limits {
+                    ip_per_min: n("NUGGET_RATE_IP_PER_MIN", d.ip_per_min),
+                    user_per_min: n("NUGGET_RATE_USER_PER_MIN", d.user_per_min),
+                    ask_per_min: n("NUGGET_RATE_ASK_PER_MIN", d.ask_per_min),
+                    sync_every_secs: n("NUGGET_SYNC_EVERY_SECS", d.sync_every_secs),
+                    action_per_min: n("NUGGET_RATE_ACTION_PER_MIN", d.action_per_min),
+                }
+            },
+            client_ip_header: match get("NUGGET_CLIENT_IP_HEADER") {
+                Some(v) if v.trim().is_empty() => None,
+                Some(v) => Some(v.trim().to_ascii_lowercase()),
+                None => Some("fly-client-ip".into()),
+            },
+            stripe_secret_key: opt("STRIPE_SECRET_KEY"),
+            stripe_webhook_secret: opt("STRIPE_WEBHOOK_SECRET"),
+            stripe_base: opt("NUGGET_STRIPE_BASE_URL")
+                .unwrap_or_else(|| "https://api.stripe.com".into()),
+            public_url: opt("NUGGET_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
+            site_origins: parse_origins(&opt("NUGGET_SITE_ORIGINS").unwrap_or_default()),
+            app_scheme: opt("NUGGET_APP_SCHEME")
+                .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
+                .unwrap_or_else(|| "nugget".into()),
         })
     }
+}
+
+/// `https://heed.app, https://www.heed.app/` → normalised origins (scheme://host[:port]).
+/// Entries that are not plain http(s) origins are dropped.
+pub fn parse_origins(s: &str) -> Vec<String> {
+    s.split(',')
+        .filter_map(|o| {
+            let u = url::Url::parse(o.trim()).ok()?;
+            let plain = matches!(u.scheme(), "https" | "http")
+                && u.host_str().is_some()
+                && matches!(u.path(), "" | "/")
+                && u.query().is_none()
+                && u.username().is_empty();
+            plain.then(|| u.origin().ascii_serialization())
+        })
+        .collect()
+}
+
+/// A non-negative integer variable, or `default` when unset or unparsable.
+fn num(opt: &impl Fn(&str) -> Option<String>, k: &str, default: u64) -> u64 {
+    opt(k).and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
 /// `gmail=ac_1, googlecalendar=ac_2` → map. Malformed pairs are ignored.
@@ -109,6 +192,20 @@ mod tests {
     }
 
     #[test]
+    fn origins_parse() {
+        assert_eq!(
+            parse_origins(
+                " https://heed.app/ ,http://localhost:4321,https://x.dev/path,ftp://a.b,,nonsense"
+            ),
+            vec![
+                "https://heed.app".to_owned(),
+                "http://localhost:4321".to_owned()
+            ]
+        );
+        assert!(parse_origins("").is_empty());
+    }
+
+    #[test]
     fn required_vars_and_defaults() {
         let env = |k: &str| match k {
             "DATABASE_URL" => Some("postgres://x".into()),
@@ -125,6 +222,11 @@ mod tests {
             !format!("{c:?}").contains("anon"),
             "debug output hides secrets"
         );
+        assert_eq!(c.log_format, "json");
+        assert_eq!(c.metrics_bind.as_deref(), Some("0.0.0.0:9091"));
+        assert_eq!(c.pool.max_size, 8);
+        assert_eq!(c.limits, crate::ratelimit::Limits::default());
+        assert_eq!(c.client_ip_header.as_deref(), Some("fly-client-ip"));
         let err = Config::from_lookup(|_| None).unwrap_err();
         assert_eq!(err.0, "DATABASE_URL");
     }

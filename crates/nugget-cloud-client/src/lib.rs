@@ -16,8 +16,13 @@ pub mod pkce;
 pub mod session;
 
 pub use api::{
-    Answer, Api, AskRequest, AskUsage, AvailableApp, Citation, ConnectStart, Connection,
-    Connections, Me, SyncReport, SyncResult, Usage,
+    Action, ActionInput, ActionKind, ActionPreview, ActionStatus, Answer, Api, AppInfo, AskRequest,
+    AskUsage, AvailableApp, BillingLink, Brief, Card, CardAction, CardEvidence, CardOutcome, Cards,
+    Citation, ConnectStart, Connection, Connections, CreateEvent, CreatePage, DEVICE_HEADER,
+    DismissReason, Entitlements, FacetCount, Facets, Interval, Me, ModelTier, PlanOffer, Plans,
+    PostMessage, PreviewDiff, PreviewField, ProposeAction, ReplyMail, SearchDates, SearchRequest,
+    SearchResponse, SearchResult, SendMail, Subscription, SyncReport, SyncResult, Timeline,
+    TimelineBucket, UpdateEvent, Usage,
 };
 pub use auth::{Callback, Provider, REDIRECT_URL, parse_callback};
 pub use session::{
@@ -46,6 +51,18 @@ pub enum CloudError {
     SignInFailed(String),
     #[error("{0}")]
     QuotaExceeded(String),
+    /// 402: no active or trialing subscription.
+    #[error("{0}")]
+    SubscriptionRequired(String),
+    /// 403: this account is signed in on as many devices as its plan allows.
+    #[error("{0}")]
+    DeviceLimitReached(String),
+    /// 403: the plan's limit of connected apps is reached.
+    #[error("{0}")]
+    ConnectionLimitReached(String),
+    /// 409: the billing portal needs a subscription first.
+    #[error("{0}")]
+    NoCustomer(String),
     #[error("{message}")]
     Api {
         status: u16,
@@ -72,6 +89,10 @@ impl CloudError {
             Self::SignInExpired => "sign_in_expired",
             Self::SignInFailed(_) => "sign_in_failed",
             Self::QuotaExceeded(_) => "quota_exceeded",
+            Self::SubscriptionRequired(_) => "subscription_required",
+            Self::DeviceLimitReached(_) => "device_limit_reached",
+            Self::ConnectionLimitReached(_) => "connection_limit_reached",
+            Self::NoCustomer(_) => "no_customer",
             Self::Api { code, .. } => code,
             Self::Network(_) => "network",
             Self::Protocol(_) => "protocol",

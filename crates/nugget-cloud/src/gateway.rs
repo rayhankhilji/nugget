@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 use crate::db::{Db, DbError, UsageKind};
+use crate::plans::{ModelTier, Plan};
 
 #[derive(Debug, thiserror::Error)]
 pub enum GatewayError {
@@ -56,33 +57,37 @@ pub trait Embedder: Send + Sync {
     async fn embed(&self, texts: &[String]) -> Result<(Vec<Vec<f32>>, u32), GatewayError>;
 }
 
-/// The user's plan, which picks the answer model and the quota.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Plan {
-    Free,
-    Pro,
+/// Inputs per embedding request.
+pub const EMBED_BATCH: usize = 100;
+
+/// What a user's plan lets them spend on AI this month (from `plans.toml`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Allowance {
+    pub default_model: ModelTier,
+    pub smart_asks_per_month: u32,
+    /// Past this, answers use the fast model.
+    pub budget_micros: i64,
+    /// Past this, AI requests are refused until the month ends.
+    pub hard_cap_micros: i64,
 }
 
-impl Plan {
-    pub fn parse(s: &str) -> Self {
-        if s == "pro" { Self::Pro } else { Self::Free }
-    }
-    /// Monthly AI budget in micro-USD (see the doc's cost table).
-    pub fn quota_micros(self) -> i64 {
-        match self {
-            Self::Free => 750_000,
-            Self::Pro => 8_000_000,
+impl From<&Plan> for Allowance {
+    fn from(p: &Plan) -> Self {
+        Self {
+            default_model: p.default_model,
+            smart_asks_per_month: p.smart_asks_per_month,
+            budget_micros: p.ai_budget_micros(),
+            hard_cap_micros: p.ai_hard_cap_micros(),
         }
     }
 }
 
-/// Which kind of work a call is for.
+/// The model picked for one request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tier {
-    /// Extraction, classification: always the cheap model.
-    Fast,
-    /// Answers: the plan's model.
-    Answer,
+pub struct ModelChoice {
+    pub tier: ModelTier,
+    /// A smart request fell back to fast (allowance or fair-use budget used up).
+    pub downgraded: bool,
 }
 
 /// Price in USD per million tokens (input, output), from the providers' official pages
@@ -174,37 +179,65 @@ impl Gateway {
         self.embedder.is_some()
     }
 
-    pub fn model_for(&self, tier: Tier, plan: Plan) -> &str {
-        match (tier, plan) {
-            (Tier::Answer, Plan::Pro) => &self.model_smart,
-            _ => &self.model_fast,
+    pub fn model_for(&self, tier: ModelTier) -> &str {
+        match tier {
+            ModelTier::Smart => &self.model_smart,
+            ModelTier::Fast => &self.model_fast,
         }
     }
 
-    /// Fails with [`GatewayError::QuotaExceeded`] when the month's usage has reached the plan's quota.
-    pub async fn check_quota(&self, db: &Db, user: Uuid, plan: Plan) -> Result<(), GatewayError> {
-        if db.month_cost_micros(user).await? >= plan.quota_micros() {
+    /// Picks the model for an answer: the requested tier (or the plan's default), falling back
+    /// to fast when the smart allowance or the fair-use budget is used up. Fails with
+    /// [`GatewayError::QuotaExceeded`] past the hard cap.
+    pub async fn choose(
+        &self,
+        db: &Db,
+        user: Uuid,
+        allowance: Allowance,
+        requested: Option<ModelTier>,
+    ) -> Result<ModelChoice, GatewayError> {
+        let cost = db.month_cost_micros(user).await?;
+        if cost >= allowance.hard_cap_micros {
             return Err(GatewayError::QuotaExceeded);
         }
-        Ok(())
+        let want = requested.unwrap_or(allowance.default_model);
+        if want == ModelTier::Fast {
+            return Ok(ModelChoice {
+                tier: ModelTier::Fast,
+                downgraded: false,
+            });
+        }
+        let smart_used = db.month_model_calls(user, &self.model_smart).await?;
+        let allowed = cost < allowance.budget_micros
+            && smart_used < i64::from(allowance.smart_asks_per_month);
+        Ok(if allowed {
+            ModelChoice {
+                tier: ModelTier::Smart,
+                downgraded: false,
+            }
+        } else {
+            ModelChoice {
+                tier: ModelTier::Fast,
+                downgraded: true,
+            }
+        })
     }
 
-    /// A metered completion. The model is chosen here from `tier` and `plan`; `req.model` is
-    /// overwritten.
+    /// A metered completion on `tier`'s model; `req.model` is overwritten. Quotas are the
+    /// caller's job ([`Self::choose`]).
     pub async fn complete(
         &self,
         db: &Db,
         user: Uuid,
-        plan: Plan,
-        tier: Tier,
+        tier: ModelTier,
         mut req: LlmRequest,
     ) -> Result<LlmResponse, GatewayError> {
         let llm = self.llm.as_ref().ok_or(GatewayError::NotConfigured)?;
-        self.check_quota(db, user, plan).await?;
-        let model = self.model_for(tier, plan).to_owned();
+        let model = self.model_for(tier).to_owned();
         req.model = model.clone();
         let res = llm.complete(&req).await?;
         let cost = cost_micros(&model, res.input_tokens, res.output_tokens);
+        crate::ops::METRICS.gateway_cost(cost);
         db.record_usage(
             user,
             UsageKind::Llm,
@@ -227,25 +260,28 @@ impl Gateway {
         let Some(e) = &self.embedder else {
             return Ok(None);
         };
-        if texts.is_empty() {
-            return Ok(Some(Vec::new()));
+        let mut out = Vec::with_capacity(texts.len());
+        // One provider call per EMBED_BATCH inputs (OpenAI accepts up to 2,048 per request).
+        for batch in texts.chunks(EMBED_BATCH) {
+            let (vecs, tokens) = e.embed(batch).await?;
+            if vecs.len() != batch.len() || vecs.iter().any(|v| v.len() != e.dims()) {
+                return Err(GatewayError::Provider(
+                    "embedding count or size mismatch".into(),
+                ));
+            }
+            crate::ops::METRICS.gateway_cost(cost_micros(e.model(), tokens, 0));
+            db.record_usage(
+                user,
+                UsageKind::Embed,
+                e.model(),
+                tokens,
+                0,
+                cost_micros(e.model(), tokens, 0),
+            )
+            .await?;
+            out.extend(vecs);
         }
-        let (vecs, tokens) = e.embed(texts).await?;
-        if vecs.len() != texts.len() || vecs.iter().any(|v| v.len() != e.dims()) {
-            return Err(GatewayError::Provider(
-                "embedding count or size mismatch".into(),
-            ));
-        }
-        db.record_usage(
-            user,
-            UsageKind::Embed,
-            e.model(),
-            tokens,
-            0,
-            cost_micros(e.model(), tokens, 0),
-        )
-        .await?;
-        Ok(Some(vecs))
+        Ok(Some(out))
     }
 }
 
@@ -408,17 +444,13 @@ mod tests {
         );
         // Unknown models are priced high.
         assert_eq!(cost_micros("mystery", 1_000, 100), 3_000);
-        assert_eq!(Plan::parse("pro"), Plan::Pro);
-        assert_eq!(Plan::parse("anything"), Plan::Free);
-        assert!(Plan::Pro.quota_micros() > Plan::Free.quota_micros());
     }
 
     #[test]
     fn model_per_tier() {
         let g = Gateway::new(None, None, "fast".into(), "smart".into());
-        assert_eq!(g.model_for(Tier::Answer, Plan::Free), "fast");
-        assert_eq!(g.model_for(Tier::Answer, Plan::Pro), "smart");
-        assert_eq!(g.model_for(Tier::Fast, Plan::Pro), "fast");
+        assert_eq!(g.model_for(ModelTier::Fast), "fast");
+        assert_eq!(g.model_for(ModelTier::Smart), "smart");
     }
 
     #[tokio::test]
