@@ -11,7 +11,8 @@ use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
 use crate::db::{Db, ItemMeta};
-use crate::gateway::{Gateway, GatewayError, LlmRequest, Plan, Role, Tier};
+use crate::gateway::{Allowance, Gateway, GatewayError, LlmRequest, Role};
+use crate::plans::ModelTier;
 
 const CANDIDATES: i64 = 40;
 const MAX_SOURCES: usize = 8;
@@ -42,6 +43,9 @@ pub struct AskResponse {
     pub answer: String,
     pub citations: Vec<Citation>,
     pub usage: Usage,
+    pub model_tier: ModelTier,
+    /// A smart request was answered by the fast model (allowance or fair use used up).
+    pub downgraded: bool,
 }
 
 /// A numbered source for the prompt.
@@ -167,20 +171,20 @@ pub async fn ask(
     db: &Db,
     gateway: &Gateway,
     user: Uuid,
-    plan: Plan,
+    allowance: Allowance,
+    requested: Option<ModelTier>,
     question: &str,
     conversation: Option<Uuid>,
 ) -> Result<AskResponse, GatewayError> {
-    // Fail fast before spending on embeddings.
-    gateway.check_quota(db, user, plan).await?;
+    // Decide (and fail on the hard cap) before spending on embeddings.
+    let choice = gateway.choose(db, user, allowance, requested).await?;
     let sources = retrieve(db, gateway, user, question).await?;
     let prompt = build_prompt(question, &sources, OffsetDateTime::now_utc());
     let res = gateway
         .complete(
             db,
             user,
-            plan,
-            Tier::Answer,
+            choice.tier,
             LlmRequest {
                 model: String::new(),
                 system: SYSTEM.into(),
@@ -215,6 +219,8 @@ pub async fn ask(
             input_tokens: res.input_tokens,
             output_tokens: res.output_tokens,
         },
+        model_tier: choice.tier,
+        downgraded: choice.downgraded,
     })
 }
 

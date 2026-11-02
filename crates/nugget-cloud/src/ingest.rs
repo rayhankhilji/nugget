@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::composio::Composio;
 use crate::db::{Connection, Db, NewItem, Upsert};
 use crate::gateway::Gateway;
+use crate::plans::{Catalog, Plan};
 
 pub const GMAIL: &str = "gmail";
 pub const CALENDAR: &str = "googlecalendar";
@@ -25,8 +26,54 @@ const MAX_BODY: usize = 64 * 1024;
 const CHUNK_CHARS: usize = 1200;
 const CHUNK_OVERLAP: usize = 200;
 const MAX_PAGES: usize = 5;
-/// History fetched on the first sync.
-const BACKFILL_DAYS: i64 = 90;
+/// Longest first-sync backfill, whatever the plan's history (keeps the first sync bounded).
+const MAX_BACKFILL_DAYS: u32 = 3 * 365;
+/// How soon to continue a backfill that did not finish in one run.
+const CONTINUE_SECS: i64 = 60;
+const IDLE_SECS: i64 = 24 * 60 * 60;
+/// Toolkits that get the plan's full cadence; others sync at most every 15 minutes, which keeps
+/// Composio tool-call cost bounded for users with many apps.
+const PRIMARY: &[&str] = &[GMAIL, CALENDAR];
+const SECONDARY_MIN_SECS: i64 = 15 * 60;
+
+/// Seconds until the next sync: the plan's cadence for mail and calendar while the user is
+/// active, at most every 15 minutes for other apps, daily when idle.
+pub fn next_interval(active: bool, toolkit: &str, policy: SyncPolicy) -> i64 {
+    match (active, PRIMARY.contains(&toolkit)) {
+        (false, _) => IDLE_SECS,
+        (true, true) => policy.interval_secs,
+        (true, false) => policy.interval_secs.max(SECONDARY_MIN_SECS),
+    }
+}
+
+/// What a plan means for syncing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncPolicy {
+    pub interval_secs: i64,
+    pub backfill_days: u32,
+    pub history_days: Option<u32>,
+}
+
+impl SyncPolicy {
+    pub fn for_plan(plan: Option<&Plan>) -> Self {
+        match plan {
+            Some(p) => Self {
+                interval_secs: i64::from(p.sync_interval_minutes) * 60,
+                backfill_days: p
+                    .history_days
+                    .unwrap_or(MAX_BACKFILL_DAYS)
+                    .min(MAX_BACKFILL_DAYS),
+                history_days: p.history_days,
+            },
+            // No live subscription: the scheduler skips the user; a stray run stays minimal.
+            None => Self {
+                interval_secs: IDLE_SECS,
+                backfill_days: 30,
+                history_days: Some(30),
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct SyncReport {
@@ -370,13 +417,11 @@ pub fn page_request(
     cursor: &Value,
     page: Option<&str>,
     now: OffsetDateTime,
+    backfill_days: u32,
 ) -> Option<(&'static str, Value)> {
     match toolkit {
         GMAIL => {
-            // Gmail's `after:` takes epoch seconds. First sync: the backfill window.
-            let after = cursor["after"]
-                .as_i64()
-                .unwrap_or((now - Duration::days(BACKFILL_DAYS)).unix_timestamp());
+            let after = gmail_after(cursor, now, backfill_days);
             let mut args = json!({"query": format!("after:{after}"), "max_results": 50, "verbose": true, "include_payload": true});
             if let Some(p) = page {
                 args["page_token"] = json!(p);
@@ -402,6 +447,13 @@ pub fn page_request(
     }
 }
 
+/// Gmail's `after:` (epoch seconds): the cursor, or on the first sync the backfill window.
+pub fn gmail_after(cursor: &Value, now: OffsetDateTime, backfill_days: u32) -> i64 {
+    cursor["after"]
+        .as_i64()
+        .unwrap_or((now - Duration::days(i64::from(backfill_days))).unix_timestamp())
+}
+
 pub fn parse_page(toolkit: &str, data: &Value) -> (Vec<NewItem>, Option<String>) {
     if toolkit == GMAIL {
         parse_gmail(data)
@@ -410,19 +462,32 @@ pub fn parse_page(toolkit: &str, data: &Value) -> (Vec<NewItem>, Option<String>)
     }
 }
 
-/// The cursor after a successful sync that started at `started`.
+/// The cursor after a sync run that started at `started`. `pending` is the next page when the
+/// run stopped before the end (a long Gmail backfill): the same query resumes there, and the
+/// newest timestamp seen so far is carried until the backfill completes.
 pub fn next_cursor(
     toolkit: &str,
     newest: Option<OffsetDateTime>,
     old: &Value,
     started: OffsetDateTime,
+    backfill_days: u32,
+    pending: Option<String>,
 ) -> Value {
     match toolkit {
-        // Re-read one hour back: mail can land with an older timestamp; unchanged items are skipped by hash.
-        GMAIL => match newest {
-            Some(t) => json!({"after": t.unix_timestamp() - 3600}),
-            None => old.clone(),
-        },
+        GMAIL => {
+            let carried = old["newest"].as_i64();
+            let newest = newest.map(|t| t.unix_timestamp()).max(carried);
+            match pending {
+                Some(page) => {
+                    json!({"after": gmail_after(old, started, backfill_days), "page": page, "newest": newest})
+                }
+                // Re-read one hour back: mail can land with an older timestamp; unchanged items are skipped by hash.
+                None => match newest {
+                    Some(t) => json!({"after": t - 3600}),
+                    None => json!({"after": gmail_after(old, started, backfill_days)}),
+                },
+            }
+        }
         _ => json!({"updated_min": rfc3339(started - Duration::minutes(5))}),
     }
 }
@@ -432,6 +497,7 @@ pub struct Ingest {
     pub db: Db,
     pub composio: Arc<dyn Composio>,
     pub gateway: Gateway,
+    pub catalog: Arc<Catalog>,
 }
 
 impl Ingest {
@@ -442,13 +508,26 @@ impl Ingest {
             ..Default::default()
         };
         let started = OffsetDateTime::now_utc();
-        let result = self.sync_inner(user, conn, started, &mut report).await;
+        let policy = SyncPolicy::for_plan(self.plan_of(user).await.as_ref());
+        let result = self
+            .sync_inner(user, conn, started, policy, &mut report)
+            .await;
         let active = self.db.recently_active(user).await.unwrap_or(false);
-        let next = if active { 30 * 60 } else { 24 * 60 * 60 };
+        let mut next = next_interval(active, &conn.toolkit, policy);
         let (cursor, err) = match result {
-            Ok(c) => (Some(c), None),
+            Ok((c, more)) => {
+                if more {
+                    next = CONTINUE_SECS;
+                }
+                (Some(c), None)
+            }
             Err(e) => (None, Some(e)),
         };
+        if let Some(days) = policy.history_days
+            && let Err(e) = self.db.prune_history(user, days).await
+        {
+            tracing::warn!(%e, "could not prune history");
+        }
         if let Err(e) = self
             .db
             .finish_sync(user, conn.id, cursor.as_ref(), err.as_deref(), next)
@@ -460,20 +539,35 @@ impl Ingest {
         report
     }
 
+    /// The user's live plan, if any.
+    pub async fn plan_of(&self, user: Uuid) -> Option<Plan> {
+        crate::plans::entitlement(&self.db, &self.catalog, user)
+            .await
+            .ok()?
+            .map(|e| e.plan)
+    }
+
+    /// Returns the new cursor and whether more pages remain (continue soon).
     async fn sync_inner(
         &self,
         user: Uuid,
         conn: &Connection,
         started: OffsetDateTime,
+        policy: SyncPolicy,
         report: &mut SyncReport,
-    ) -> Result<Value, String> {
+    ) -> Result<(Value, bool), String> {
         let uid = user.to_string();
-        let mut page: Option<String> = None;
+        let mut page: Option<String> = conn.sync_cursor["page"].as_str().map(str::to_owned);
         let mut newest: Option<OffsetDateTime> = None;
-        for _ in 0..MAX_PAGES {
-            let Some((tool, args)) =
-                page_request(&conn.toolkit, &conn.sync_cursor, page.as_deref(), started)
-            else {
+        let mut pending = None;
+        for i in 0..MAX_PAGES {
+            let Some((tool, args)) = page_request(
+                &conn.toolkit,
+                &conn.sync_cursor,
+                page.as_deref(),
+                started,
+                policy.backfill_days,
+            ) else {
                 return Err(format!("toolkit {} is not supported yet", conn.toolkit));
             };
             let data = self
@@ -495,16 +589,23 @@ impl Ingest {
                 }
             }
             match next {
+                Some(n) if i + 1 == MAX_PAGES => pending = Some(n),
                 Some(n) => page = Some(n),
                 None => break,
             }
         }
-        Ok(next_cursor(
+        // Only Gmail resumes mid-query; other toolkits restart from their cursor.
+        let pending = pending.filter(|_| conn.toolkit == GMAIL);
+        let more = pending.is_some();
+        let cursor = next_cursor(
             &conn.toolkit,
             newest,
             &conn.sync_cursor,
             started,
-        ))
+            policy.backfill_days,
+            pending,
+        );
+        Ok((cursor, more))
     }
 
     /// Stores one item unless its content is unchanged. Embeds chunks when an embedder exists.
@@ -656,30 +757,79 @@ mod tests {
     #[test]
     fn requests_and_cursors() {
         let now = OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
-        let (tool, args) = page_request(GMAIL, &json!({}), None, now).unwrap();
+        let (tool, args) = page_request(GMAIL, &json!({}), None, now, 365).unwrap();
         assert_eq!(tool, "GMAIL_FETCH_EMAILS");
         assert_eq!(
             args["query"],
-            format!("after:{}", 1_800_000_000 - 90 * 86_400)
+            format!("after:{}", 1_800_000_000 - 365 * 86_400)
         );
-        let (_, args) = page_request(GMAIL, &json!({"after": 5}), Some("p"), now).unwrap();
+        let (_, args) = page_request(GMAIL, &json!({"after": 5}), Some("p"), now, 365).unwrap();
         assert_eq!(args["query"], "after:5");
         assert_eq!(args["page_token"], "p");
-        let (tool, args) = page_request(CALENDAR, &json!({}), None, now).unwrap();
+        let (tool, args) = page_request(CALENDAR, &json!({}), None, now, 365).unwrap();
         assert_eq!(tool, "GOOGLECALENDAR_EVENTS_LIST");
         assert!(args["timeMin"].is_string() && args.get("updatedMin").is_none());
-        let c = next_cursor(CALENDAR, None, &json!({}), now);
-        let (_, args) = page_request(CALENDAR, &c, None, now).unwrap();
+        let c = next_cursor(CALENDAR, None, &json!({}), now, 365, None);
+        let (_, args) = page_request(CALENDAR, &c, None, now, 365).unwrap();
         assert!(args["updatedMin"].is_string());
         assert_eq!(
-            next_cursor(GMAIL, None, &json!({"after": 9}), now),
+            next_cursor(GMAIL, None, &json!({"after": 9}), now, 365, None),
             json!({"after": 9})
         );
         assert_eq!(
-            next_cursor(GMAIL, Some(now), &json!({}), now),
+            next_cursor(GMAIL, Some(now), &json!({}), now, 365, None),
             json!({"after": 1_800_000_000 - 3600})
         );
-        assert!(page_request("slack", &json!({}), None, now).is_none());
+        assert!(page_request("slack", &json!({}), None, now, 365).is_none());
+    }
+
+    #[test]
+    fn gmail_backfill_resumes_then_advances() {
+        let now = OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
+        let older = OffsetDateTime::from_unix_timestamp(1_799_000_000).unwrap();
+        // Run 1 stops with pages left: same `after`, the page to resume, the newest seen.
+        let c1 = next_cursor(GMAIL, Some(now), &json!({}), now, 30, Some("p6".into()));
+        assert_eq!(
+            c1,
+            json!({"after": 1_800_000_000 - 30 * 86_400, "page": "p6", "newest": 1_800_000_000})
+        );
+        let (_, args) = page_request(GMAIL, &c1, c1["page"].as_str(), now, 30).unwrap();
+        assert_eq!(args["page_token"], "p6");
+        assert_eq!(
+            args["query"],
+            format!("after:{}", 1_800_000_000 - 30 * 86_400)
+        );
+        // Run 2 reaches the end with only older mail: the carried newest wins.
+        let c2 = next_cursor(GMAIL, Some(older), &c1, now, 30, None);
+        assert_eq!(c2, json!({"after": 1_800_000_000 - 3600}));
+    }
+
+    #[test]
+    fn sync_policy_from_plan() {
+        let c = Catalog::parse(crate::plans::DEFAULT_TOML, |_| None).unwrap();
+        let heed = SyncPolicy::for_plan(c.get("heed"));
+        assert_eq!(
+            heed,
+            SyncPolicy {
+                interval_secs: 30 * 60,
+                backfill_days: 365,
+                history_days: Some(365)
+            }
+        );
+        let max = SyncPolicy::for_plan(c.get("heed_max"));
+        assert_eq!(
+            max,
+            SyncPolicy {
+                interval_secs: 5 * 60,
+                backfill_days: MAX_BACKFILL_DAYS,
+                history_days: None
+            }
+        );
+        assert_eq!(SyncPolicy::for_plan(None).interval_secs, IDLE_SECS);
+        assert_eq!(next_interval(true, GMAIL, max), 5 * 60);
+        assert_eq!(next_interval(true, "slack", max), 15 * 60);
+        assert_eq!(next_interval(true, "slack", heed), 30 * 60);
+        assert_eq!(next_interval(false, GMAIL, max), IDLE_SECS);
     }
 
     #[test]

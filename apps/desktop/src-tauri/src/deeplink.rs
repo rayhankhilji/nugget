@@ -9,6 +9,7 @@
 //! | a `.nuggetplugin` file | asks to install it, then the usual approval of what it may do |
 //! | `nugget://auth/callback?code=<c>` (or `?error=..&error_description=..`) | finishes a cloud sign-in started in this app |
 //! | `nugget://connections/callback` | Composio is done: shows Connections, which reloads its list |
+//! | `nugget://billing/done` | Stripe Checkout is done: shows Connections, which reloads the plan |
 //!
 //! The sign-in link is never shown to the page: its code is exchanged in Rust (`cloud.rs`), and
 //! only works while a sign-in this app started is pending (10 minutes, once). The page hears
@@ -91,6 +92,8 @@ pub enum Link {
     },
     /// Composio sent the browser back after connecting an app.
     Connections,
+    /// The cloud's page after Stripe Checkout sent the browser back.
+    Billing,
     /// Supabase sent the browser back after sign-in. Handled in Rust, never sent to the page.
     #[serde(skip)]
     AuthCallback(nugget_cloud_client::Callback),
@@ -226,6 +229,16 @@ pub fn parse_url(raw: &str) -> Result<Link, String> {
                 _ => Err("unknown link".into()),
             }
         }
+        "billing" => {
+            only(&[])?;
+            if url.fragment().is_some() {
+                return Err("unexpected parts in the link".into());
+            }
+            match segments.as_slice() {
+                [p] if p == "done" => Ok(Link::Billing),
+                _ => Err("unknown link".into()),
+            }
+        }
         _ => Err("unknown link".into()),
     }
 }
@@ -338,13 +351,17 @@ pub fn dispatch(app: &AppHandle, links: Vec<Result<Link, String>>) {
             }
             Ok(link) => {
                 tracing::info!(kind = kind(&link), "opening a link");
-                let connections = link == Link::Connections;
+                let cloud_event = match link {
+                    Link::Connections => Some(crate::cloud::CONNECTIONS_EVENT),
+                    Link::Billing => Some(crate::cloud::BILLING_EVENT),
+                    _ => None,
+                };
                 if let Some(p) = app.try_state::<Pending>() {
                     *p.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(link);
                 }
                 crate::tray::show_main(app, None);
-                if connections {
-                    let _ = app.emit_to("main", crate::cloud::CONNECTIONS_EVENT, ());
+                if let Some(event) = cloud_event {
+                    let _ = app.emit_to("main", event, ());
                 }
                 let _ = app.emit_to("main", EVENT, ());
             }
@@ -361,6 +378,7 @@ fn kind(link: &Link) -> &'static str {
         Link::Ask { .. } => "ask",
         Link::Plugin { .. } => "plugin",
         Link::Connections => "connections",
+        Link::Billing => "billing",
         Link::AuthCallback(_) => "auth_callback",
     }
 }
@@ -506,6 +524,21 @@ mod tests {
         ] {
             assert!(parse_url(bad).is_err(), "{bad}");
         }
+        assert_eq!(parse_url("nugget://billing/done"), Ok(Link::Billing));
+        assert_eq!(parse_url("nugget://billing/done/"), Ok(Link::Billing));
+        for bad in [
+            "nugget://billing",
+            "nugget://billing/done?session_id=cs_1",
+            "nugget://billing/done#x",
+            "nugget://billing/other",
+            "nugget://billing/done/x",
+        ] {
+            assert!(parse_url(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            serde_json::to_value(Link::Billing).unwrap(),
+            serde_json::json!({ "kind": "billing" })
+        );
         // The page never receives the sign-in code.
         let link = parse_url("nugget://auth/callback?code=secret").unwrap();
         assert!(serde_json::to_string(&link).is_err());
