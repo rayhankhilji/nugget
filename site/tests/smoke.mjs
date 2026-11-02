@@ -66,6 +66,10 @@ for (const scheme of ["light", "dark"]) {
   await page.goto(base + "/pricing");
   check((await page.getAttribute(".pricing", "data-plans-source")) === "api", "pricing rendered from GET /v1/billing/plans");
   const firstPrice = () => page.locator(".plan .amt:visible").first().textContent();
+  const tiers = await page.$$eval("[data-tier]", (els) => els.map((e) => e.getAttribute("data-tier")));
+  check(JSON.stringify(tiers) === JSON.stringify(["free", "heed", "heed_max"]), `pricing has three tiers: ${tiers.join(", ")}`);
+  check((await page.locator('[data-tier="free"] a[href*="github.com/rayhankhilji/nugget"]').count()) === 1, "free tier links to GitHub");
+  check(!/no free (plan|tier)/i.test(await page.textContent("body") ?? ""), "pricing no longer says there's no free plan");
   check((await firstPrice()) === "£39", "pricing shows £39 monthly");
   check((await page.textContent(".toggle em"))?.trim() === "Save 17%", "annual toggle says Save 17%");
   await page.locator('input[value="year"]').check();

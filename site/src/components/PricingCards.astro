@@ -1,8 +1,13 @@
 ---
-import { loadPlans } from "../lib/plans";
+/**
+ * The pricing row: Free (open source) plus the Heed Cloud plans from GET /v1/billing/plans.
+ * One flat row with no boxes: tiers are separated by whitespace and hairlines. Each tier has its
+ * name in mono caps, a huge Fraunces price, one line on who it's for, one CTA and a short feature list.
+ */
+import { loadPlans, FREE_TIER, GITHUB_URL } from "../lib/plans";
 
 interface Props {
-  /** Heading level for plan names, so the page outline stays in order. */
+  /** Heading level for tier names, so the page outline stays in order. */
   level?: "h2" | "h3";
 }
 const { level = "h3" } = Astro.props;
@@ -15,79 +20,70 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
 ---
 <div class="pricing" data-plans-source={source}>
   <fieldset class="toggle">
-    <legend class="sr-only">Billing period</legend>
+    <legend class="sr-only">Billing period for Heed Cloud</legend>
     <label><input type="radio" name="interval" value="month" checked /><span>Monthly</span></label>
-    <label
-      ><input type="radio" name="interval" value="year" /><span>Annual <em>Save {save}%</em></span></label
-    >
+    <label><input type="radio" name="interval" value="year" /><span>Annual <em>Save {save}%</em></span></label>
   </fieldset>
 
-  <div class="cards" style={`--n:${plans.length}`}>
+  <div class="row" style={`--n:${plans.length + 1}`}>
+    <article class="tier plan" data-tier="free" aria-labelledby="tier-free">
+      <H id="tier-free" class="tname">{FREE_TIER.name} <span class="tag">Open source</span></H>
+      <p class="price"><span class="amt-free">£0</span><span class="per">forever</span></p>
+      <p class="who">{FREE_TIER.who}</p>
+      <div class="ctas">
+        <a class="btn btn-secondary" href="/download">Download</a>
+        <a class="gh" href={GITHUB_URL} rel="noopener">View on GitHub →</a>
+      </div>
+      <ul class="feats">{FREE_TIER.features.map((f) => <li>{f}</li>)}</ul>
+    </article>
+
     {
       plans.map((p) => (
-        <article class:list={["plan", { hl: p.highlight }]} aria-labelledby={`plan-${p.id}`}>
-          <div class="plan-top">
-            <H id={`plan-${p.id}`} class="name">
-              {p.highlight && <span class="dot" aria-hidden="true" />}
-              {p.name}
-            </H>
-            {p.highlight && <span class="badge">Most capable</span>}
+        <article class:list={["tier", "plan", { hl: p.highlight }]} data-tier={p.id} aria-labelledby={`tier-${p.id}`}>
+          <H id={`tier-${p.id}`} class="tname">
+            {p.name}
+            {p.highlight && <span class="tag">Most capable</span>}
+          </H>
+          <p class="price">
+            <span class="amt m">{gbp(p.monthly_gbp)}</span>
+            <span class="amt y">{gbp(p.annual_gbp)}</span>
+            <span class="per m">a month</span>
+            <span class="per y">a year</span>
+          </p>
+          <p class="who">{p.pitch}</p>
+          <div class="ctas">
+            <a class:list={["btn", "go", "m", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=month`}>
+              Start {TRIAL_DAYS}-day free trial
+            </a>
+            <a class:list={["btn", "go", "y", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=year`}>
+              Start {TRIAL_DAYS}-day free trial
+            </a>
           </div>
-          <p class="pitch">{p.pitch}</p>
-          <div class="price">
-            <p class="m">
-              <span class="amt">{gbp(p.monthly_gbp)}</span>
-              <span class="per">/ month</span>
-            </p>
-            <p class="y">
-              <span class="amt">{gbp(p.annual_gbp)}</span>
-              <span class="per">/ year</span>
-            </p>
-            <p class="sub m">Billed monthly. Cancel any time.</p>
-            <p class="sub y">
-              {gbp(p.annual_gbp / 12)} a month, billed yearly. Save {gbp(p.monthly_gbp * 12 - p.annual_gbp)}.
-            </p>
-          </div>
-          <a class:list={["btn", "btn-lg", "go", "m", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=month`}>
-            Start {TRIAL_DAYS}-day free trial
-          </a>
-          <a class:list={["btn", "btn-lg", "go", "y", p.highlight ? "btn-primary" : "btn-secondary"]} href={`/checkout?plan=${p.id}&interval=year`}>
-            Start {TRIAL_DAYS}-day free trial
-          </a>
-          <ul>
-            {p.features.map((f) => (
-              <li>
-                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-                  <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-                {f}
-              </li>
-            ))}
-          </ul>
+          <ul class="feats">{p.features.map((f) => <li>{f}</li>)}</ul>
         </article>
       ))
     }
   </div>
   <p class="fine">
-    Prices include VAT. Both plans start with a {TRIAL_DAYS}-day free trial; a card is required, and you won't be charged
-    if you cancel before it ends. There's no free plan.
+    Heed Cloud prices include VAT. Both cloud plans start with a {TRIAL_DAYS}-day free trial: a card is needed, and you can
+    cancel any time before you're charged. The free app is open source under Apache-2.0.
   </p>
 </div>
 
 <style>
   .pricing {
     display: grid;
-    gap: 28px;
-    justify-items: center;
+    gap: 32px;
   }
   .toggle {
+    justify-self: center;
     display: inline-flex;
     margin: 0;
     padding: 4px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 999px;
     background: var(--surface-2);
-    box-shadow: inset 0 0 0 1px var(--line);
+    box-shadow: inset 0 0 0 1px var(--line-2);
   }
   .toggle label {
     position: relative;
@@ -106,194 +102,181 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     gap: 8px;
     height: 36px;
     padding: 0 16px;
-    border-radius: 9px;
+    border-radius: 999px;
     font-size: 14px;
     font-weight: 500;
     color: var(--text-2);
-    transition: background-color 0.2s, color 0.2s;
+    transition:
+      background-color var(--t-ui),
+      color var(--t-ui);
   }
   .toggle em {
     font-style: normal;
-    font-size: 12px;
+    font-family: var(--mono);
+    font-size: 11.5px;
     color: var(--text-2);
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: var(--accent-soft);
   }
   .toggle input:checked + span {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: var(--shadow-1);
+    background: var(--text);
+    color: var(--bg);
+  }
+  .toggle input:checked + span em {
+    color: var(--bg);
   }
   .toggle input:focus-visible + span {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
 
-  /* One column per plan from the API, so a third tier (e.g. a free bring-your-own-key plan) just appears. */
-  .cards {
+  /* The row: hairline above, dashed hairlines between tiers, no boxes. */
+  .row {
     display: grid;
-    grid-template-columns: repeat(var(--n, 2), minmax(0, 1fr));
-    gap: 20px;
-    width: 100%;
-    max-width: calc(var(--n, 2) * 440px);
+    grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+    border-top: 1px solid var(--text);
   }
-  @media (max-width: 1080px) {
-    .cards {
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    }
-  }
-  .plan {
-    position: relative;
+  .tier {
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    padding: 28px;
-    border-radius: var(--r-4);
-    background: var(--surface);
-    box-shadow: var(--shadow-2), var(--hi);
+    gap: 14px;
+    padding: 28px clamp(20px, 2.6vw, 36px) 8px;
   }
-  /* The most capable plan is the ink-blue card. */
-  .plan.hl {
-    background: #0b0b1a;
-    background-image: radial-gradient(circle at 1px 1px, rgb(233 236 255 / 0.08) 1px, transparent 1.6px);
-    background-size: 14px 14px;
-    color: #f3f1ec;
-    box-shadow:
-      0 0 0 1px rgb(233 236 255 / 0.1),
-      0 30px 60px -28px rgb(7 7 152 / 0.6);
+  .tier:first-child {
+    padding-left: 0;
   }
-  .hl .pitch,
-  .hl .per,
-  .hl .sub {
-    color: #b9b6c8;
+  .tier:last-child {
+    padding-right: 0;
   }
-  .hl ul {
-    border-top-color: rgb(255 255 255 / 0.25);
+  .tier + .tier {
+    border-left: 1px dashed var(--line-2);
   }
-  .hl li svg {
-    color: #8a97ff;
-  }
-  .hl .badge {
-    color: #f3f1ec;
-    background: #1d2050;
-  }
-  .hl .name .dot {
-    background: #5a6cff;
-  }
-  .hl .btn-primary {
-    background: #4a5cff;
-    color: #fff;
-  }
-  .hl .btn-primary:hover {
-    background: #5a6cff;
-  }
-  .plan-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-  .name {
-    font-family: var(--font);
-    font-weight: 600;
-    letter-spacing: -0.015em;
-    line-height: 1.2;
+  .tname {
     display: flex;
     align-items: center;
     gap: 10px;
-    font-size: 22px;
-  }
-  .name .dot {
-    width: 8px;
-    height: 8px;
-  }
-  .badge {
     font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.04em;
+    font-variation-settings: normal;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    word-spacing: normal;
+    line-height: 1.3;
     text-transform: uppercase;
-    padding: 4px 8px;
-    border-radius: 6px;
+  }
+  .tag {
+    padding: 2px 6px;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
     color: var(--text);
-    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--text);
+    border-radius: 2px;
   }
-  .pitch {
-    color: var(--text-2);
-    font-size: 15px;
-    min-height: 3.1em;
+  .hl .tag {
+    color: var(--on-accent);
+    background: var(--accent);
+    box-shadow: none;
   }
-  .price p {
-    margin: 0;
+  .price {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 4px 0 0;
   }
-  .amt {
-    font-family: var(--mono);
-    font-size: 56px;
-    font-weight: 400;
-    letter-spacing: -0.05em;
-    font-variant-numeric: tabular-nums;
-    line-height: 1;
+  .amt,
+  .amt-free {
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: 300;
+    font-size: clamp(64px, 7vw, 96px);
+    letter-spacing: -0.035em;
+    line-height: 0.95;
   }
   .per {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     color: var(--text-2);
-    font-size: 15px;
-    margin-left: 4px;
   }
-  .sub {
+  .who {
+    min-height: 3em;
     color: var(--text-2);
-    font-size: 13.5px;
+    font-size: 16px;
+    max-width: 26em;
   }
-  .go {
-    width: 100%;
+  .hl .who {
+    color: var(--text);
   }
-  ul {
+  .ctas {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+  }
+  .gh {
+    font-size: 14px;
+    color: var(--text);
+    text-underline-offset: 3px;
+  }
+  .feats {
     list-style: none;
-    margin: 6px 0 0;
-    padding: 18px 0 0;
-    border-top: 1px solid var(--line);
+    margin: 10px 0 0;
+    padding: 14px 0 0;
+    border-top: 1px dashed var(--line-2);
     display: grid;
-    gap: 12px;
-    font-size: 15px;
+    gap: 9px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    line-height: 1.45;
+    text-transform: uppercase;
+    color: var(--text-2);
   }
-  li {
+  .feats li {
     display: flex;
     gap: 10px;
-    align-items: flex-start;
   }
-  li svg {
+  .feats li::before {
+    content: "";
     flex: none;
-    margin-top: 3px;
-    color: var(--brand);
+    width: 5px;
+    height: 5px;
+    margin-top: 6px;
+    background: var(--brand);
   }
   .fine {
-    max-width: 620px;
-    text-align: center;
+    max-width: 680px;
     font-size: 14px;
     color: var(--text-2);
   }
 
-  /* The toggle drives which price and button show: CSS only, no script needed. */
+  /* The toggle switches cloud prices and links: CSS only, no script. */
   .y {
     display: none;
   }
   .pricing:has(input[value="year"]:checked) .m {
     display: none;
   }
-  .pricing:has(input[value="year"]:checked) .y {
-    display: block;
+  .pricing:has(input[value="year"]:checked) span.y {
+    display: inline;
   }
   .pricing:has(input[value="year"]:checked) a.y {
     display: inline-flex;
   }
 
-  @media (max-width: 720px) {
-    .cards {
+  @media (max-width: 900px) {
+    .row {
       grid-template-columns: 1fr;
     }
-    .plan {
-      padding: 22px;
+    .tier,
+    .tier:first-child,
+    .tier:last-child {
+      padding: 28px 0 20px;
     }
-    .pitch {
+    .tier + .tier {
+      border-left: 0;
+      border-top: 1px dashed var(--line-2);
+    }
+    .who {
       min-height: 0;
     }
   }

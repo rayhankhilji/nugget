@@ -97,7 +97,7 @@ const FALLBACK: ApiPlan[] = [
 ];
 
 const PITCH: Record<PlanId, string> = {
-  heed: "Everything you need to stay on top of your work.",
+  heed: "Heed Cloud: one-click apps, always on, AI included.",
   heed_max: "For people whose job is their inbox, calendar and team.",
 };
 
@@ -184,3 +184,28 @@ export const planName = (id: string | null | undefined): string =>
 
 export const isPlanId = (v: string | null): v is PlanId => v === "heed" || v === "heed_max";
 export const isInterval = (v: string | null): v is Interval => v === "month" || v === "year";
+
+/** The open-source app: free, self-run, bring your own AI. Not sold through Stripe, so it's static here. */
+export const GITHUB_URL = "https://github.com/rayhankhilji/nugget";
+export const FREE_TIER = {
+  id: "free",
+  name: "Free",
+  who: "Open source. Run it yourself, with your own AI.",
+  features: [
+    "The full Mac app, Apache-2.0",
+    "Bring your own AI: ChatGPT sign-in, API key or a local model",
+    "Connect apps with your own OAuth, IMAP or CalDAV",
+    "Syncs while your Mac is awake",
+    "Your data stays on your Mac",
+    "Community support",
+  ],
+} as const;
+
+/** Why people pay for Heed Cloud instead of running Free. */
+export const CLOUD_PERKS = [
+  "One-click connections, no OAuth setup",
+  "Always-on sync, and a morning brief while your Mac sleeps",
+  "AI included, no keys",
+  "Several devices",
+  "Updates and support",
+];

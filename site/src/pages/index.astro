@@ -8,7 +8,7 @@ import GhostCard from "../components/cards/GhostCard.astro";
 import StepCard from "../components/cards/StepCard.astro";
 import { APPS, label } from "../lib/apps";
 import { FAQ } from "../lib/faq";
-import { loadPlans } from "../lib/plans";
+import { loadPlans, GITHUB_URL } from "../lib/plans";
 
 const { plans } = await loadPlans();
 const trial = plans[0]?.trial_days ?? 14;
@@ -40,7 +40,8 @@ const faqLd = {
           <a class="btn btn-lg btn-cream" href="/pricing">Start free trial</a>
           <a class="btn btn-lg btn-glass" href="/download">Download for Mac</a>
         </div>
-        <p class="sys">{trial}-day free trial · card needed · cancel any time before you're charged</p>
+        <p class="sys">Heed Cloud: {trial}-day free trial · card needed · cancel any time before you're charged</p>
+        <p class="oss">Open source · Apache-2.0 · <a href={GITHUB_URL} rel="noopener">View on GitHub</a></p>
       </div>
       <figure class="print">
         <img
@@ -175,7 +176,7 @@ const faqLd = {
         <div>
           <p class="tag">Privacy</p>
           <h2 id="privacy-h">Your data, in plain English.</h2>
-          <p class="muted">Heed runs in the cloud, not on your Mac. This is what that means for you.</p>
+          <p class="muted">The free app keeps your data on your Mac. Heed Cloud runs in the cloud, and this is what that means for you.</p>
           <p class="more"><a href="/legal/privacy">Read the privacy policy</a></p>
         </div>
         <dl class="facts">
@@ -196,14 +197,16 @@ const faqLd = {
         <h2 id="get-h">Get Heed for Mac.</h2>
         <div class="cta left">
           <a class="btn btn-lg btn-primary" href="/download">Download for Mac</a>
-          <a class="btn btn-lg btn-secondary" href="/pricing">Start free trial</a>
+          <a class="btn btn-lg btn-secondary" href={GITHUB_URL} rel="noopener">View on GitHub</a>
         </div>
+        <pre class="install" aria-label="Get the source"><code><span class="c"># or get the source</span>
+git clone https://github.com/rayhankhilji/nugget</code></pre>
       </div>
       <dl class="specs">
         <div><dt>System</dt><dd>macOS 11 Big Sur or later</dd></div>
         <div><dt>Chips</dt><dd>Apple silicon and Intel</dd></div>
-        <div><dt>Trial</dt><dd>{trial} days free · card needed · cancel any time before you're charged</dd></div>
-        <div><dt>Plans</dt><dd>From £{from} a month · <a href="/pricing">compare plans</a></dd></div>
+        <div><dt>Free</dt><dd>Open source, Apache-2.0 · bring your own AI</dd></div>
+        <div><dt>Heed Cloud</dt><dd>From £{from} a month · {trial}-day free trial, card needed · <a href="/pricing">compare plans</a></dd></div>
         <div><dt>Windows, Linux</dt><dd>Coming soon</dd></div>
       </dl>
     </div>
@@ -362,6 +365,16 @@ const faqLd = {
     font-size: 12.5px;
     color: rgb(246 243 236 / 0.86);
   }
+  .oss {
+    margin-top: -14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: rgb(246 243 236 / 0.86);
+  }
+  .oss a {
+    color: #f6f3ec;
+    text-underline-offset: 3px;
+  }
   .print {
     margin: 0;
     padding: 12px 12px 10px;
@@ -481,6 +494,7 @@ const faqLd = {
   .tile {
     position: relative;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     place-items: center;
     margin-top: 12px;
     padding: 24px;
@@ -709,6 +723,24 @@ const faqLd = {
   .get h2 {
     font-size: clamp(44px, 6.4vw, 88px);
     margin-bottom: 28px;
+  }
+  .get-in > * {
+    min-width: 0;
+  }
+  .install {
+    margin: 24px 0 0;
+    padding: 14px 16px;
+    max-width: 30em;
+    overflow-x: auto;
+    border-radius: 4px;
+    background: #0b0b1a;
+    color: #f3f1ec;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .install .c {
+    color: #b9b6c8;
   }
   .specs {
     margin: 0;
