@@ -16,6 +16,7 @@ const custom: SavedKeyProvider = {
   key: "keychain",
   env_var: null,
   available: true,
+  locality: "cloud",
   error: null,
 };
 const work: SavedKeyProvider = {
@@ -26,6 +27,7 @@ const work: SavedKeyProvider = {
   key: "env",
   env_var: "WORK_KEY",
   available: false,
+  locality: "cloud",
   error: "provider work: api_key env:WORK_KEY: environment variable WORK_KEY is not set",
 };
 
@@ -35,6 +37,17 @@ async function violations(): Promise<string[]> {
 }
 
 describe("Your providers (Models page)", () => {
+  it("a server on this computer has no key to replace and keeps its models when removed", async () => {
+    const ollama: SavedKeyProvider = { ...custom, id: "ollama", key: "none", locality: "on_device", light_model: "qwen3:1.7b" };
+    mockDaemon({ ai_key_saved: { providers: [ollama] } });
+    const { container } = await render(<YourProviders />);
+    expect(container.textContent).toContain("No key needed: it runs on this computer");
+    expect(container.textContent).toContain("qwen3:1.7b");
+    expect(container.querySelector('button[aria-label="Replace key: ollama"]')).toBeNull();
+    await click(container.querySelector('button[aria-label="Remove ollama"]'));
+    expect(document.querySelector("dialog")?.textContent).toContain("The server itself and its models are not changed");
+  });
+
   it("removes a provider after confirming, with focus on Cancel first", async () => {
     let providers = [custom, work];
     const removed: unknown[] = [];

@@ -95,6 +95,7 @@ no_arg_commands! {
     sources_list -> Vec<SourceInfo> = method::SOURCES_LIST, ();
     ingest_status -> IngestStatus = method::INGEST_STATUS, ();
     ai_key_saved -> Value = "ai.key.saved", ();
+    ai_local_detect -> Value = "ai.local.detect", ();
     models_fit -> Value = "models.fit", ();
     runtime_status -> Vec<RuntimeInfo> = method::RUNTIME_STATUS, ();
     knowledge_status -> KnowledgeStatus = method::KNOWLEDGE_STATUS, ();

@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "再インデックス中",
   "models.searchUpgrade.keepsWorking": "その間も検索は使えます。",
   "models.searchUpgrade.failed": "アップグレードは完了しませんでした。検索は引き続き現在のインデックスを使います。",
-  "models.searchUpgrade.retry": "もう一度試す"
+  "models.searchUpgrade.retry": "もう一度試す",
+  "onboarding.byok.form.privateLocal": "プライベートなものはローカルに留まります。アイテムの仕分けは常にこのコンピューターで行われ、機密とマークされたアイテムはクラウドモデルに送られず、ソースのその他のアイテムもプライバシーで許可した場合にのみ送られます。",
+  "onboarding.byok.form.getKey": "{provider} でキーを取得",
+  "onboarding.byok.form.lightModel": "簡単なタスク用のモデル",
+  "onboarding.byok.form.keyOptional": "このコンピューター上のサーバーには通常キーは不要です。設定していない限り空のままにしてください。",
+  "onboarding.byok.local.heading": "このコンピューターで見つかりました",
+  "onboarding.byok.local.use": "{server} を使う",
+  "onboarding.byok.local.added": "{server} を追加しました。Nugget ですぐに使えます。",
+  "onboarding.byok.local.inUse": "追加済み",
+  "models.providers.keyNone": "キー不要：このコンピューターで動作します",
+  "models.providers.removeDialog.descriptionLocal": "Nugget はこのサーバーの使用をやめます。サーバー自体とそのモデルは変更されず、設定ファイルのその他の内容もそのままです。"
 }

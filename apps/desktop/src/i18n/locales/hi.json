@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "फिर से इंडेक्स हो रहा है",
   "models.searchUpgrade.keepsWorking": "इस दौरान खोज काम करती रहती है।",
   "models.searchUpgrade.failed": "अपग्रेड पूरा नहीं हुआ। खोज अभी भी मौजूदा इंडेक्स का उपयोग करती है।",
-  "models.searchUpgrade.retry": "फिर से कोशिश करें"
+  "models.searchUpgrade.retry": "फिर से कोशिश करें",
+  "onboarding.byok.form.privateLocal": "निजी चीज़ें स्थानीय रहती हैं: आपके आइटम की छँटाई हमेशा इसी कंप्यूटर पर होती है, संवेदनशील चिह्नित आइटम कभी क्लाउड मॉडल को नहीं जाते, और किसी स्रोत के बाकी आइटम तभी जाते हैं जब आप गोपनीयता में इसकी अनुमति दें।",
+  "onboarding.byok.form.getKey": "{provider} से कुंजी पाएँ",
+  "onboarding.byok.form.lightModel": "त्वरित कार्यों के लिए मॉडल",
+  "onboarding.byok.form.keyOptional": "इस कंप्यूटर पर चल रहे सर्वर को आमतौर पर कुंजी की ज़रूरत नहीं होती। जब तक आपने कोई कुंजी सेट न की हो, इसे खाली छोड़ें।",
+  "onboarding.byok.local.heading": "इस कंप्यूटर पर मिला",
+  "onboarding.byok.local.use": "{server} का उपयोग करें",
+  "onboarding.byok.local.added": "{server} जोड़ा गया। Nugget अब इसका उपयोग कर सकता है।",
+  "onboarding.byok.local.inUse": "जोड़ा गया",
+  "models.providers.keyNone": "कुंजी की ज़रूरत नहीं: यह इसी कंप्यूटर पर चलता है",
+  "models.providers.removeDialog.descriptionLocal": "Nugget इस सर्वर का उपयोग बंद कर देता है। सर्वर और उसके मॉडल नहीं बदलते, और आपकी कॉन्फ़िग फ़ाइल में बाकी सब वैसा ही रहता है।"
 }

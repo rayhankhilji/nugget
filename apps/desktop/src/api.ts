@@ -2263,6 +2263,8 @@ export interface AiKeySaveRequest {
   base_url?: string | null;
   api_key: string;
   model: string;
+  /** A cheaper model for quick tasks (the `light` tier), saved as a `NAME-light` provider. */
+  light_model?: string | null;
 }
 
 export interface AiKeySaveResult extends AiKeyTestResult {
@@ -2976,8 +2978,14 @@ export function utcOffsetMinutes(d: Date = new Date()): number {
 /** Every reason `ai.key.*` can answer with (test/save ones plus replace/remove and the env fallback). */
 export type AiKeyOutcome = AiKeyReason | "no_keychain" | "env_missing" | "not_found" | "not_editable" | "reserved";
 
-/** Where the key comes from: typed (goes to the OS keychain), or the daemon's environment variable. */
-export type AiKeySource = { api_key: string; key_ref?: undefined } | { key_ref: `env:${string}`; api_key?: undefined };
+/**
+ * Where the key comes from: typed (goes to the OS keychain), the daemon's environment variable,
+ * or none (an OpenAI-compatible server on this computer only).
+ */
+export type AiKeySource =
+  | { api_key: string; key_ref?: undefined }
+  | { key_ref: `env:${string}`; api_key?: undefined }
+  | { api_key?: undefined; key_ref?: undefined };
 
 export type AiKeyCheckRequest = Omit<AiKeyTestRequest, "api_key"> & AiKeySource;
 export type AiKeyAddRequest = Omit<AiKeySaveRequest, "api_key"> & AiKeySource;
@@ -3009,13 +3017,28 @@ export interface SavedKeyProvider {
   kind: AiKeyKind;
   base_url: string | null;
   model: string;
-  /** Where its key is: the OS keychain or an environment variable. */
-  key: "keychain" | "env";
+  /** Where its key is: the OS keychain, an environment variable, or none (a server on this computer). */
+  key: "keychain" | "env" | "none";
   env_var: string | null;
+  /** The quick-tasks model, when it has its own. */
+  light_model?: string;
+  locality: Locality;
   /** Routed right now. */
   available: boolean;
   /** Why it is not (from the daemon, English). */
   error: string | null;
+}
+
+/** A local AI server found on this computer (`ai.local.detect`). */
+export interface LocalServer {
+  id: string;
+  label: string;
+  base_url: string;
+  models: string[];
+  /** Models that forward prompts to the cloud (Ollama's `-cloud` ones); not offered here. */
+  cloud_models: string[];
+  /** A provider already uses this address. */
+  configured: boolean;
 }
 
 /** A valid environment variable name for `key_ref`. */
@@ -3030,6 +3053,8 @@ export const aiKeysApi = {
   /** Delete the provider's key and remove it from config.toml. */
   remove: (name: string) => call<AiKeyRemoveResult>("ai_key_remove", { request: { name } }),
   saved: async () => (await call<{ providers: SavedKeyProvider[] }>("ai_key_saved")).providers,
+  /** Ollama and LM Studio running on this computer, with their models. */
+  detectLocal: async () => (await call<{ servers: LocalServer[] }>("ai_local_detect")).servers,
 };
 
 /** This machine's IANA time zone (`Europe/Berlin`), when the runtime knows it. */

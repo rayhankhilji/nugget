@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "正在重建索引",
   "models.searchUpgrade.keepsWorking": "在此期间搜索仍可正常使用。",
   "models.searchUpgrade.failed": "升级未完成。搜索仍使用当前索引。",
-  "models.searchUpgrade.retry": "重试"
+  "models.searchUpgrade.retry": "重试",
+  "onboarding.byok.form.privateLocal": "隐私内容留在本地：条目的分类始终在这台电脑上进行，标记为敏感的条目绝不会发送给云端模型，来源中的其他条目也只有在你于“隐私”中允许后才会发送。",
+  "onboarding.byok.form.getKey": "从 {provider} 获取密钥",
+  "onboarding.byok.form.lightModel": "用于快速任务的模型",
+  "onboarding.byok.form.keyOptional": "这台电脑上的服务器通常不需要密钥。除非你设置过，否则请留空。",
+  "onboarding.byok.local.heading": "在这台电脑上找到",
+  "onboarding.byok.local.use": "使用 {server}",
+  "onboarding.byok.local.added": "已添加 {server}，Nugget 现在可以使用它了。",
+  "onboarding.byok.local.inUse": "已添加",
+  "models.providers.keyNone": "无需密钥：在这台电脑上运行",
+  "models.providers.removeDialog.descriptionLocal": "Nugget 将停止使用此服务器。服务器本身及其模型不会改变，配置文件中的其他内容也保持不变。"
 }

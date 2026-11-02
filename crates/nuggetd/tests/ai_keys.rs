@@ -385,3 +385,74 @@ async fn without_a_keychain_the_save_explains_and_writes_nothing() {
 
     h.stop().await;
 }
+
+/// A server on this computer is saved without a key (no keychain entry, no `api_key`), listed
+/// as on-device, used for triage too, and removed again; a cloud kind still needs a key.
+#[tokio::test]
+async fn local_servers_are_saved_without_a_key() {
+    let mut h = Harness::start(NO_RUNTIME).await;
+    let server = MockServer::start().await;
+    Mock::given(http_method("GET"))
+        .and(path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "object": "list", "data": [{"id": "qwen3:4b"}],
+        })))
+        .mount(&server)
+        .await;
+    let base = format!("{}/v1", server.uri());
+
+    let detected = call(&h, "ai.local.detect", json!({})).await.unwrap();
+    assert!(detected["servers"].is_array(), "{detected}");
+
+    let r = call(
+        &h,
+        "ai.key.save",
+        json!({"name": "ollama", "kind": "openai_compatible", "base_url": base, "model": "qwen3:4b"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r["saved"], true, "{r}");
+    let config = std::fs::read_to_string(h.paths.config_file()).unwrap();
+    assert!(!config.contains("api_key"), "{config}");
+    assert!(config.contains("\"triage\""), "{config}");
+    assert!(
+        h.secrets
+            .get(&provider_account("ollama"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(provider_ids(&h).await.contains(&"ollama".to_owned()));
+    let saved = call(&h, "ai.key.saved", json!({})).await.unwrap();
+    let p = &saved["providers"][0];
+    assert_eq!(
+        (p["id"].clone(), p["key"].clone(), p["locality"].clone()),
+        (json!("ollama"), json!("none"), json!("on_device")),
+        "{saved}"
+    );
+    // A keyless server has no key to replace.
+    let r = call(
+        &h,
+        "ai.key.update",
+        json!({"id": "ollama", "api_key": GOOD}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r["reason"], "not_editable", "{r}");
+
+    let r = call(&h, "ai.key.remove", json!({"id": "ollama"}))
+        .await
+        .unwrap();
+    assert_eq!(r["removed"], true, "{r}");
+    assert!(!provider_ids(&h).await.contains(&"ollama".to_owned()));
+
+    // A cloud provider without a key is malformed.
+    let err = call(
+        &h,
+        "ai.key.save",
+        json!({"name": "x", "kind": "openai_compatible", "base_url": "https://api.example.com/v1", "model": "m"}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.as_rpc().map(|e| e.code), Some(code::INVALID_PARAMS));
+    h.stop().await;
+}

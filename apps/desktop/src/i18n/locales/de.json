@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "Neuindexierung",
   "models.searchUpgrade.keepsWorking": "Die Suche funktioniert währenddessen weiter.",
   "models.searchUpgrade.failed": "Die Umstellung wurde nicht abgeschlossen. Die Suche verwendet weiterhin den aktuellen Index.",
-  "models.searchUpgrade.retry": "Erneut versuchen"
+  "models.searchUpgrade.retry": "Erneut versuchen",
+  "onboarding.byok.form.privateLocal": "Privates bleibt lokal: Das Sortieren deiner Einträge läuft immer auf diesem Computer, als sensibel markierte Einträge gehen nie an ein Cloud-Modell, und andere Einträge einer Quelle nur, wenn du es unter Datenschutz erlaubst.",
+  "onboarding.byok.form.getKey": "Schlüssel bei {provider} holen",
+  "onboarding.byok.form.lightModel": "Modell für schnelle Aufgaben",
+  "onboarding.byok.form.keyOptional": "Ein Server auf diesem Computer braucht meist keinen Schlüssel. Lass das Feld leer, außer du hast einen festgelegt.",
+  "onboarding.byok.local.heading": "Auf diesem Computer gefunden",
+  "onboarding.byok.local.use": "{server} verwenden",
+  "onboarding.byok.local.added": "{server} hinzugefügt. Nugget kann es jetzt verwenden.",
+  "onboarding.byok.local.inUse": "Hinzugefügt",
+  "models.providers.keyNone": "Kein Schlüssel nötig: läuft auf diesem Computer",
+  "models.providers.removeDialog.descriptionLocal": "Nugget verwendet diesen Server nicht mehr. Der Server und seine Modelle bleiben unverändert, und alles andere in deiner Konfigurationsdatei bleibt, wie es ist."
 }

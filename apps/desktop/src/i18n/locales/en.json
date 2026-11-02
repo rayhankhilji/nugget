@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "Re-indexing",
   "models.searchUpgrade.keepsWorking": "Search keeps working meanwhile.",
   "models.searchUpgrade.failed": "The upgrade didn't finish. Search still uses the current index.",
-  "models.searchUpgrade.retry": "Try again"
+  "models.searchUpgrade.retry": "Try again",
+  "onboarding.byok.form.privateLocal": "Private things stay local: sorting your items always runs on this computer, items marked sensitive never go to a cloud model, and a source's other items only do if you allow it in Privacy.",
+  "onboarding.byok.form.getKey": "Get a key from {provider}",
+  "onboarding.byok.form.lightModel": "Model for quick tasks",
+  "onboarding.byok.form.keyOptional": "A server on this computer usually needs no key. Leave it empty unless you set one.",
+  "onboarding.byok.local.heading": "Found on this computer",
+  "onboarding.byok.local.use": "Use {server}",
+  "onboarding.byok.local.added": "{server} added. Nugget can use it now.",
+  "onboarding.byok.local.inUse": "Added",
+  "models.providers.keyNone": "No key needed: it runs on this computer",
+  "models.providers.removeDialog.descriptionLocal": "Nugget stops using this server. The server itself and its models are not changed, and everything else in your config file stays as it is."
 }

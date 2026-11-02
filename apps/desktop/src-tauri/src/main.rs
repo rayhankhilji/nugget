@@ -144,6 +144,7 @@ fn main() {
             commands::ai_key_update,
             commands::ai_key_remove,
             commands::ai_key_saved,
+            commands::ai_local_detect,
             commands::models_fit,
             commands::knowledge_entities,
             commands::knowledge_entity,

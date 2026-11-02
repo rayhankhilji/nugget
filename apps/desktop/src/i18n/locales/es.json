@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "Reindexando",
   "models.searchUpgrade.keepsWorking": "La búsqueda sigue funcionando mientras tanto.",
   "models.searchUpgrade.failed": "La mejora no terminó. La búsqueda sigue usando el índice actual.",
-  "models.searchUpgrade.retry": "Intentar de nuevo"
+  "models.searchUpgrade.retry": "Intentar de nuevo",
+  "onboarding.byok.form.privateLocal": "Lo privado se queda en tu equipo: la clasificación de tus elementos siempre se hace en este ordenador, los elementos marcados como sensibles nunca van a un modelo en la nube y los demás elementos de una fuente solo van si lo permites en Privacidad.",
+  "onboarding.byok.form.getKey": "Obtener una clave de {provider}",
+  "onboarding.byok.form.lightModel": "Modelo para tareas rápidas",
+  "onboarding.byok.form.keyOptional": "Un servidor en este ordenador no suele necesitar clave. Déjalo vacío salvo que hayas configurado una.",
+  "onboarding.byok.local.heading": "Encontrado en este ordenador",
+  "onboarding.byok.local.use": "Usar {server}",
+  "onboarding.byok.local.added": "{server} añadido. Nugget ya puede usarlo.",
+  "onboarding.byok.local.inUse": "Añadido",
+  "models.providers.keyNone": "No necesita clave: se ejecuta en este ordenador",
+  "models.providers.removeDialog.descriptionLocal": "Nugget deja de usar este servidor. El servidor y sus modelos no cambian, y todo lo demás de tu archivo de configuración se queda como está."
 }

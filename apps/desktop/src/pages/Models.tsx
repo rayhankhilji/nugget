@@ -5,6 +5,7 @@ import { formatBytes, percent } from "../format";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { Dialog } from "../components/Dialog";
 import { ByokForm, kindLabel, ReplaceKeyForm } from "../onboarding/ByokForm";
+import { LocalServers } from "../onboarding/LocalServers";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
 import { DownloadFailureNote, isCancelled, useInstallFocus } from "../onboarding/DownloadFailure";
@@ -359,6 +360,7 @@ export function YourProviders() {
       <p role="status" className={notice ? "note" : undefined}>
         {notice}
       </p>
+      <LocalServers onSaved={() => saved.reload()} />
       <details className="models-add-provider">
         <summary>{t("models.providers.add")}</summary>
         <ByokForm
@@ -416,11 +418,21 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
           ·{" "}
           <bdi dir="ltr">
             <code>{p.model}</code>
+            {p.light_model && (
+              <>
+                {" · "}
+                <code>{p.light_model}</code>
+              </>
+            )}
           </bdi>
         </span>
       </p>
       <p className="small muted">
-        {p.key === "env" && p.env_var ? t("models.providers.keyEnv", { name: p.env_var }) : t("models.providers.keyKeychain")}
+        {p.key === "none"
+          ? t("models.providers.keyNone")
+          : p.key === "env" && p.env_var
+            ? t("models.providers.keyEnv", { name: p.env_var })
+            : t("models.providers.keyKeychain")}
       </p>
       {/* Why it isn't in use, in plain words; the daemon's own line stays under Details. */}
       {!p.available && (
@@ -443,9 +455,11 @@ function SavedProviderCard({ provider: p, onReplace, onRemove }: { provider: Sav
         </div>
       )}
       <div className="card-actions" style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
-        <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
-          {t("models.providers.replace")}
-        </button>
+        {p.key !== "none" && (
+          <button type="button" className="btn" onClick={onReplace} aria-label={t("models.providers.replaceLabel", { name: p.id })}>
+            {t("models.providers.replace")}
+          </button>
+        )}
         <button type="button" className="btn btn-danger-ghost" onClick={onRemove} aria-label={t("models.providers.removeLabel", { name: p.id })}>
           {t("models.providers.remove")}
         </button>
@@ -479,7 +493,13 @@ function RemoveProviderDialog({ provider, onClose, onRemoved }: { provider: Save
   return (
     <Dialog
       title={t("models.providers.removeDialog.title", { name: provider.id })}
-      description={provider.key === "env" ? t("models.providers.removeDialog.descriptionEnv") : t("models.providers.removeDialog.description")}
+      description={t(
+        provider.key === "none"
+          ? "models.providers.removeDialog.descriptionLocal"
+          : provider.key === "env"
+            ? "models.providers.removeDialog.descriptionEnv"
+            : "models.providers.removeDialog.description",
+      )}
       onClose={onClose}
     >
       {refused && (

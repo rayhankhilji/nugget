@@ -62,7 +62,7 @@ describe("ByokForm", () => {
 
     await click(byText(container, "button", "Check and save key"));
     expect(saves).toEqual([
-      { name: "custom", kind: "openai_compatible", base_url: "http://127.0.0.1:9999/v1", api_key: "sk-e2e-good", model: "m1" },
+      { name: "custom", kind: "openai_compatible", base_url: "http://127.0.0.1:9999/v1", api_key: "sk-e2e-good", model: "m1", light_model: null },
     ]);
     expect(container.querySelector('[role="status"]')?.textContent).toBe("Key checked and saved. You can use it now.");
     expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -106,7 +106,7 @@ describe("ByokForm", () => {
 
     await type(env, "MY_OPENAI_KEY");
     await click(byText(container, "button", "Check and save key"));
-    expect(saves[1]).toEqual({ name: "openai", kind: "openai_responses", base_url: null, model: "gpt-5", key_ref: "env:MY_OPENAI_KEY" });
+    expect(saves[1]).toEqual({ name: "openai", kind: "openai_responses", base_url: null, model: "gpt-5", light_model: "gpt-6-luna", key_ref: "env:MY_OPENAI_KEY" });
     expect(container.querySelector('[role="status"]')?.textContent).toBe("Key checked and saved. You can use it now.");
 
     // And back to pasting a key; focus follows to the field that appears.
@@ -115,5 +115,58 @@ describe("ByokForm", () => {
     expect(document.activeElement).toBe(field(container, "API key"));
     await click(byText(container, "button", "Use an environment variable instead"));
     expect(document.activeElement).toBe(field(container, "Environment variable name"));
+  });
+
+  it("a preset fills the address and a model per tier, and links to its key page", async () => {
+    const saves: AiKeySaveRequest[] = [];
+    const opened: string[] = [];
+    mockDaemon({
+      ai_key_save: (args: unknown) => {
+        saves.push((args as { request: AiKeySaveRequest }).request);
+        return result({ ok: true, saved: true, provider_id: "gemini" });
+      },
+      open_url: (args: unknown) => {
+        opened.push((args as { url: string }).url);
+        return { opened: true };
+      },
+    });
+    const { container } = await render(<ByokForm kind="gemini" />);
+    expect(field(container, "Address (base URL)").value).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(field(container, "Model").value).toBe("gemini-4-argon");
+    expect(field(container, "Model for quick tasks").value).toBe("gemini-3.5-flash-lite");
+    await click(byText(container, "button", "Get a key from Google Gemini"));
+    expect(opened).toEqual(["https://aistudio.google.com/apikey"]);
+    await type(field(container, "API key"), "AIza-test");
+    await click(byText(container, "button", "Check and save key"));
+    // An OpenAI-compatible preset always sends its address (config.toml has no default for it).
+    expect(saves[0]).toEqual({
+      name: "gemini",
+      kind: "openai_compatible",
+      base_url: "https://generativelanguage.googleapis.com/v1beta/openai",
+      model: "gemini-4-argon",
+      light_model: "gemini-3.5-flash-lite",
+      api_key: "AIza-test",
+    });
+    expect(await violations()).toEqual([]);
+  });
+
+  it("a server on this computer is saved without a key", async () => {
+    const saves: AiKeySaveRequest[] = [];
+    mockDaemon({
+      ai_key_save: (args: unknown) => {
+        saves.push((args as { request: AiKeySaveRequest }).request);
+        return result({ ok: true, saved: true, provider_id: "custom" });
+      },
+    });
+    const { container } = await render(<ByokForm kind="compatible" />);
+    await type(field(container, "Address (base URL)"), "http://localhost:1234/v1");
+    await type(field(container, "Model"), "qwen3:4b");
+    expect(field(container, "API key").required).toBe(false);
+    await click(byText(container, "button", "Check and save key"));
+    expect(saves[0]).toEqual({ name: "custom", kind: "openai_compatible", base_url: "http://localhost:1234/v1", model: "qwen3:4b", light_model: null });
+    // A cloud address still needs a key.
+    await type(field(container, "Address (base URL)"), "https://api.example.com/v1");
+    await click(byText(container, "button", "Check and save key"));
+    expect(saves).toHaveLength(1);
   });
 });

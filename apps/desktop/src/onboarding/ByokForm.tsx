@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import {
   aiKeysApi,
+  api,
   ENV_NAME_RE,
   type AiKeyAddResult,
   type AiKeyCheckResult,
@@ -10,34 +11,25 @@ import {
 } from "../api";
 import { useT, type MessageKey } from "../i18n";
 import { ErrorNote } from "../components/ui";
+import { CUSTOM_MODEL_EXAMPLE, isLoopback, PRESETS, preset, type Preset, type PresetId } from "./presets";
 
-/** The provider choice of the onboarding guide. */
-export type ByokGuideKind = "anthropic" | "openai" | "compatible";
+/** The provider choice of the onboarding guide: a preset. */
+export type ByokGuideKind = PresetId;
 
-interface KindInfo {
-  api: AiKeyKind;
-  label: MessageKey;
-  /** Prefilled address; the provider's own API, or empty when the user must enter one. */
-  baseUrl: string;
-  /** Default provider id (matches the guide's `keychain:NAME`). */
-  name: string;
-  /** Example model id and key prefix, shown as placeholders (never sent). */
-  modelExample: string;
-  keyExample: string;
-}
-
-// i18n-ignore-block: API kinds, URLs and provider ids are code, not prose.
-const KINDS: Record<ByokGuideKind, KindInfo> = {
-  anthropic: { api: "anthropic", label: "onboarding.byok.provider.anthropic", baseUrl: "https://api.anthropic.com", name: "anthropic", modelExample: "claude-opus-5-5", keyExample: "sk-ant-…" },
-  openai: { api: "openai_responses", label: "onboarding.byok.provider.openai", baseUrl: "https://api.openai.com/v1", name: "openai", modelExample: "gpt-5", keyExample: "sk-…" },
-  compatible: { api: "openai_compatible", label: "onboarding.byok.provider.compatible", baseUrl: "", name: "custom", modelExample: "qwen3:4b", keyExample: "sk-…" },
+const KIND_LABELS: Record<AiKeyKind, MessageKey> = {
+  anthropic: "onboarding.byok.provider.anthropic",
+  openai_responses: "onboarding.byok.provider.openai",
+  openai_compatible: "onboarding.byok.provider.compatible",
 };
-// i18n-ignore-end
 
 /** The label of a provider kind (for lists of saved providers). */
 export function kindLabel(kind: AiKeyKind): MessageKey {
-  const k = (Object.keys(KINDS) as ByokGuideKind[]).find((g) => KINDS[g].api === kind);
-  return KINDS[k ?? "compatible"].label;
+  return KIND_LABELS[kind];
+}
+
+/** A preset's name: its brand, or the custom entry's message. */
+export function presetLabel(t: ReturnType<typeof useT>, p: Preset): string {
+  return p.label ?? t("onboarding.byok.provider.compatible");
 }
 
 const NAME_RE = /^[a-z0-9_-]{1,32}$/;
@@ -74,17 +66,18 @@ interface KeyEntry {
   env: string;
 }
 
-/** The request's key part, or why it cannot be sent. */
-function keySource(e: KeyEntry): AiKeySource | MessageKey {
+/** The request's key part, or why it cannot be sent. `keyless`: a server on this computer may have none. */
+function keySource(e: KeyEntry, keyless = false): AiKeySource | MessageKey {
   if (e.mode === "env") {
     const v = e.env.trim();
     return ENV_NAME_RE.test(v) ? { key_ref: `env:${v}` } : "onboarding.byok.form.error.envName";
   }
+  if (!e.key.trim() && keyless) return {};
   return e.key.trim() ? { api_key: e.key.trim() } : "onboarding.byok.form.error.key";
 }
 
 /** The alert for a failed outcome (`no_keychain` names the variable to use). */
-function failureText(t: ReturnType<typeof useT>, reason: AiKeyOutcome, env: string): string | null {
+export function failureText(t: ReturnType<typeof useT>, reason: AiKeyOutcome, env: string): string | null {
   if (reason === "ok") return null;
   if (reason === "no_keychain") return t("onboarding.byok.form.error.no_keychain", { name: env });
   return t(REASON_KEYS[reason] ?? "onboarding.byok.form.error.server_error");
@@ -101,7 +94,7 @@ export function ByokForm({ kind, onSaved }: { kind?: ByokGuideKind; onSaved?: (p
   const t = useT();
   const selectId = useId();
   const [own, setOwn] = useState<ByokGuideKind>("anthropic");
-  const current = kind ?? own;
+  const current = preset(kind ?? own);
   return (
     <section className="ob-section ob-byok-form" aria-labelledby={`${selectId}-h`}>
       <h3 id={`${selectId}-h`}>{t("onboarding.byok.form.heading")}</h3>
@@ -109,18 +102,27 @@ export function ByokForm({ kind, onSaved }: { kind?: ByokGuideKind; onSaved?: (p
       {kind === undefined && (
         <div className="field">
           <label htmlFor={selectId}>{t("onboarding.byok.form.kind")}</label>
-          <select id={selectId} value={own} onChange={(e) => setOwn(e.target.value as ByokGuideKind)}>
-            {(Object.keys(KINDS) as ByokGuideKind[]).map((k) => (
-              <option key={k} value={k}>
-                {t(KINDS[k].label)}
-              </option>
-            ))}
-          </select>
+          <PresetSelect id={selectId} value={own} onChange={setOwn} />
         </div>
       )}
       {/* Keyed by kind: switching provider starts from that provider's defaults. */}
-      <KeyForm key={current} info={KINDS[current]} onSaved={onSaved} />
+      <KeyForm key={current.id} info={current} onSaved={onSaved} />
+      <p className="muted small">{t("onboarding.byok.form.privateLocal")}</p>
     </section>
+  );
+}
+
+/** The provider presets as a select. */
+export function PresetSelect({ id, value, onChange }: { id: string; value: PresetId; onChange: (p: PresetId) => void }) {
+  const t = useT();
+  return (
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value as PresetId)}>
+      {PRESETS.map((p) => (
+        <option key={p.id} value={p.id}>
+          {presetLabel(t, p)}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -135,12 +137,15 @@ function KeyFields({
   placeholder,
   disabled,
   autoFocus,
+  optional,
 }: {
   entry: KeyEntry;
   onChange: (e: KeyEntry) => void;
   placeholder?: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  /** A server on this computer: the key may stay empty. */
+  optional?: boolean;
 }) {
   const t = useT();
   const id = useId();
@@ -170,7 +175,7 @@ function KeyFields({
         value={env ? entry.env : entry.key}
         autoComplete="off"
         spellCheck={false}
-        required
+        required={!optional}
         maxLength={env ? 128 : undefined}
         placeholder={env ? undefined : placeholder}
         aria-describedby={env ? `${id}-env-hint` : undefined}
@@ -182,6 +187,7 @@ function KeyFields({
           {t("onboarding.byok.form.envVarHint")}
         </p>
       )}
+      {!env && optional && <p className="muted small">{t("onboarding.byok.form.keyOptional")}</p>}
       <button
         type="button"
         className="btn btn-ghost btn-small"
@@ -195,14 +201,16 @@ function KeyFields({
   );
 }
 
-function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: string) => void }) {
+function KeyForm({ info, onSaved }: { info: Preset; onSaved?: (provider: string) => void }) {
   const t = useT();
   const id = useId();
-  const ids = { base: `${id}-base`, baseHint: `${id}-base-hint`, model: `${id}-model`, models: `${id}-models`, name: `${id}-name`, nameHint: `${id}-name-hint` };
+  const ids = { base: `${id}-base`, baseHint: `${id}-base-hint`, model: `${id}-model`, light: `${id}-light`, models: `${id}-models`, name: `${id}-name`, nameHint: `${id}-name-hint` };
+  const name0 = info.id === "compatible" ? "custom" : info.id;
   const [baseUrl, setBaseUrl] = useState(info.baseUrl);
-  const [model, setModel] = useState("");
-  const [entry, setEntry] = useState<KeyEntry>({ mode: "key", key: "", env: suggestedEnv(info.name) });
-  const [name, setName] = useState(info.name);
+  const [model, setModel] = useState(info.model);
+  const [lightModel, setLightModel] = useState(info.lightModel);
+  const [entry, setEntry] = useState<KeyEntry>({ mode: "key", key: "", env: suggestedEnv(name0) });
+  const [name, setName] = useState(name0);
   const [busy, setBusy] = useState<"test" | "save" | "replace" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -210,8 +218,9 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
   /** The address to send: `null` for the provider's own API (so config.toml keeps its default). */
   const base = (): string | null => {
     const b = baseUrl.trim().replace(/\/+$/, "");
-    return b === "" || b === info.baseUrl ? null : b;
+    return b === "" || (b === info.baseUrl && info.api !== "openai_compatible") ? null : b;
   };
+  const keyless = info.api === "openai_compatible" && isLoopback(baseUrl);
 
   const record = (r: AiKeyCheckResult) => {
     if (r.models.length) setModels(r.models);
@@ -225,7 +234,7 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
 
   const run = async (what: "test" | "save" | "replace") => {
     if (busy) return;
-    const source = keySource(entry);
+    const source = keySource(entry, keyless);
     const invalid =
       typeof source === "string"
         ? source
@@ -249,7 +258,7 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
       }
       const r =
         what === "save"
-          ? await aiKeysApi.save({ name: name.trim(), kind: info.api, base_url: base(), model: model.trim(), ...source })
+          ? await aiKeysApi.save({ name: name.trim(), kind: info.api, base_url: base(), model: model.trim(), light_model: lightModel.trim() || null, ...source })
           : await aiKeysApi.update({ name: name.trim(), base_url: base(), ...source });
       record(r);
       if (r.saved) {
@@ -305,7 +314,14 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
           </p>
         )}
       </div>
-      <KeyFields entry={entry} onChange={setEntry} placeholder={info.keyExample} disabled={busy !== null} />
+      <KeyFields entry={entry} onChange={setEntry} placeholder={info.keyExample} disabled={busy !== null} optional={keyless} />
+      {info.keyUrl && (
+        <p className="small">
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => void api.openUrl(info.keyUrl!).catch(() => {})}>
+            {t("onboarding.byok.form.getKey", { provider: presetLabel(t, info) })}
+          </button>
+        </p>
+      )}
       <div className="field">
         <label htmlFor={ids.model}>{t("onboarding.byok.form.model")}</label>
         <input
@@ -316,7 +332,7 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
           autoComplete="off"
           spellCheck={false}
           required
-          placeholder={t("onboarding.byok.form.modelPlaceholder", { example: info.modelExample })}
+          placeholder={t("onboarding.byok.form.modelPlaceholder", { example: info.model || CUSTOM_MODEL_EXAMPLE })}
           list={models.length ? ids.models : undefined}
           onChange={(e) => setModel(e.target.value)}
         />
@@ -327,6 +343,19 @@ function KeyForm({ info, onSaved }: { info: KindInfo; onSaved?: (provider: strin
             ))}
           </datalist>
         )}
+      </div>
+      <div className="field">
+        <label htmlFor={ids.light}>{t("onboarding.byok.form.lightModel")}</label>
+        <input
+          id={ids.light}
+          type="text"
+          dir="ltr"
+          value={lightModel}
+          autoComplete="off"
+          spellCheck={false}
+          list={models.length ? ids.models : undefined}
+          onChange={(e) => setLightModel(e.target.value)}
+        />
       </div>
       <div className="field">
         <label htmlFor={ids.name}>{t("onboarding.byok.form.name")}</label>
@@ -389,7 +418,7 @@ export function ReplaceKeyForm({
   onDone,
   onCancel,
 }: {
-  provider: { id: string; key: "keychain" | "env"; env_var: string | null };
+  provider: { id: string; key: "keychain" | "env" | "none"; env_var: string | null };
   onDone: () => void;
   onCancel: () => void;
 }) {

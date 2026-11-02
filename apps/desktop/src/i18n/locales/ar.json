@@ -2297,5 +2297,15 @@
   "models.searchUpgrade.phase.embedding": "جارٍ إعادة الفهرسة",
   "models.searchUpgrade.keepsWorking": "يظل البحث يعمل في هذه الأثناء.",
   "models.searchUpgrade.failed": "لم تكتمل الترقية. لا يزال البحث يستخدم الفهرس الحالي.",
-  "models.searchUpgrade.retry": "حاول مرة أخرى"
+  "models.searchUpgrade.retry": "حاول مرة أخرى",
+  "onboarding.byok.form.privateLocal": "تبقى الأشياء الخاصة محلية: يتم فرز عناصرك دائمًا على هذا الكمبيوتر، ولا تُرسل العناصر المصنفة حساسة أبدًا إلى نموذج سحابي، ولا تُرسل بقية عناصر المصدر إلا إذا سمحت بذلك في الخصوصية.",
+  "onboarding.byok.form.getKey": "احصل على مفتاح من {provider}",
+  "onboarding.byok.form.lightModel": "نموذج للمهام السريعة",
+  "onboarding.byok.form.keyOptional": "عادةً لا يحتاج الخادم على هذا الكمبيوتر إلى مفتاح. اتركه فارغًا ما لم تكن قد عيّنت واحدًا.",
+  "onboarding.byok.local.heading": "تم العثور عليه على هذا الكمبيوتر",
+  "onboarding.byok.local.use": "استخدم {server}",
+  "onboarding.byok.local.added": "تمت إضافة {server}. يمكن لـ Nugget استخدامه الآن.",
+  "onboarding.byok.local.inUse": "تمت الإضافة",
+  "models.providers.keyNone": "لا حاجة إلى مفتاح: يعمل على هذا الكمبيوتر",
+  "models.providers.removeDialog.descriptionLocal": "يتوقف Nugget عن استخدام هذا الخادم. لا يتغير الخادم نفسه ولا نماذجه، ويبقى كل شيء آخر في ملف الإعدادات كما هو."
 }

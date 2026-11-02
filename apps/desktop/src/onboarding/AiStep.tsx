@@ -6,7 +6,9 @@ import { Trans, useT, type MessageKey } from "../i18n";
 import { Badge, ErrorNote, Spinner } from "../components/ui";
 import type { AiChoice } from "./machine";
 import type { ModelFit } from "../api";
-import { ByokForm } from "./ByokForm";
+import { ByokForm, PresetSelect } from "./ByokForm";
+import { LocalServers } from "./LocalServers";
+import { preset, type PresetId } from "./presets";
 import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { DownloadFailureNote, isCancelled, useInstallFocus } from "./DownloadFailure";
@@ -65,7 +67,14 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
         </div>
       </fieldset>
       {choice === "local" &&
-        (connected ? <LocalModels onReady={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} /> : <OfflineNote />)}
+        (connected ? (
+          <>
+            <LocalServers onSaved={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} />
+            <LocalModels onReady={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} />
+          </>
+        ) : (
+          <OfflineNote />
+        ))}
       {choice === "byok" && <ByokGuide onSaved={(what) => dispatch({ type: "aiSetUp", ai: "byok", what })} />}
       {choice === "later" && <p className="muted">{t("onboarding.ai.laterDetail")}</p>}
     </>
@@ -432,8 +441,9 @@ function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
   const t = useT();
   const os = detectOs();
   const selectId = useId();
-  const [kind, setKind] = useState<ProviderKind>("anthropic");
-  const guide = PROVIDER_GUIDES[kind];
+  const [kind, setKind] = useState<PresetId>("anthropic");
+  const wire = preset(kind).api;
+  const guide = PROVIDER_GUIDES[wire === "anthropic" ? "anthropic" : wire === "openai_responses" ? "openai" : "compatible"];
   // A key saved before (running setup again) sets up this path too.
   useEffect(() => {
     let alive = true;
@@ -449,13 +459,7 @@ function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
       <p className="note">{t("onboarding.byok.never")}</p>
       <div className="field ob-field">
         <label htmlFor={selectId}>{t("onboarding.byok.provider")}</label>
-        <select id={selectId} value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
-          {(Object.keys(PROVIDER_GUIDES) as ProviderKind[]).map((k) => (
-            <option key={k} value={k}>
-              {t(PROVIDER_GUIDES[k].label)}
-            </option>
-          ))}
-        </select>
+        <PresetSelect id={selectId} value={kind} onChange={setKind} />
       </div>
       <ByokForm kind={kind} onSaved={onSaved} />
       <details className="ob-manual">
