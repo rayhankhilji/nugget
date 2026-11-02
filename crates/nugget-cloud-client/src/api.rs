@@ -124,6 +124,13 @@ impl Interval {
             )),
         }
     }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Month => "month",
+            Self::Year => "year",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +138,19 @@ impl Interval {
 pub enum ModelTier {
     Fast,
     Smart,
+}
+
+/// What a plan change would cost now (`GET /v1/billing/preview`), from Stripe's upcoming invoice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BillingPreview {
+    pub plan: String,
+    pub interval: Interval,
+    /// In the currency's minor units (pence for `gbp`); negative is a credit.
+    pub amount_due: i64,
+    /// Lowercase ISO code, e.g. `gbp`.
+    pub currency: String,
+    /// RFC 3339: the moment the proration was computed for.
+    pub proration_date: String,
 }
 
 /// A Stripe page (Checkout or the customer portal) to open in the browser.
@@ -216,6 +236,9 @@ pub struct Citation {
     pub url: Option<String>,
     pub occurred_at: Option<String>,
     pub snippet: String,
+    /// The sender or author's display name (servers before it omit it).
+    #[serde(default)]
+    pub author: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,6 +328,31 @@ impl ActionKind {
             .into_iter()
             .find(|k| k.as_str() == s)
             .ok_or_else(|| CloudError::Invalid("not a known action".into()))
+    }
+
+    /// The input fields the user may edit before approving (`PATCH /v1/actions/{id}`). The
+    /// server's [`Action::editable`] is authoritative; this mirrors it for the client.
+    pub fn editable(self) -> &'static [&'static str] {
+        match self {
+            Self::SendMail => &["to", "cc", "bcc", "subject", "body"],
+            Self::ReplyMail => &["to", "body"],
+            Self::CreateEvent | Self::UpdateEvent => &[
+                "title",
+                "start",
+                "end",
+                "timezone",
+                "attendees",
+                "location",
+                "description",
+            ],
+            Self::PostMessage => &["text"],
+            Self::CreatePage => &["title", "markdown"],
+        }
+    }
+
+    /// Whether some kind lets the user edit `field`.
+    pub fn any_editable(field: &str) -> bool {
+        Self::ALL.into_iter().any(|k| k.editable().contains(&field))
     }
 }
 
@@ -402,6 +450,15 @@ pub struct Action {
     pub executed_at: Option<String>,
     pub result: Option<Value>,
     pub error: Option<String>,
+    /// RFC 3339: hidden from lists until then (unless asked for); servers before snoozing omit it.
+    #[serde(default)]
+    pub snoozed_until: Option<String>,
+    /// 1, plus one per edit (0 from servers before edits).
+    #[serde(default)]
+    pub revision: u32,
+    /// The input fields the user may edit for this kind (empty from servers before edits).
+    #[serde(default)]
+    pub editable: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -673,11 +730,24 @@ impl Api {
         self.json(Method::POST, "actions", Some(body)).await
     }
 
-    /// `GET /v1/actions[?status=...]`: the user's actions, optionally of one status.
-    pub async fn actions(&self, status: Option<&str>) -> Result<Vec<Action>> {
-        let path = match status {
-            Some(s) => format!("actions?status={}", ActionStatus::parse(s)?.as_str()),
-            None => "actions".to_owned(),
+    /// `GET /v1/actions[?status=...][&include=snoozed]`: the user's actions, optionally of one
+    /// status. Snoozed actions are left out unless `include_snoozed`.
+    pub async fn actions(
+        &self,
+        status: Option<&str>,
+        include_snoozed: bool,
+    ) -> Result<Vec<Action>> {
+        let mut query = Vec::new();
+        if let Some(s) = status {
+            query.push(format!("status={}", ActionStatus::parse(s)?.as_str()));
+        }
+        if include_snoozed {
+            query.push("include=snoozed".to_owned());
+        }
+        let path = if query.is_empty() {
+            "actions".to_owned()
+        } else {
+            format!("actions?{}", query.join("&"))
         };
         Ok(self
             .json::<ActionList>(Method::GET, &path, None)
@@ -709,6 +779,36 @@ impl Api {
         .await
     }
 
+    /// `PATCH /v1/actions/{id}`: edit a pending action's input. `input` holds only the fields
+    /// to change (see [`ActionKind::editable`]); they are merged over the stored input. The
+    /// result carries a new `digest` (an approval with the old one gets `digest_mismatch`).
+    pub async fn update_action(&self, id: &str, input: &Value) -> Result<Action> {
+        let id = path_segment(id)?;
+        if !input.is_object() {
+            return Err(CloudError::Invalid(
+                "an action's input must be an object".into(),
+            ));
+        }
+        self.json(
+            Method::PATCH,
+            &format!("actions/{id}"),
+            Some(json!({ "input": input })),
+        )
+        .await
+    }
+
+    /// `POST /v1/actions/{id}/snooze`: hide the action from lists until `until` (RFC 3339; the
+    /// server caps it at the action's expiry). `None` un-snoozes it.
+    pub async fn snooze_action(&self, id: &str, until: Option<&str>) -> Result<Action> {
+        let id = path_segment(id)?;
+        self.json(
+            Method::POST,
+            &format!("actions/{id}/snooze"),
+            Some(json!({ "until": until })),
+        )
+        .await
+    }
+
     /// `POST /v1/actions/{id}/cancel`.
     pub async fn cancel_action(&self, id: &str) -> Result<Action> {
         let id = path_segment(id)?;
@@ -727,17 +827,22 @@ impl Api {
 
     /// `POST /v1/billing/checkout`: a Stripe Checkout page that starts a trial of `plan`.
     pub async fn checkout(&self, plan: &str, interval: Interval) -> Result<BillingLink> {
-        let ok = !plan.is_empty()
-            && plan.len() <= 32
-            && plan
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-        if !ok {
-            return Err(CloudError::Invalid("not a known plan".into()));
-        }
+        let plan = plan_slug(plan)?;
         let body = json!({ "plan": plan, "interval": interval });
         self.json(Method::POST, "billing/checkout", Some(body))
             .await
+    }
+
+    /// `GET /v1/billing/preview?plan=&interval=`: what switching the subscription to `plan`
+    /// would charge now (proration). Needs a subscription (`no_subscription` otherwise).
+    pub async fn billing_preview(&self, plan: &str, interval: Interval) -> Result<BillingPreview> {
+        let plan = plan_slug(plan)?;
+        self.json(
+            Method::GET,
+            &format!("billing/preview?plan={plan}&interval={}", interval.as_str()),
+            None,
+        )
+        .await
     }
 
     /// `POST /v1/billing/portal`: the Stripe customer portal (change plan, card, cancel).
@@ -756,6 +861,20 @@ impl Api {
         self.send(Method::DELETE, "me", None).await?;
         self.session.forget().await;
         Ok(())
+    }
+}
+
+/// A plan id (`heed`, `heed_max`): it goes into a body or a query unescaped.
+fn plan_slug(plan: &str) -> Result<&str> {
+    let ok = !plan.is_empty()
+        && plan.len() <= 32
+        && plan
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if ok {
+        Ok(plan)
+    } else {
+        Err(CloudError::Invalid("not a known plan".into()))
     }
 }
 
@@ -781,7 +900,9 @@ pub(super) mod tests {
     use crate::auth::tests::token_body;
     use crate::session::tests::{FakeClock, session};
     use crate::session::{MemoryStore, StoredSession};
-    use wiremock::matchers::{body_json, header, method, path, query_param};
+    use wiremock::matchers::{
+        body_json, header, method, path, query_param, query_param_is_missing,
+    };
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     pub(super) async fn signed_in(server: &MockServer) -> Api {
@@ -1045,12 +1166,12 @@ pub(super) mod tests {
         assert_eq!(a.preview.diff[0].after.as_deref(), Some("Lunch"));
         assert_eq!(a.digest.len(), 64);
 
-        let pending = api.actions(Some("pending")).await.unwrap();
+        let pending = api.actions(Some("pending"), false).await.unwrap();
         assert_eq!(pending.len(), 1);
-        let all = api.actions(None).await.unwrap();
+        let all = api.actions(None, false).await.unwrap();
         assert_eq!(all[1].status, ActionStatus::Unknown);
         assert!(matches!(
-            api.actions(Some("pending&x=1")).await,
+            api.actions(Some("pending&x=1"), false).await,
             Err(CloudError::Invalid(_))
         ));
 
@@ -1124,6 +1245,297 @@ pub(super) mod tests {
         }
         assert!(ActionKind::parse("delete_everything").is_err());
         assert!(ActionStatus::parse("unknown").is_err());
+    }
+
+    #[tokio::test]
+    async fn actions_edit_snooze_and_list_snoozed() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        let id = "a1";
+        let mut edited = action_body(id, "pending");
+        edited["digest"] = json!("cd".repeat(32));
+        edited["revision"] = json!(2);
+        edited["editable"] = json!(["to", "cc", "bcc", "subject", "body"]);
+        edited["snoozed_until"] = Value::Null;
+        let mut snoozed = action_body(id, "pending");
+        snoozed["revision"] = json!(1);
+        snoozed["snoozed_until"] = json!("2026-11-02T10:10:00Z");
+        Mock::given(method("PATCH"))
+            .and(path("/v1/actions/a1"))
+            .and(header("authorization", "Bearer AT"))
+            .and(body_json(
+                json!({ "input": { "subject": "Lunch?", "cc": ["bo@example.com"] } }),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(edited.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/actions/a1/snooze"))
+            .and(body_json(json!({ "until": "2026-11-02T10:10:00Z" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(snoozed.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/actions/a1/snooze"))
+            .and(body_json(json!({ "until": null })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(edited.clone()))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/actions"))
+            .and(query_param("status", "pending"))
+            .and(query_param("include", "snoozed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "actions": [snoozed.clone()] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/actions"))
+            .and(query_param("include", "snoozed"))
+            .and(query_param_is_missing("status"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({ "actions": [snoozed.clone()] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/actions"))
+            .and(query_param_is_missing("include"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "actions": [] })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let a = api
+            .update_action(
+                id,
+                &json!({ "subject": "Lunch?", "cc": ["bo@example.com"] }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            (a.revision, a.digest.as_str()),
+            (2, "cd".repeat(32).as_str())
+        );
+        assert_eq!(a.editable, ["to", "cc", "bcc", "subject", "body"]);
+        assert_eq!(a.snoozed_until, None);
+
+        let s = api
+            .snooze_action(id, Some("2026-11-02T10:10:00Z"))
+            .await
+            .unwrap();
+        assert_eq!(s.snoozed_until.as_deref(), Some("2026-11-02T10:10:00Z"));
+        assert_eq!(
+            api.snooze_action(id, None).await.unwrap().snoozed_until,
+            None
+        );
+
+        let listed = api.actions(Some("pending"), true).await.unwrap();
+        assert_eq!(
+            listed[0].snoozed_until.as_deref(),
+            Some("2026-11-02T10:10:00Z")
+        );
+        assert_eq!(api.actions(None, true).await.unwrap().len(), 1);
+        assert!(api.actions(None, false).await.unwrap().is_empty());
+
+        for bad in ["", "..", "a/b"] {
+            assert!(matches!(
+                api.update_action(bad, &json!({})).await,
+                Err(CloudError::Invalid(_))
+            ));
+            assert!(matches!(
+                api.snooze_action(bad, None).await,
+                Err(CloudError::Invalid(_))
+            ));
+        }
+        assert!(matches!(
+            api.update_action(id, &json!(["subject"])).await,
+            Err(CloudError::Invalid(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_old_server_action_parses_without_the_new_fields() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/actions/a1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(action_body("a1", "pending")))
+            .mount(&server)
+            .await;
+        let a = api.action("a1").await.unwrap();
+        assert_eq!(a.snoozed_until, None);
+        assert_eq!(a.revision, 0);
+        assert!(a.editable.is_empty());
+    }
+
+    #[tokio::test]
+    async fn edit_and_snooze_errors_keep_the_server_code() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        for (id, status, code) in [
+            ("bad", 400, "bad_action"),
+            ("deny", 403, "denied_by_policy"),
+            ("gone", 404, "not_found"),
+            ("done", 409, "not_pending"),
+            ("old", 410, "expired"),
+            ("fast", 429, "rate_limited"),
+        ] {
+            Mock::given(method("PATCH"))
+                .and(path(format!("/v1/actions/{id}")))
+                .respond_with(err(status, code, "no"))
+                .mount(&server)
+                .await;
+            Mock::given(method("POST"))
+                .and(path(format!("/v1/actions/{id}/snooze")))
+                .respond_with(err(status, code, "no"))
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("PATCH"))
+            .and(path("/v1/actions/paid"))
+            .respond_with(err(402, "subscription_required", "Subscribe."))
+            .mount(&server)
+            .await;
+        for (id, status, code) in [
+            ("bad", 400, "bad_action"),
+            ("deny", 403, "denied_by_policy"),
+            ("gone", 404, "not_found"),
+            ("done", 409, "not_pending"),
+            ("old", 410, "expired"),
+            ("fast", 429, "rate_limited"),
+        ] {
+            let e = api
+                .update_action(id, &json!({ "body": "x" }))
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&e, CloudError::Api { status: s, .. } if *s == status),
+                "{e:?}"
+            );
+            assert_eq!(e.code(), code);
+            let e = api.snooze_action(id, None).await.unwrap_err();
+            assert_eq!(e.code(), code);
+        }
+        let e = api.update_action("paid", &json!({})).await.unwrap_err();
+        assert!(matches!(e, CloudError::SubscriptionRequired(_)));
+    }
+
+    #[tokio::test]
+    async fn billing_preview_sends_plan_and_interval() {
+        let server = MockServer::start().await;
+        let api = signed_in(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/v1/billing/preview"))
+            .and(header("authorization", "Bearer AT"))
+            .and(query_param("plan", "heed_max"))
+            .and(query_param("interval", "year"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "plan": "heed_max", "interval": "year", "amount_due": 95_100,
+                "currency": "gbp", "proration_date": "2026-11-02T10:00:00Z"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/billing/preview"))
+            .and(query_param("plan", "heed"))
+            .respond_with(err(409, "no_subscription", "Subscribe first."))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/billing/preview"))
+            .and(query_param("plan", "gold"))
+            .respond_with(err(400, "unknown_plan", "No such plan."))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/billing/preview"))
+            .and(query_param("plan", "off"))
+            .respond_with(err(404, "billing_disabled", "Billing is off."))
+            .mount(&server)
+            .await;
+
+        let p = api
+            .billing_preview("heed_max", Interval::Year)
+            .await
+            .unwrap();
+        assert_eq!(
+            p,
+            BillingPreview {
+                plan: "heed_max".into(),
+                interval: Interval::Year,
+                amount_due: 95_100,
+                currency: "gbp".into(),
+                proration_date: "2026-11-02T10:00:00Z".into(),
+            }
+        );
+        let e = api
+            .billing_preview("heed", Interval::Month)
+            .await
+            .unwrap_err();
+        assert!(matches!(&e, CloudError::Api { status: 409, .. }), "{e:?}");
+        assert_eq!(e.code(), "no_subscription");
+        assert_eq!(
+            api.billing_preview("gold", Interval::Month)
+                .await
+                .unwrap_err()
+                .code(),
+            "unknown_plan"
+        );
+        assert_eq!(
+            api.billing_preview("off", Interval::Month)
+                .await
+                .unwrap_err()
+                .code(),
+            "billing_disabled"
+        );
+        for bad in ["", "../x", "heed&plan=x", "Heed", &"a".repeat(33)] {
+            assert!(
+                matches!(
+                    api.billing_preview(bad, Interval::Month).await,
+                    Err(CloudError::Invalid(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert_eq!(Interval::Month.as_str(), "month");
+        assert_eq!(
+            serde_json::to_value(Interval::Year).unwrap(),
+            json!(Interval::Year.as_str())
+        );
+    }
+
+    #[test]
+    fn citations_read_an_optional_author_and_kinds_list_editable_fields() {
+        let c: Citation = serde_json::from_value(json!({
+            "n": 1, "item_id": "i1", "title": null, "source": "gmail", "url": null,
+            "occurred_at": null, "snippet": "s", "author": "Dana Scully"
+        }))
+        .unwrap();
+        assert_eq!(c.author.as_deref(), Some("Dana Scully"));
+        let old: Citation = serde_json::from_value(json!({
+            "n": 1, "item_id": "i1", "title": null, "source": "gmail", "url": null,
+            "occurred_at": null, "snippet": "s"
+        }))
+        .unwrap();
+        assert_eq!(old.author, None);
+
+        assert_eq!(ActionKind::PostMessage.editable(), ["text"]);
+        assert_eq!(ActionKind::CreatePage.editable(), ["title", "markdown"]);
+        assert_eq!(
+            ActionKind::CreateEvent.editable(),
+            ActionKind::UpdateEvent.editable()
+        );
+        assert!(ActionKind::any_editable("attendees"));
+        assert!(!ActionKind::any_editable("event_id"));
+        assert!(!ActionKind::any_editable("channel"));
     }
 
     #[tokio::test]
