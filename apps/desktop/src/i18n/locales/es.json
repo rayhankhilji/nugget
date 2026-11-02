@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "Preguntar a Heed",
   "palette.filter.from": "De: {value}",
   "palette.filter.in": "En: {value}",
-  "palette.filter.remove": "Quitar el filtro {label}"
+  "palette.filter.remove": "Quitar el filtro {label}",
+  "cloud.billing.selfHostedTitle": "Autoalojado · facturación desactivada"
 }

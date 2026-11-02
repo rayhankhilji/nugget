@@ -13,7 +13,7 @@ import { Dialog } from "./Dialog";
  */
 export function trialDaysLeft(me: CloudMe | null | undefined, now: number): number | null {
   const s = me?.subscription;
-  if (!s || s.status !== "trialing" || !s.trial_end) return null;
+  if (me?.billing === false || !s || s.status !== "trialing" || !s.trial_end) return null;
   const end = Date.parse(s.trial_end);
   if (Number.isNaN(end)) return null;
   return Math.max(0, Math.ceil((end - now) / 86_400_000));

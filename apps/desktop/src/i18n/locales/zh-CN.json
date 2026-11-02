@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "问 Heed",
   "palette.filter.from": "发件人：{value}",
   "palette.filter.in": "位于：{value}",
-  "palette.filter.remove": "移除筛选 {label}"
+  "palette.filter.remove": "移除筛选 {label}",
+  "cloud.billing.selfHostedTitle": "自托管 · 计费已关闭"
 }

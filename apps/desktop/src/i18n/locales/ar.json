@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "اسأل Heed",
   "palette.filter.from": "من: {value}",
   "palette.filter.in": "في: {value}",
-  "palette.filter.remove": "إزالة عامل التصفية {label}"
+  "palette.filter.remove": "إزالة عامل التصفية {label}",
+  "cloud.billing.selfHostedTitle": "استضافة ذاتية · الفوترة متوقفة"
 }

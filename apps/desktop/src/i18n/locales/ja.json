@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "Heed に聞く",
   "palette.filter.from": "差出人: {value}",
   "palette.filter.in": "場所: {value}",
-  "palette.filter.remove": "フィルター {label} を外す"
+  "palette.filter.remove": "フィルター {label} を外す",
+  "cloud.billing.selfHostedTitle": "セルフホスト · 課金オフ"
 }

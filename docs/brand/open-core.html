@@ -40,12 +40,12 @@
           <li>Needs you and the brief, fresh every few minutes</li>
           <li>Replies and invites sent only when you approve</li>
         </ul>
-        <span class="ob-fork-foot">14 days free, then £39 a month</span>
+        <span class="ob-fork-foot">14 days free, then from £39 a month</span>
       </button>
       <button type="button" class="ob-fork-card">
         <span class="ob-fork-kicker">Open source</span>
         <h2>Run it yourself</h2>
-        <p>Everything stays on this computer, answered by the AI you choose.</p>
+        <p>Your data stays on this computer. Only the passages a question needs go to the AI you choose, or nothing at all with a local model.</p>
         <ul class="ob-fork-points">
           <li>Folders, mail and notes on this computer</li>
           <li>Sign in with ChatGPT, paste an API key, or run a local model</li>
@@ -57,7 +57,7 @@
   </main></div></div>
   <ul class="notes">
     <li><code>.ob-fork</code> holds two <code>button.ob-fork-card</code>s. Set <code>aria-pressed="true"</code> (or <code>.is-selected</code>) for the outline if the choice is kept on screen.</li>
-    <li>Card heading: Fraunces at 28px. The kicker is a 12px label, the ticks are ultramarine, and the price line sits at the bottom so both cards end together.</li>
+    <li>Card heading: Fraunces at 28px. The kicker is a 12px label, the ticks are ultramarine, and the price line sits at the bottom so both cards end together. Never hard-code the price: read it from the plans list, and show "14-day free trial" with no price when that fails (offline on first run).</li>
     <li>Under 640px the cards stack. Reduced motion drops the 2px hover lift.</li>
   </ul>
 </section>

@@ -279,10 +279,8 @@ const ENDED = ["canceled", "incomplete_expired", "unpaid"];
 function statusText(s: CloudSubscription, t: TFunction): string {
   const end = day(s.current_period_end);
   if (s.cancel_at_period_end && end) return t("cloud.billing.status.cancels", { date: end });
-  if (s.status === "trialing") {
-    const until = day(s.trial_end);
-    return until ? t("cloud.billing.status.trialUntil", { date: until }) : t("cloud.billing.status.trialing");
-  }
+  // The strip's "Trial ends" column carries the date; the pill just says Trial.
+  if (s.status === "trialing") return t("cloud.billing.status.trialing");
   if (s.status === "active") return t("cloud.billing.status.active");
   if (s.status === "past_due") return t("cloud.billing.status.pastDue");
   return s.status;
@@ -339,9 +337,19 @@ export function Billing() {
       )}
       {me.loading && !me.data && <Loading lines={2} />}
       {me.data?.billing === false && (
-        <p className="note" role="status">
-          {t("cloud.billing.selfHosted", { plan: ent?.name ?? me.data.plan ?? "" })}
-        </p>
+        <div className="cloud-subscription">
+          <dl className="plan-strip">
+            <div>
+              <dt>{t("cloud.billing.strip.plan")}</dt>
+              <dd>
+                <strong>{t("cloud.billing.selfHostedTitle")}</strong>
+              </dd>
+            </div>
+          </dl>
+          <p className="muted" role="status">
+            {t("cloud.billing.selfHosted", { plan: ent?.name ?? me.data.plan ?? "" })}
+          </p>
+        </div>
       )}
       {me.data && me.data.billing !== false && subscribed && sub && (
         <div className="cloud-subscription">

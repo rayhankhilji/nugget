@@ -207,7 +207,7 @@ describe("Plan & billing", () => {
     });
     const { container } = await render(<AccountPage />);
     let s = section(container);
-    expect(s.textContent).toMatch(/Trial until .*2026/);
+    expect(s.textContent).toMatch(/Trial ends.*2026/);
     expect(s.textContent).toContain("Smart asks this month 7 of 300");
     await click(byText(s, "button", "Manage billing"));
     await click(byText(s, "button", "Upgrade to Heed Max"));

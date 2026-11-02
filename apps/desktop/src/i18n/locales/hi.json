@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "Heed से पूछें",
   "palette.filter.from": "से: {value}",
   "palette.filter.in": "में: {value}",
-  "palette.filter.remove": "फ़िल्टर {label} हटाएँ"
+  "palette.filter.remove": "फ़िल्टर {label} हटाएँ",
+  "cloud.billing.selfHostedTitle": "सेल्फ़-होस्टेड · बिलिंग बंद"
 }

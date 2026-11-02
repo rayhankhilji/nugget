@@ -2515,5 +2515,6 @@
   "palette.hint.ask": "Ask Heed",
   "palette.filter.from": "From: {value}",
   "palette.filter.in": "In: {value}",
-  "palette.filter.remove": "Remove filter {label}"
+  "palette.filter.remove": "Remove filter {label}",
+  "cloud.billing.selfHostedTitle": "Self-hosted · billing off"
 }

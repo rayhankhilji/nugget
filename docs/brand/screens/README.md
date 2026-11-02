@@ -17,7 +17,7 @@ to Heed Cloud. Regenerate them after a UI change:
 | `search.png` | Search across the connected apps, with source filters |
 | `search-cmdk.png` | ⌘K over Home: live results in sections (People, Docs, Mail, Messages), "Open ↵" on the active row, and the key legend |
 | `connections.png` | Heed Cloud connections: four connected apps, Slack still importing, and the app gallery |
-| `account.png` | Account: Heed Pro on trial, the smart-ask usage meter and Upgrade |
+| `account.png` | Account: Heed on trial, the smart-ask usage meter and Upgrade |
 | `welcome.png` | First run: sign in to Heed Cloud over the sky and dither backdrop |
 | `quickask-dark.png` | The quick ask window, dark, with a cited answer |
 | `ghost-text.png` | Ghost text in a mail compose window. The window is a neutral mock drawn by the script; the suggestion and its Tab hint use the app's real ghost styles |
