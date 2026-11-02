@@ -4282,3 +4282,58 @@ section[aria-labelledby="cloud-ask"] form input {
   color: var(--muted);
   font-size: var(--fs-xs);
 }
+
+/* Provider status (Settings): one row per AI the app can use; health is the only green here. */
+.provider-status {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.provider-status > li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+
+.provider-status > li + li {
+  border-block-start: 1px solid var(--hairline);
+}
+
+.provider-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--heed-ink-3);
+}
+
+.provider-dot[data-health="ok"] {
+  background: var(--heed-ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-ok) 18%, transparent);
+}
+
+.provider-dot[data-health="warn"] {
+  background: var(--heed-warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--heed-warn) 18%, transparent);
+}
+
+.provider-name {
+  font-weight: 600;
+}
+
+.provider-detail {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.provider-model {
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}

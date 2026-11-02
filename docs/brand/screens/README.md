@@ -20,3 +20,10 @@ to Heed Cloud. Regenerate them after a UI change:
 | `welcome.png` | First run: sign in to Heed Cloud over the sky and dither backdrop |
 | `quickask-dark.png` | The quick ask window, dark, with a cited answer |
 | `ghost-text.png` | Ghost text in a mail compose window. The window is a neutral mock drawn by the script; the suggestion and its Tab hint use the app's real ghost styles |
+
+## Open-core design specs
+
+`open-core-*.png` are not app screenshots. They are renders of `docs/brand/open-core.html`, the
+design spec for the first-run fork, Choose your AI and provider status. That page uses the app's
+own stylesheets, so its classes (`.ob-fork`, `.ai-choice`, `.key-field`, `.provider-status`) are
+the ones the real views use.

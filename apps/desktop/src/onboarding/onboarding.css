@@ -59,7 +59,7 @@
   }
 
   .onboarding::after {
-    opacity: 0.16;
+    opacity: 0.08;
   }
 }
 
@@ -955,5 +955,231 @@ button.ob-app-tile:disabled {
 
   button.ob-app-tile:active:not(:disabled) {
     transform: none;
+  }
+}
+
+/* ---- Open core: the first-run fork and "Choose your AI" ----
+   Markup is CL3's; these classes are the look (spec: docs/brand/open-core.html). */
+
+/* Two calm cards over the welcome backdrop: Heed Cloud, or run it yourself. */
+.ob-fork {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  max-inline-size: 46rem;
+  margin-inline: auto;
+}
+
+.ob-fork-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-2);
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition:
+    transform var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.ob-fork-card:hover {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-3);
+}
+
+.ob-fork-card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.ob-fork-card[aria-pressed="true"],
+.ob-fork-card.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent), var(--shadow-3);
+}
+
+.ob-fork-kicker {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.ob-fork-card h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: var(--heed-display-weight);
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.ob-fork-card p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.ob-fork-points {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.ob-fork-points li {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ob-fork-points li::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-block-start: 2px;
+  border-radius: 50%;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2 4.2 7.4 8 3' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+      center / 10px no-repeat,
+    var(--accent);
+}
+
+.ob-fork-foot {
+  margin-block-start: auto;
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--hairline);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 40rem) {
+  .ob-fork {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Choose your AI: one row per way in, the chosen one opens beneath it. */
+.ai-choices {
+  display: grid;
+  gap: var(--space-2);
+  max-inline-size: 36rem;
+  margin-inline: auto;
+}
+
+.ai-choice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: pointer;
+}
+
+.ai-choice:has(input:checked),
+.ai-choice.is-selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.ai-choice:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ai-choice input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ai-choice-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.ai-choice-title {
+  font-weight: 600;
+}
+
+.ai-choice-blurb {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.ai-choice-status {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.ai-choice-body {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--space-2);
+  padding-block-start: var(--space-2);
+  border-block-start: 1px solid var(--hairline);
+}
+
+/* An API key field: mono, and it says what it found as soon as it has checked. */
+.key-field {
+  display: grid;
+  gap: 6px;
+}
+
+.key-field input {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+}
+
+.key-field-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 1.4em;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.key-field[data-state="valid"] input {
+  border-color: var(--good);
+}
+
+.key-field[data-state="valid"] .key-field-status {
+  color: var(--good);
+}
+
+.key-field[data-state="invalid"] input {
+  border-color: var(--bad);
+}
+
+.key-field[data-state="invalid"] .key-field-status {
+  color: var(--bad);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-fork-card,
+  .ob-fork-card:hover {
+    transform: none;
+    transition: none;
   }
 }
