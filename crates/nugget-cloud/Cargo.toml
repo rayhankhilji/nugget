@@ -1,0 +1,16 @@
+[package]
+name = "nugget-cloud"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Nugget Cloud service: auth check, Composio connections and ingest, AI gateway, cloud Ask."
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

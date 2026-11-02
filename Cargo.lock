@@ -3954,6 +3954,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-cloud"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "nugget-cloud-client"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nugget-computer"
 version = "0.0.1"
 dependencies = [
