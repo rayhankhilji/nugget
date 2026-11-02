@@ -60,7 +60,6 @@ export const PAGES: readonly PageDef[] = [
   { id: "search", label: "app.nav.search", Component: SearchPage, keywords: "app.keywords.search" },
   { id: "knowledge", label: "app.nav.knowledge", Component: KnowledgePage, keywords: "app.keywords.knowledge" },
   { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources" },
-  { id: "connections", label: "app.nav.connections", Component: CloudPage, standalone: true },
   { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps" },
   { id: "plugins", label: "app.nav.plugins", Component: PluginsPage },
   { id: "agent", label: "app.nav.agent", Component: AgentPage },
@@ -69,6 +68,7 @@ export const PAGES: readonly PageDef[] = [
   { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
   { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
+  { id: "connections", label: "app.nav.connections", Component: CloudPage, standalone: true },
 ];
 
 /**
