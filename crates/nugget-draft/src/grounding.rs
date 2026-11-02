@@ -388,20 +388,6 @@ fn claims_attachment(text: &str) -> bool {
     ATTACHMENT_CLAIMS.iter().any(|w| lower.contains(w))
 }
 
-/// Whether a word may carry what the default check looks at (a number, amount, date, link,
-/// contact or credential): the first unit of a draft is held from such a word to its end.
-fn risky_word(w: &str) -> bool {
-    let lower = w
-        .trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase();
-    w.chars()
-        .any(|c| c.is_numeric() || matches!(c, '@' | '$' | '€' | '£' | '¥' | '/'))
-        || month(&lower).is_some_and(|_| month_word(w) && lower.len() > 3)
-        || number_word(&lower).is_some_and(|_| lower != "one")
-        || CURRENCY_WORDS.contains(&lower.as_str())
-        || !contacts(w).is_empty()
-}
-
 fn words(text: &str) -> impl Iterator<Item = String> + '_ {
     text.split(|c: char| !c.is_alphabetic())
         .filter(|w| !w.is_empty())
@@ -416,12 +402,12 @@ pub enum GroundingCheck {
     /// superseded values and copied credentials. Costs the first sentence's generation time
     /// before the first character.
     Sentences,
-    /// Stream the first sentence (or line) word by word, holding it from the first word that
-    /// may carry a value, link or credential to its end; hold every later sentence whole. Each
-    /// held part is checked: unsupported amounts, dates and numbers of three or more digits,
-    /// links and contact details the thread and the user's text don't have, copies of another
-    /// person's message and credentials are dropped (in the first sentence, once some of it
-    /// went out, the draft ends there instead). The first characters come as fast as before.
+    /// Hold each sentence (and the greeting) until it ends and drop it for a credential, a
+    /// link or contact detail the thread and the user's text don't have, a copy of the other
+    /// person's message, or an unsupported amount, date or number of three or more digits.
+    /// Times, weekdays and small counts are left alone. Nothing half-checked is ever emitted,
+    /// so a draft never ends in a cut sentence (the first characters wait for the first
+    /// sentence).
     #[default]
     Secrets,
 }
@@ -451,12 +437,6 @@ pub struct Grounder {
     report: GroundingReport,
     /// Check values (amounts, dates, numbers) at all; off when grounding is.
     values: bool,
-    /// `Secrets`: the first unit (streamed word by word) is over.
-    first_done: bool,
-    /// `Secrets`: the first unit is held from a value-like word to its end.
-    first_hold: bool,
-    /// `Secrets`: what went out of the first unit.
-    first_emitted: String,
 }
 
 impl Grounder {
@@ -479,9 +459,6 @@ impl Grounder {
             finished: false,
             report,
             values: true,
-            first_done: false,
-            first_hold: false,
-            first_emitted: String::new(),
         }
     }
 
@@ -530,12 +507,6 @@ impl Grounder {
         }
         self.pending.push_str(text);
         let mut out = String::new();
-        if self.check == GroundingCheck::Secrets && !self.first_done {
-            out = self.stream_first(false);
-            if !self.first_done || self.finished {
-                return out;
-            }
-        }
         loop {
             let start = self.unit_start();
             let from = start + self.scanned;
@@ -570,12 +541,6 @@ impl Grounder {
             return String::new();
         }
         let mut out = String::new();
-        if self.check == GroundingCheck::Secrets && !self.first_done {
-            out = self.stream_first(true);
-        }
-        if self.finished {
-            return out;
-        }
         self.finished = true;
         let rest = std::mem::take(&mut self.pending);
         let start = rest.len() - rest.trim_start().len();
@@ -642,133 +607,6 @@ impl Grounder {
         self.emitted_any = true;
     }
 
-    /// `Secrets`: how much of `pending[..limit]` may go out now (all of it with `complete`),
-    /// keeping a trailing partial word, a trailing run of digit groups ("4111 1111") and the
-    /// start of a possible credential until they end. `None`: a credential is already complete.
-    fn secrets_cut(&self, limit: usize, complete: bool) -> Option<usize> {
-        let mut cut = if complete {
-            limit
-        } else {
-            let mut cut = self.pending[..limit]
-                .rfind(char::is_whitespace)
-                .unwrap_or(0);
-            // A card number arrives a group at a time.
-            let partial = self.pending[cut..limit].trim();
-            if partial.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                loop {
-                    let head = self.pending[..cut].trim_end();
-                    let start = head
-                        .char_indices()
-                        .rfind(|(_, c)| c.is_whitespace())
-                        .map_or(0, |(i, c)| i + c.len_utf8());
-                    let word = &head[start..];
-                    if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit() || c == '-') {
-                        cut = start;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            cut
-        };
-        if !self.corpus.secrets.is_empty() {
-            if self.copies_secret(&self.pending[..cut]) {
-                return None;
-            }
-            if !complete {
-                cut = self.hold_secret_start(cut);
-            }
-        }
-        Some(cut)
-    }
-
-    /// `Secrets`: stream the first unit (up to its sentence end or line break) word by word
-    /// until a word that may carry a value, link or credential; hold from there to its end and
-    /// check it. With `last`, the draft is over.
-    fn stream_first(&mut self, last: bool) -> String {
-        let start = self.unit_start();
-        let (end, complete) = match find_boundary(&self.pending, start) {
-            Scan::Boundary(e) => (e, true),
-            Scan::NeedMore(_) => (self.pending.len(), last),
-        };
-        let mut out = String::new();
-        let mut end = end;
-        if !self.first_hold {
-            let Some(cut) = self.secrets_cut(end, complete) else {
-                return self.stop_secret();
-            };
-            let mut cut = cut.max(start);
-            if let Some(r) = self.pending[start..cut]
-                .split_whitespace()
-                .find(|w| risky_word(w))
-                .map(|w| w.as_ptr() as usize - self.pending.as_ptr() as usize)
-            {
-                cut = r;
-                self.first_hold = true;
-            }
-            // Hold while the draft so far repeats the start of a message from someone else.
-            let sofar = squash(&format!("{}{}", self.first_emitted, &self.pending[..cut]));
-            if !sofar.is_empty() && self.corpus.others.iter().any(|o| o.starts_with(&sofar)) {
-                cut = 0;
-            }
-            let cut = self.pending[..cut].trim_end().len();
-            if cut > start || (cut > 0 && self.emitted_any) {
-                let mut release: String = self.pending.drain(..cut).collect();
-                end -= cut;
-                if !self.emitted_any {
-                    release = release.trim_start().to_owned();
-                }
-                self.remember(&release);
-                self.first_emitted.push_str(&release);
-                self.emitted_any = true;
-                self.body_ok = true;
-                out.push_str(&release);
-            }
-        } else if !self.corpus.secrets.is_empty() && self.copies_secret(&self.pending[start..end]) {
-            return self.stop_secret();
-        }
-        if !complete {
-            return out;
-        }
-        // The first unit is complete: check what is held.
-        let held: String = self.pending.drain(..end).collect();
-        self.first_done = true;
-        let body = if self.emitted_any {
-            held.as_str()
-        } else {
-            held.trim_start()
-        };
-        if body.trim().is_empty() {
-            return out;
-        }
-        let sentence = format!("{}{}", self.first_emitted, body);
-        self.report.sentences_checked += 1;
-        if self.check(sentence.trim()) {
-            self.remember(body);
-            out.push_str(body);
-            self.emitted_any = true;
-            self.body_ok = true;
-        } else {
-            self.report.sentences_dropped += 1;
-            if !self.first_emitted.trim().is_empty() {
-                // Part of it went out: end the draft rather than leave a broken sentence.
-                self.pending.clear();
-                self.finished = true;
-            } else {
-                self.carry = held[..held.len() - held.trim_start().len()].to_owned();
-            }
-        }
-        out
-    }
-
-    /// A credential is complete in held text: drop everything and end the draft.
-    fn stop_secret(&mut self) -> String {
-        self.report.secrets_dropped += 1;
-        self.pending.clear();
-        self.finished = true;
-        String::new()
-    }
-
     /// Whether `text`, after what was emitted before it, copies a credential from a sensitive
     /// fact: its letters and digits contain one, or (for a card or account number) its digits do.
     fn copies_secret(&self, text: &str) -> bool {
@@ -777,15 +615,24 @@ impl Grounder {
         }
         let new = squash(text);
         let sq = format!("{}{new}", self.tail);
-        let digits: String = self
-            .digits
-            .chars()
-            .chain(new.chars().filter(char::is_ascii_digit))
-            .collect();
+        let digits = format!("{}{}", self.digits, self.own_digits(text));
         self.corpus.secrets.iter().any(|s| {
             sq.contains(s.as_str())
                 || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
         })
+    }
+
+    /// The digits of `text`, leaving out each number (a run of digits and the separators inside
+    /// it) that the thread or the user's own text states: "$3,124 for 50 seats" copied from the
+    /// thread never adds up to a card or booking number (QA GG1-18).
+    fn own_digits(&self, text: &str) -> String {
+        text.chars()
+            .map(fold)
+            .collect::<String>()
+            .split(|c: char| !(c.is_ascii_digit() || matches!(c, ',' | '.' | '-' | ' ')))
+            .map(|run| run.chars().filter(char::is_ascii_digit).collect::<String>())
+            .filter(|d| !d.is_empty() && (d.len() < 3 || !self.corpus.user.contains(d.as_str())))
+            .collect()
     }
 
     /// Whether `text` ends with the first four or more letters and digits of a credential.
@@ -813,36 +660,10 @@ impl Grounder {
         let keep: Vec<char> = self
             .digits
             .chars()
-            .chain(new.chars().filter(char::is_ascii_digit))
+            .chain(self.own_digits(text).chars())
             .collect();
         let n = keep.len().saturating_sub(self.corpus.secret_len);
         self.digits = keep[n..].iter().collect();
-    }
-
-    /// `Secrets`: move `cut` back so no (squashed) start of a credential goes out before the
-    /// text after it shows whether it is one. The scan back is bounded; the tail catches a
-    /// credential whose start slipped out.
-    fn hold_secret_start(&self, cut: usize) -> usize {
-        let head = &self.pending[..cut];
-        let max = self.corpus.secret_len;
-        let mut best = cut;
-        // The squashed end of `head`, reversed.
-        let mut rev: Vec<char> = Vec::new();
-        for (i, c) in head.char_indices().rev().take(16 * max + 64) {
-            let sq = squash(&head[i..i + c.len_utf8()]);
-            if sq.is_empty() {
-                continue;
-            }
-            rev.extend(sq.chars().rev());
-            if rev.len() > max {
-                break;
-            }
-            let s: String = rev.iter().rev().collect();
-            if self.corpus.secrets.iter().any(|sec| sec.starts_with(&s)) {
-                best = i;
-            }
-        }
-        best
     }
 
     /// Whether every value in the sentence is supported; counts values and names.
@@ -2096,18 +1917,53 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         );
     }
 
+    /// MM1 on GG1 (real 4B): the default check never leaves a cut sentence ("Hi Sam, the
+    /// password is"). A sentence is emitted only once it passed; with nothing that passed, the
+    /// draft is empty.
     #[test]
-    fn secrets_mode_streams_the_first_line_and_holds_later_sentences() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        // The first line goes out word by word; later sentences are checked whole.
-        assert_eq!(g.push("Hi Ravi,\n\nThe team"), "Hi Ravi,");
-        assert_eq!(
-            g.push(" has 12 people. The VPN"),
-            "\n\nThe team has 12 people."
-        );
-        assert_eq!(g.push(" password is tangerine-Otter-42. Kind regards"), "");
-        assert_eq!(g.finish(), " Kind regards");
-        assert_eq!(g.report().secrets_dropped, 1);
+    fn the_default_check_never_leaves_a_cut_sentence() {
+        for (draft, want) in [
+            ("Hi Ravi, the VPN password is tangerine-Otter-42.", ""),
+            ("Hi Ravi, the total is $9,800.", ""),
+            (
+                "the dashboard is here: https://dash.evil.example.com/q4",
+                "",
+            ),
+            ("رمز الباب: ٤٧١٩٢٥٨٣", ""),
+            ("Código de la alarma: 2580 4719.", ""),
+            ("Hi Ravi, the caterer quote for Quarry Hall is $4,150.", ""),
+            (
+                "Hi Ravi,\n\nThe team has 12 people. The VPN password is tangerine-Otter-42.\n\nBest,\nHenrik",
+                "Hi Ravi,\n\nThe team has 12 people.\n\nBest,\nHenrik",
+            ),
+        ] {
+            let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+            // Fed a few characters at a time, as a model streams.
+            let chars: Vec<char> = draft.chars().collect();
+            let parts: Vec<String> = chars.chunks(3).map(|c| c.iter().collect()).collect();
+            let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+            assert_eq!(stream(&mut g, &parts), want, "{draft}");
+        }
+    }
+
+    /// MM1 on GG1: a number the thread states passes even when its digits, joined with the
+    /// next number's, spell a sensitive reference.
+    #[test]
+    fn numbers_from_the_thread_never_add_up_to_a_secret() {
+        let (mut ctx, _) = henrik();
+        ctx.thread[0].text = "Can we do $3,124 for 50 seats?".into();
+        let mut c = cite(1, "k80", "Booking", "2026-10-01");
+        c.sensitive = true;
+        let cr = ContextResponse {
+            text: "[1] Booking (notes)\nBooking reference 312450.".into(),
+            citations: vec![c],
+            excluded_sensitive: 0,
+        };
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["Yes, $3,124 for 50 seats works."]);
+        assert_eq!(out, "Yes, $3,124 for 50 seats works.");
+        assert_eq!(g.report().secrets_dropped, 0);
     }
 
     /// QA GG1-11: the default check drops invented and superseded amounts, spelled out too.
@@ -2129,12 +1985,6 @@ twelve thousand dollars. See you Friday at 3 pm.",
         assert_eq!(
             g.report().unsupported,
             ["$310,000", "twelve thousand dollars"]
-        );
-        // In the streamed first sentence, the draft ends before the invented figure.
-        let mut g = grounder().with_check(GroundingCheck::Secrets);
-        assert_eq!(
-            stream(&mut g, &["The cover limit is €610,000 per claim. Thanks!"]),
-            "The cover limit is"
         );
     }
 
@@ -2190,19 +2040,6 @@ ravi.menon@northwind.example.com.",
     }
 
     #[test]
-    fn secrets_mode_holds_digit_groups_until_the_run_ends() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(g.push("The card is 4111 1111"), "The card is");
-        assert_eq!(g.push(" 1111 1111 for"), "");
-        assert!(g.is_finished());
-        // A harmless number streams as usual, and the end flushes everything.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let (out, _) = run(&mut g, &["We are 12 ", "people, see you at 10:00."]);
-        assert_eq!(out, "We are 12 people, see you at 10:00.");
-        assert_eq!(g.report().secrets_dropped, 0);
-    }
-
-    #[test]
     fn plain_drafts_pass_unchanged() {
         for draft in [
             "ok",
@@ -2233,37 +2070,6 @@ ravi.menon@northwind.example.com.",
             out.push_str(&g.push(p));
         }
         out + &g.finish()
-    }
-
-    #[test]
-    fn secrets_mode_catches_a_credential_padded_past_any_window() {
-        // Each character of the password, with separators between them: the raw text runs far
-        // longer than the password, and arrives one word at a time.
-        let parts: Vec<String> = "tangerineOtter42"
-            .chars()
-            .map(|c| format!("{c} ,  ; "))
-            .collect();
-        let mut all = vec!["The password is "];
-        all.extend(parts.iter().map(String::as_str));
-        all.push("ok.");
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &all);
-        // Neither the password nor its start went out.
-        assert!(!squash(&out).contains("tang"), "{out:?}");
-        assert_eq!(g.report().secrets_dropped, 1);
-    }
-
-    #[test]
-    fn secrets_mode_holds_the_start_of_a_credential_split_by_a_space() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &["It is tangerine- ", "Otter-42 ", "now."]);
-        assert_eq!(out, "It is");
-        assert_eq!(g.report().secrets_dropped, 1);
-        // A word that only starts like one goes out when the next word shows it is not.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(g.push("a tangerine "), "a");
-        assert_eq!(g.push("tree now"), " tangerine tree");
-        assert_eq!(g.finish(), " now");
     }
 
     #[test]
@@ -2349,21 +2155,6 @@ ravi.menon@northwind.example.com.",
             assert!(!digits.contains("4111111111111111"), "{check:?}: {out:?}");
             assert_eq!(g.report().secrets_dropped, 1, "{check:?}");
         }
-    }
-
-    #[test]
-    fn secrets_mode_holds_the_start_of_a_credential_glued_to_a_word() {
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        let out = stream(&mut g, &["the code isTangerine ", "Otter-42 ok."]);
-        assert!(!squash(&out).contains("tang"), "{out:?}");
-        assert_eq!(g.report().secrets_dropped, 1);
-        // Held mid-word only while it may still be one.
-        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
-        assert_eq!(
-            stream(&mut g, &["a cat ", "sat ", "here."]),
-            "a cat sat here."
-        );
-        assert_eq!(g.report().secrets_dropped, 0);
     }
 
     #[test]
