@@ -1,7 +1,7 @@
 // Screenshots of every page at desktop and mobile widths, in light and dark, saved small under screenshots/.
 import { createRequire } from "node:module";
 import sharp from "sharp";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { buildTestSite, signedIn, CLOUD, ME } from "./mocks.mjs";
 
 await buildTestSite();
@@ -46,10 +46,10 @@ for (const v of VIEWS) {
       // Scroll through once so scroll-triggered reveals have run, then return to the top.
       await page.evaluate(async () => {
         for (let y = 0; y < document.body.scrollHeight; y += 500) {
-          window.scrollTo(0, y);
+          window.scrollTo({ top: y, behavior: "instant" });
           await new Promise((r) => setTimeout(r, 40));
         }
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: "instant" });
       });
       // Checkout's API call is held open on purpose (to catch the redirect state), so it never goes idle.
       if (r !== "/checkout") await page.waitForLoadState("networkidle");
@@ -57,7 +57,20 @@ for (const v of VIEWS) {
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
       const file = new URL(`${name}.webp`, OUT);
-      await sharp(png).resize({ width: r === "/" ? (v.name === "desktop" ? 1040 : 420) : v.out }).webp({ quality: r === "/" ? (v.name === "mobile" ? 26 : 40) : r === "/pricing" ? 56 : v.name === "mobile" ? 62 : 70 }).toFile(file.pathname);
+      // Resize, cap the height at WebP's limit, then step the quality down until the file is under 300 KB.
+      const resized = await sharp(png).resize({ width: r === "/" ? (v.name === "desktop" ? 1040 : 420) : v.out }).toBuffer({ resolveWithObject: true });
+      const capped = resized.info.height > 16000 ? await sharp(resized.data).extract({ left: 0, top: 0, width: resized.info.width, height: 16000 }).toBuffer() : resized.data;
+      let quality = r === "/" ? (v.name === "mobile" ? 34 : 46) : r === "/pricing" ? 56 : v.name === "mobile" ? 62 : 70;
+      let out = await sharp(capped).webp({ quality }).toBuffer();
+      while (out.length > 300 * 1024 && quality > 12) {
+        quality -= 6;
+        out = await sharp(capped).webp({ quality }).toBuffer();
+      }
+      // Very long pages: shrink as a last resort.
+      for (let scale = 0.85; out.length > 300 * 1024 && scale > 0.4; scale -= 0.15) {
+        out = await sharp(capped).resize({ width: Math.round(resized.info.width * scale) }).webp({ quality }).toBuffer();
+      }
+      await writeFile(file, out);
       console.log(name);
     }
     await anon.close();
