@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "ChatGPT へのサインインがうまくいきませんでした。もう一度試してください。",
   "models.ai.title": "あなたの AI",
   "models.ai.hint": "Heed が回答や文章作成に使えるものと、それが動作しているかどうか。",
-  "models.ai.working": "{name}：動作中",
-  "models.ai.notWorking": "{name}：動作していません（下の「あなたのプロバイダ」を参照）",
+  "models.ai.working": "動作中",
+  "models.ai.notWorking": "動作していません: {reason}。",
   "chatgpt.unavailable.title": "このアカウントでは、ChatGPT でのサインインはまだ利用できません",
-  "chatgpt.unavailable.body": "OpenAI がこのアカウントによる Heed への ChatGPT サインインを許可しませんでした。代わりに API キーを使うか、後でもう一度試してください。"
+  "chatgpt.unavailable.body": "OpenAI がこのアカウントによる Heed への ChatGPT サインインを許可しませんでした。代わりに API キーを使うか、後でもう一度試してください。",
+  "models.ai.reason.refused": "キーが拒否されました。キーを置き換えて直してください",
+  "models.ai.reason.limited": "プロバイダがリクエストを制限しています。Heed が自動で再試行します",
+  "models.ai.reason.unreachable": "プロバイダから応答がありません",
+  "models.ai.reason.other": "プロバイダがエラーを返しました"
 }

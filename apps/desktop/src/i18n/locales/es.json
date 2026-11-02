@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "El inicio de sesión en ChatGPT no funcionó. Inténtalo de nuevo.",
   "models.ai.title": "Tu IA",
   "models.ai.hint": "Lo que Heed puede usar para responder y escribir, y si funciona.",
-  "models.ai.working": "{name}: funciona",
-  "models.ai.notWorking": "{name}: no funciona (consulta Tus proveedores más abajo)",
+  "models.ai.working": "Funciona",
+  "models.ai.notWorking": "No funciona: {reason}.",
   "chatgpt.unavailable.title": "El inicio de sesión con ChatGPT aún no está disponible para esta cuenta",
-  "chatgpt.unavailable.body": "OpenAI no permitió que esta cuenta use el inicio de sesión con ChatGPT en Heed. Usa una clave de API en su lugar o inténtalo más tarde."
+  "chatgpt.unavailable.body": "OpenAI no permitió que esta cuenta use el inicio de sesión con ChatGPT en Heed. Usa una clave de API en su lugar o inténtalo más tarde.",
+  "models.ai.reason.refused": "se rechazó la clave. Sustituye la clave para arreglarlo",
+  "models.ai.reason.limited": "el proveedor está limitando las solicitudes; Heed lo reintenta solo",
+  "models.ai.reason.unreachable": "el proveedor no respondió",
+  "models.ai.reason.other": "el proveedor devolvió un error"
 }

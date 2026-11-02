@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "ChatGPT साइन इन काम नहीं किया। फिर से कोशिश करें।",
   "models.ai.title": "आपका AI",
   "models.ai.hint": "Heed जवाब देने और लिखने के लिए क्या इस्तेमाल कर सकता है, और क्या वह काम कर रहा है।",
-  "models.ai.working": "{name}: काम कर रहा है",
-  "models.ai.notWorking": "{name}: काम नहीं कर रहा (नीचे आपके प्रोवाइडर देखें)",
+  "models.ai.working": "काम कर रहा है",
+  "models.ai.notWorking": "काम नहीं कर रहा: {reason}।",
   "chatgpt.unavailable.title": "इस खाते के लिए ChatGPT साइन इन अभी उपलब्ध नहीं है",
-  "chatgpt.unavailable.body": "OpenAI ने इस खाते को Heed के साथ ChatGPT साइन इन इस्तेमाल करने नहीं दिया। इसके बजाय API कुंजी इस्तेमाल करें, या बाद में फिर से कोशिश करें।"
+  "chatgpt.unavailable.body": "OpenAI ने इस खाते को Heed के साथ ChatGPT साइन इन इस्तेमाल करने नहीं दिया। इसके बजाय API कुंजी इस्तेमाल करें, या बाद में फिर से कोशिश करें।",
+  "models.ai.reason.refused": "कुंजी अस्वीकार कर दी गई। ठीक करने के लिए कुंजी बदलें",
+  "models.ai.reason.limited": "प्रोवाइडर अनुरोध सीमित कर रहा है; Heed अपने-आप फिर कोशिश करता है",
+  "models.ai.reason.unreachable": "प्रोवाइडर ने जवाब नहीं दिया",
+  "models.ai.reason.other": "प्रोवाइडर ने एक त्रुटि लौटाई"
 }

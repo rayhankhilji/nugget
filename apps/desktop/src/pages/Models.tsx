@@ -324,6 +324,15 @@ export function SearchUpgrade() {
  * Sign in with ChatGPT when Heed runs on this computer, and every provider with a key, each with
  * whether it works, its model and one action. Green means healthy and nothing else.
  */
+/** Why a saved key isn't working, from the daemon's English error, as plain words. */
+export function keyFailure(error: string | null): MessageKey {
+  const e = (error ?? "").toLowerCase();
+  if (/401|403|unauthori[sz]ed|invalid|incorrect|refused|forbidden|api key/.test(e)) return "models.ai.reason.refused";
+  if (/429|rate|limit|quota/.test(e)) return "models.ai.reason.limited";
+  if (/timeout|timed out|connect|unreachable|dns|network|resolve/.test(e)) return "models.ai.reason.unreachable";
+  return "models.ai.reason.other";
+}
+
 export function AiProviderStatus() {
   const t = useT();
   const titleId = useId();
@@ -356,7 +365,7 @@ export function AiProviderStatus() {
             <span>
               <span className="provider-name">{t(kindLabel(p.kind, p.base_url))}</span>
               <span className="provider-detail">
-                {p.available ? t("models.ai.working", { name: p.id }) : t("models.ai.notWorking", { name: p.id })}
+                {p.available ? t("models.ai.working") : t("models.ai.notWorking", { reason: t(keyFailure(p.error)) })}
               </span>
             </span>
             <span className="provider-model" dir="ltr">

@@ -2614,8 +2614,12 @@
   "chatgpt.error.other": "O login no ChatGPT não funcionou. Tente de novo.",
   "models.ai.title": "Sua IA",
   "models.ai.hint": "O que o Heed pode usar para responder e escrever, e se está funcionando.",
-  "models.ai.working": "{name}: funcionando",
-  "models.ai.notWorking": "{name}: não está funcionando (veja Seus provedores abaixo)",
+  "models.ai.working": "Funcionando",
+  "models.ai.notWorking": "Não está funcionando: {reason}.",
   "chatgpt.unavailable.title": "O login com o ChatGPT ainda não está disponível para esta conta",
-  "chatgpt.unavailable.body": "A OpenAI não permitiu que esta conta use o login com o ChatGPT no Heed. Use uma chave de API ou tente de novo mais tarde."
+  "chatgpt.unavailable.body": "A OpenAI não permitiu que esta conta use o login com o ChatGPT no Heed. Use uma chave de API ou tente de novo mais tarde.",
+  "models.ai.reason.refused": "a chave foi recusada. Substitua a chave para corrigir",
+  "models.ai.reason.limited": "o provedor está limitando as solicitações; o Heed tenta de novo sozinho",
+  "models.ai.reason.unreachable": "o provedor não respondeu",
+  "models.ai.reason.other": "o provedor retornou um erro"
 }
