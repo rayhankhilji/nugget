@@ -4,7 +4,7 @@ import AppIcon from "../components/AppIcon.astro";
 import BriefCard from "../components/cards/BriefCard.astro";
 import ApprovalCard from "../components/cards/ApprovalCard.astro";
 import GhostCard from "../components/cards/GhostCard.astro";
-import AgentProgress from "../components/cards/AgentProgress.astro";
+import StepCard from "../components/cards/StepCard.astro";
 import WeekStats from "../components/WeekStats.astro";
 import { FAQ } from "../lib/faq";
 import { loadPlans } from "../lib/plans";
@@ -41,7 +41,7 @@ const faqLd = {
   <section class="hero" aria-labelledby="hero-h">
     <div class="sky" aria-hidden="true" data-sky><div class="drift"></div></div>
     <div class="wrap hero-copy">
-      <p class="kicker">Heed for Mac · {trial} days free</p>
+      <p class="kicker">Heed for Mac · {trial}-day free trial</p>
       <h1 id="hero-h">Everything that needs you.<br /><em>Nothing that doesn't.</em></h1>
       <p class="lede">
         Heed reads your mail, calendar, docs and chats. It tells you what needs you, answers with sources and writes
@@ -113,20 +113,57 @@ const faqLd = {
     </div>
   </section>
 
-  <!-- How it works -->
+  <!-- How it works: three cream cards, each in the agent-progress pattern -->
   <section id="how" class="section how dots-bg" aria-labelledby="how-h">
-    <div class="wrap how-in">
-      <div class="how-copy">
+    <div class="wrap">
+      <div class="section-head center">
         <p class="eyebrow">How it works</p>
         <h2 id="how-h">It does the legwork.<br />You make the calls.</h2>
-        <ol class="how-steps">
-          <li><b>Connect your apps.</b> One click each, through the app's own sign-in. No passwords.</li>
-          <li><b>Heed reads and learns.</b> It catches up on your history, then keeps in sync.</li>
-          <li><b>It drafts and asks.</b> Replies, event changes and prep notes, ready for you to check.</li>
-          <li><b>You approve.</b> Nothing leaves your account until you do, and every action is logged.</li>
-        </ol>
       </div>
-      <div class="how-card" data-reveal><AgentProgress /></div>
+      <ol class="how-cards">
+        <li data-reveal style="--i:0">
+          <p class="how-n"><span>01</span> Connect your apps</p>
+          <StepCard
+            title="Connecting"
+            meta="2 of 4"
+            steps={[
+              { label: "Gmail", icon: "gmail", state: "done" },
+              { label: "Google Calendar", icon: "googlecalendar", state: "done" },
+              { label: "Google Drive", icon: "googledrive", state: "current" },
+              { label: "Notion", icon: "notion", state: "pending" },
+            ]}
+          />
+          <p class="how-p">One click each, through the app's own sign-in. Heed never sees your passwords.</p>
+        </li>
+        <li data-reveal style="--i:1">
+          <p class="how-n"><span>02</span> Heed reads and learns</p>
+          <StepCard
+            title="Catching up"
+            meta="12,408 items"
+            steps={[
+              { label: "Read 12 months of mail", detail: "9,862 threads", state: "done" },
+              { label: "Learned who matters", detail: "38 regular contacts", state: "done" },
+              { label: "Mapping projects and deadlines", detail: "Driftwood, Moorland, Q4 board", state: "current" },
+            ]}
+          />
+          <p class="how-p">It catches up on your history, then stays in sync as new mail, events and docs arrive.</p>
+        </li>
+        <li data-reveal style="--i:2">
+          <p class="how-n"><span>03</span> It drafts, you approve</p>
+          <StepCard
+            title="Reply to Margaret"
+            meta="Needs you"
+            steps={[
+              { label: "Found her question about Thursday", state: "done" },
+              { label: "Checked your calendar", detail: "Free from 14:00", state: "done" },
+              { label: "Drafted a reply", state: "done" },
+              { label: "Waiting for your approval", state: "current" },
+            ]}
+            actions={[{ label: "Pause" }, { label: "View draft", primary: true }]}
+          />
+          <p class="how-p">Nothing leaves your account until you approve it, and every action is logged.</p>
+        </li>
+      </ol>
     </div>
   </section>
 
@@ -178,7 +215,7 @@ const faqLd = {
     <div class="wrap teaser-in">
       <div>
         <p class="eyebrow">Pricing</p>
-        <h2 id="teaser-h">Two plans.<br />{trial} days free.</h2>
+        <h2 id="teaser-h">Two plans.<br />A {trial}-day free trial.</h2>
         <p class="muted">A card is required to start, and you can cancel before day {trial} without being charged. There's no free plan.</p>
         <a class="btn btn-secondary" href="/pricing">Compare plans</a>
       </div>
@@ -188,7 +225,7 @@ const faqLd = {
             <a class:list={["mini-card", { hl: p.highlight }]} href={`/checkout?plan=${p.id}&interval=month`} data-reveal style={`--i:${i}`}>
               <span class="mini-name">{p.name}</span>
               <span class="mini-price">
-                <span class="display">£{p.monthly_gbp}</span>
+                <span class="amt">£{p.monthly_gbp}</span>
                 <small>/ month</small>
               </span>
               <span class="mini-sub">or £{p.annual_gbp} a year · {p.features[0]}</span>
@@ -470,37 +507,43 @@ const faqLd = {
   .how {
     border-block: 1px solid var(--line);
   }
-  .how-in {
+  .how-cards {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: clamp(32px, 6vw, 80px);
-    align-items: center;
-  }
-  .how-copy {
-    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 20px;
+    align-items: start;
   }
-  .how-copy h2 {
-    font-size: clamp(36px, 5vw, 60px);
-  }
-  .how-steps {
-    margin: 8px 0 0;
-    padding-left: 20px;
+  .how-cards > li {
     display: grid;
+    gap: 14px;
+    padding: 20px;
+    border-radius: var(--heed-radius-xl);
+    background: var(--surface-2);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  .how-n {
+    display: flex;
+    align-items: baseline;
     gap: 10px;
-    color: var(--text-2);
+    font-family: var(--display);
+    font-variation-settings: var(--heed-display-settings);
+    font-weight: var(--heed-display-weight);
+    font-size: 28px;
+    letter-spacing: var(--heed-display-tracking);
+    line-height: 1.1;
   }
-  .how-steps b {
-    color: var(--text);
-    font-weight: 560;
-  }
-  .how-steps li::marker {
+  .how-n span {
     font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 0;
     color: var(--text-3);
   }
-  .how-card {
-    display: flex;
-    justify-content: center;
+  .how-p {
+    color: var(--text-2);
+    font-size: 15px;
   }
 
   /* Privacy */
@@ -613,14 +656,16 @@ const faqLd = {
     box-shadow: var(--shadow-3);
   }
   .mini-card.hl {
-    background: var(--band);
-    color: #fff;
+    background: #0b0b1a;
+    color: #f3f1ec;
   }
   .mini-name {
     font-weight: 600;
   }
-  .mini-price .display {
-    font-size: 56px;
+  .mini-price .amt {
+    font-family: var(--mono);
+    font-size: 48px;
+    letter-spacing: -0.05em;
     line-height: 1;
   }
   .mini-price small {
@@ -633,7 +678,7 @@ const faqLd = {
     color: var(--text-2);
   }
   .hl .mini-sub {
-    color: rgb(255 255 255 / 0.88);
+    color: #b9b6c8;
   }
   .mini-go {
     margin-top: 6px;
@@ -642,7 +687,7 @@ const faqLd = {
     color: var(--text);
   }
   .hl .mini-go {
-    color: #fff;
+    color: #f3f1ec;
   }
 
   /* FAQ */
@@ -718,7 +763,11 @@ const faqLd = {
     .facts {
       grid-template-columns: 1fr 1fr;
     }
-    .how-in,
+    .how-cards {
+      grid-template-columns: 1fr;
+      max-width: 520px;
+      margin-inline: auto;
+    }
     .teaser-in,
     .faq-in {
       grid-template-columns: 1fr;

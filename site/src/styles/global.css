@@ -491,3 +491,12 @@ html:not(.js) [data-reveal] {
     color: var(--text);
     text-underline-offset: 3px;
   }
+
+.section-head.center {
+  margin-inline: auto;
+  text-align: center;
+  justify-items: center;
+}
+.section-head p.eyebrow {
+  font-size: 12px;
+}

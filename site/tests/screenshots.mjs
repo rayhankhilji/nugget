@@ -55,7 +55,7 @@ for (const v of VIEWS) {
       const full = r !== "/legal/privacy" && r !== "/legal/terms";
       const png = await page.screenshot({ fullPage: full });
       const file = new URL(`${name}.webp`, OUT);
-      await sharp(png).resize({ width: r === "/" && v.name === "desktop" ? 1040 : v.out }).webp({ quality: r === "/" ? 46 : v.name === "mobile" ? 62 : 70 }).toFile(file.pathname);
+      await sharp(png).resize({ width: r === "/" && v.name === "desktop" ? 1040 : v.out }).webp({ quality: r === "/" ? 40 : v.name === "mobile" ? 62 : 70 }).toFile(file.pathname);
       console.log(name);
     }
     await anon.close();

@@ -28,7 +28,7 @@ the Heed cloud API (`crates/nugget-cloud`) from the browser.
 
 | Route | What it does |
 | --- | --- |
-| `/` | A Fraunces hero over a drifting dithered sky, with floating product cards: the brief, ghost text in an email, and a Needs-you approval. Then the app logos; an ultramarine feature band with three features; "What Heed did for you this week" with dotted charts (labelled as an example week); how it works, as an agent-progress card; privacy in plain English; a pricing teaser; the FAQ; and a footer with the engraved landscape. There are no testimonials, on purpose. |
+| `/` | A Fraunces hero over a drifting dithered sky, with floating product cards: the brief, ghost text in an email, and a Needs-you approval. Then the app logos; an ultramarine feature band with three features; "What Heed did for you this week" with dotted charts (labelled as an example week); how it works, as three cream agent-progress cards; privacy in plain English; a pricing teaser; the FAQ; a footer with the engraved landscape and an oversized wordmark. There are no testimonials, on purpose. |
 | `/pricing` | The plans with a monthly/annual toggle (CSS only, via `:has()`), and a comparison table. Both are rendered at build time from `GET {CLOUD_URL}/v1/billing/plans`. |
 | `/download` | The macOS builds, from env vars. It leads with the Intel build when the browser reports x86. Windows and Linux show as "Coming soon". |
 | `/signin`, `/signup` | Supabase magic link and Google OAuth. `?next=/path` is kept, and only same-site paths are allowed. |

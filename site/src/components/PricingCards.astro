@@ -147,37 +147,40 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     background: var(--surface);
     box-shadow: var(--shadow-2), var(--hi);
   }
-  /* The most capable plan sits in the signal field. */
+  /* The most capable plan is the ink-blue card. */
   .plan.hl {
-    background: var(--band);
-    color: #fff;
-    box-shadow: 0 30px 60px -28px rgb(7 7 152 / 0.55);
+    background: #0b0b1a;
+    background-image: radial-gradient(circle at 1px 1px, rgb(233 236 255 / 0.08) 1px, transparent 1.6px);
+    background-size: 14px 14px;
+    color: #f3f1ec;
+    box-shadow:
+      0 0 0 1px rgb(233 236 255 / 0.1),
+      0 30px 60px -28px rgb(7 7 152 / 0.6);
   }
   .hl .pitch,
   .hl .per,
   .hl .sub {
-    color: rgb(255 255 255 / 0.86);
+    color: #b9b6c8;
   }
   .hl ul {
     border-top-color: rgb(255 255 255 / 0.25);
   }
   .hl li svg {
-    color: #fff;
+    color: #8a97ff;
   }
   .hl .badge {
-    color: #fff;
-    background: rgb(255 255 255 / 0.16);
+    color: #f3f1ec;
+    background: #1d2050;
   }
   .hl .name .dot {
-    background: #fff;
+    background: #5a6cff;
   }
   .hl .btn-primary {
-    background: #f6f3ec;
-    color: #14110f;
-    box-shadow: 0 8px 20px -10px rgb(0 0 0 / 0.4);
+    background: #4a5cff;
+    color: #fff;
   }
   .hl .btn-primary:hover {
-    background: #fff;
+    background: #5a6cff;
   }
   .plan-top {
     display: flex;
@@ -218,11 +221,11 @@ const gbp = (n: number) => `£${Number.isInteger(n) ? n : n.toFixed(2)}`;
     margin: 0;
   }
   .amt {
-    font-family: var(--display);
-    font-variation-settings: var(--heed-display-settings);
-    font-size: 72px;
-    font-weight: 320;
-    letter-spacing: -0.03em;
+    font-family: var(--mono);
+    font-size: 56px;
+    font-weight: 400;
+    letter-spacing: -0.05em;
+    font-variant-numeric: tabular-nums;
     line-height: 1;
   }
   .per {

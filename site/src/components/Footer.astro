@@ -1,5 +1,7 @@
 ---
 import Logo from "./Logo.astro";
+import wordSvg from "../../public/brand/heed-wordmark-mono.svg?raw";
+const bigWord = wordSvg.replace(/\srole="img"/, "").replace(/\saria-label="[^"]*"/, ' aria-hidden="true"');
 interface Props {
   minimal?: boolean;
 }
@@ -39,7 +41,7 @@ const cols = [
       <div class="horizon">
         <div class="wrap horizon-copy">
           <p class="h-line">Let Heed keep watch.</p>
-          <p class="h-sub">Fourteen days free. Cancel in two clicks if it isn't for you.</p>
+          <p class="h-sub">14-day free trial. A card is needed, and you can cancel any time before you're charged.</p>
           <div class="h-cta">
             <a class="btn btn-primary btn-lg" href="/pricing">Start free trial</a>
             <a class="btn btn-secondary btn-lg" href="/download">Download for Mac</a>
@@ -80,6 +82,7 @@ const cols = [
         <button type="button" role="radio" data-theme-set="dark" aria-checked="false">Dark</button>
       </div>
     </div>
+    {!minimal && <div class="giant" set:html={bigWord} />}
   </div>
 </footer>
 
@@ -217,6 +220,18 @@ const cols = [
   .bottom:first-child {
     border-top: 0;
     padding-top: 0;
+  }
+  /* An oversized wordmark across the full width, cut by the page edge. */
+  .giant {
+    margin-top: 40px;
+    margin-bottom: -40px;
+    color: var(--text);
+    line-height: 0;
+  }
+  .giant :global(svg) {
+    display: block;
+    width: 100%;
+    height: auto;
   }
   .theme {
     display: inline-flex;
