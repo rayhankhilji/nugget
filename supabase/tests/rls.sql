@@ -184,3 +184,23 @@ do $$ begin
   assert (select count(*) from public.billing_customers) = 0, 'customers cascade';
 end $$;
 select 'rls.sql: all assertions passed' as result;
+
+-- Nothing in nugget_private is executable by the API roles.
+do $$ begin
+  assert not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+                  unnest(array['anon', 'authenticated']) r
+    where n.nspname = 'nugget_private' and has_function_privilege(r, p.oid, 'execute')
+  ), 'nugget_private functions are private';
+  assert not exists (
+    select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where p.prosecdef and n.nspname in ('public', 'nugget_private')
+      and not exists (select 1 from unnest(p.proconfig) c where c like 'search_path=%')
+  ), 'definer functions pin search_path';
+end $$;
+-- A new auth user still gets a profile after the revoke.
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000c', 'c@example.com');
+do $$ begin
+  assert exists (select 1 from public.profiles where user_id = '00000000-0000-0000-0000-00000000000c'), 'trigger still works';
+end $$;
+select 'rls.sql: hardening assertions passed' as result;

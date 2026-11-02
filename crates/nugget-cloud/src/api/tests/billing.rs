@@ -457,3 +457,52 @@ async fn return_page_hands_back_to_the_app() {
         String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
     assert!(html.contains("nugget://billing/done"));
 }
+
+#[tokio::test]
+async fn account_deletion_cancels_billing_first_and_aborts_on_failure() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    let u = add_user(&h.pool).await;
+    let (s, _) = call(
+        &h.app,
+        "POST",
+        "/v1/billing/checkout",
+        Some(u),
+        Some(json!({"plan": "heed", "interval": "month"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let customer = h.stripe.customers.lock().unwrap()[0].clone();
+    let (_, ex) = call(&h.app, "GET", "/v1/export", Some(u), None).await;
+    assert_eq!(
+        ex["billing_customers"][0]["stripe_customer_id"],
+        customer.as_str()
+    );
+
+    // Stripe fails: nothing is deleted, and the provider's text does not leak.
+    h.stripe
+        .fail_delete
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (s, v) = call(&h.app, "DELETE", "/v1/me", Some(u), None).await;
+    assert_eq!(
+        (s, v["error"].as_str()),
+        (StatusCode::BAD_GATEWAY, Some("billing_error"))
+    );
+    assert!(!v.to_string().contains("secret detail"));
+    assert!(
+        h.auth.deleted.lock().unwrap().is_empty(),
+        "auth user kept for a retry"
+    );
+
+    h.stripe
+        .fail_delete
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let (s, _) = call(&h.app, "DELETE", "/v1/me", Some(u), None).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    assert_eq!(
+        h.stripe.deleted_customers.lock().unwrap().as_slice(),
+        &[customer]
+    );
+    assert_eq!(h.auth.deleted.lock().unwrap().as_slice(), &[u]);
+}

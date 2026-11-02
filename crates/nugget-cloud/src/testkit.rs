@@ -310,6 +310,8 @@ pub struct FakeStripe {
     pub checkouts: Mutex<Vec<(String, String, Option<u32>)>>,
     pub customers: Mutex<Vec<String>>,
     pub fetches: Mutex<u32>,
+    pub deleted_customers: Mutex<Vec<String>>,
+    pub fail_delete: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -351,6 +353,15 @@ impl crate::stripe::Stripe for FakeStripe {
             .get(id)
             .cloned()
             .ok_or_else(|| crate::stripe::StripeError::Http("no such subscription".into()))
+    }
+    async fn delete_customer(&self, id: &str) -> Result<(), crate::stripe::StripeError> {
+        if self.fail_delete.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(crate::stripe::StripeError::Http(
+                "stripe down (secret detail)".into(),
+            ));
+        }
+        self.deleted_customers.lock().unwrap().push(id.into());
+        Ok(())
     }
 }
 

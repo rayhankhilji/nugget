@@ -268,6 +268,6 @@ async fn apply_subscription(
         cancel_at_period_end: sub.cancel_at_period_end,
     };
     s.db.upsert_subscription(owner, &row, &sub.price_id).await?;
-    tracing::info!(%owner, plan, status = %sub.status, "subscription stored");
+    tracing::info!(plan, status = %sub.status, "subscription stored");
     Ok(())
 }

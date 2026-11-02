@@ -278,7 +278,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/billing/plans", get(billing::plans))
         .route("/v1/billing/checkout", post(billing::checkout))
         .route("/v1/billing/portal", post(billing::portal))
-        .route("/v1/webhooks/stripe", post(billing::stripe_webhook))
+        .route(
+            "/v1/webhooks/stripe",
+            // Stripe events can exceed a small default body limit.
+            post(billing::stripe_webhook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
         .route("/billing/done", get(billing::done))
         .with_state(state)
 }
@@ -308,6 +312,12 @@ async fn delete_me(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<St
         for acc in c.accounts(&u.id.to_string()).await? {
             c.delete_account(&acc.id).await?;
         }
+    }
+    // Then Stripe: deleting the customer cancels any subscription at once (no further charges).
+    // Invoices stay in Stripe for HMRC; our billing rows go with the user. Abort on failure.
+    if let Some(customer) = s.db.customer(u.id).await? {
+        let stripe = s.stripe.as_ref().ok_or(StripeError::NotConfigured)?;
+        stripe.delete_customer(&customer).await?;
     }
     s.auth.delete_user(u.id).await?;
     Ok(StatusCode::NO_CONTENT)
