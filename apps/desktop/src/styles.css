@@ -4419,3 +4419,354 @@ section[aria-labelledby="cloud-ask"] form input {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
+
+/* Toasts: one ink pill, bottom centre, rising in; ⌘Z runs its Undo. */
+.toaster {
+  position: fixed;
+  z-index: 50;
+  inset-block-end: var(--space-5);
+  inset-inline: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: min(560px, calc(100vw - 48px));
+  padding: 8px 8px 8px 16px;
+  border-radius: 999px;
+  background: var(--heed-ink);
+  color: var(--heed-canvas);
+  box-shadow: var(--shadow-3);
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+  animation: toast-in var(--dur-2) var(--ease-out);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.toast-message {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast-action,
+.toast-close {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action {
+  padding: 4px 10px;
+  color: color-mix(in srgb, var(--heed-signal) 45%, var(--heed-canvas));
+}
+
+.toast-action kbd {
+  background: rgb(255 255 255 / 0.12);
+  border-color: transparent;
+  color: inherit;
+}
+
+.toast-close {
+  width: 24px;
+  height: 24px;
+  justify-content: center;
+  opacity: 0.7;
+}
+
+.toast-action:hover,
+.toast-close:hover {
+  background: rgb(255 255 255 / 0.1);
+  opacity: 1;
+}
+
+.toast-action:focus-visible,
+.toast-close:focus-visible {
+  outline: 2px solid var(--heed-signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toast {
+    background: var(--heed-ink);
+    color: #0b0b1a;
+  }
+
+  .toast-action {
+    color: var(--heed-signal-deep);
+  }
+
+  .toast-action kbd,
+  .toast-action:hover,
+  .toast-close:hover {
+    background: rgb(0 0 0 / 0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: fade-in var(--dur-1) linear;
+  }
+}
+
+/* The approval queue as a split: one line per action, the full preview beside it. */
+.action-split {
+  margin-block-end: var(--space-5);
+}
+
+.action-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-2);
+  align-items: center;
+}
+
+.action-row .app-logo {
+  grid-row: span 2;
+}
+
+.action-footer {
+  position: sticky;
+  inset-block-end: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-block: var(--space-3) 0;
+  border-block-start: 1px solid var(--hairline);
+  background: var(--surface);
+}
+
+.action-footer .keycap + .btn {
+  margin-inline-start: var(--space-3);
+}
+
+/* The trial: a quiet sidebar row, then a Home card in the last 3 days. */
+.trial-row {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.trial-dot {
+  width: 7px;
+  height: 7px;
+  margin-inline: 4px 2px;
+  border-radius: 50%;
+  background: var(--heed-signal);
+}
+
+.trial-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-block-end: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-large);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--heed-signal) 18%, transparent);
+}
+
+.trial-card h2 {
+  margin: 0 0 2px;
+  font-size: var(--fs-lg);
+}
+
+.trial-card p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* Connections: find an app, and show all, connected or available. */
+.cloud-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-block-end: var(--space-4);
+}
+
+.cloud-filter input {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.cloud-conn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The sidebar sync pill: what is importing, with a thin sweep. */
+.sync-pill {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  margin-block-end: var(--space-2);
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: start;
+  cursor: pointer;
+}
+
+.sync-pill:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.sync-pill-text {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sync-pill-count {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.sync-pill-bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--heed-signal), transparent) 0 0 / 40% 100% no-repeat, color-mix(in srgb, var(--heed-signal) 14%, transparent);
+  animation: meter-sweep 1.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-pill-bar {
+    animation: none;
+    background: color-mix(in srgb, var(--heed-signal) 30%, transparent);
+  }
+}
+
+/* Citation chips name the source app; the "N sources" stack opens the list. */
+.cite.cite-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 3px;
+  font-family: var(--font);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.cite-glyph,
+.sources-stack-glyphs > span {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--logo-tile);
+  box-shadow: inset 0 0 0 1px var(--heed-line);
+  color: var(--logo-ink);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.sources-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block: var(--space-3) var(--space-2);
+  padding: 4px 12px 4px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--heed-ink) 6%, transparent);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.sources-stack:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.sources-stack:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.sources-stack-glyphs {
+  display: inline-flex;
+}
+
+.sources-stack-glyphs > span {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 1px var(--heed-line);
+}
+
+.sources-stack-glyphs > span + span {
+  margin-inline-start: -6px;
+}
+
+/* ⌘K: sections with a small heading, the active row says "Open ↵", filters as chips. */
+.palette-section-head {
+  padding: 10px 14px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.palette-source {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.palette-open {
+  font-size: var(--fs-xs);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+
+.palette-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px 0;
+}
+
+.palette-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* `hidden` wins over the display these lists set for themselves. */
+.citations[hidden],
+section[hidden] {
+  display: none;
+}

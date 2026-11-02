@@ -464,9 +464,10 @@ function PermissionList({ os }: { os: Exclude<Os, "other"> }) {
  * that is off (Full Disk Access only once a Messages source is set up). Looks again when the user
  * comes back from System Settings. Nothing is shown when the shell can't say (a browser preview).
  */
-export function MacPermissionStatus() {
+export function MacPermissionStatus({ onGranted }: { onGranted?: () => void } = {}) {
   const t = useT();
   const [status, setStatus] = useState<DoubleTapStatus>();
+  const wasMissing = useRef(false);
   const [tick, setTick] = useState(0);
   const recheck = useCallback(() => setTick((n) => n + 1), []);
   useEffect(() => {
@@ -484,6 +485,15 @@ export function MacPermissionStatus() {
   const needFda = useNeedsFullDiskAccess();
   const panes = missingPanes(status, needFda);
   useRecheckOnReturn(recheck, panes.length > 0);
+  // The step polls for the grant; once what was missing is on, it moves on by itself.
+  useEffect(() => {
+    if (status?.platform !== "macos") return;
+    if (panes.length > 0) wasMissing.current = true;
+    else if (wasMissing.current) {
+      wasMissing.current = false;
+      onGranted?.();
+    }
+  }, [status, panes.length, onGranted]);
   if (status?.platform !== "macos") return null;
   return (
     <>
@@ -503,7 +513,7 @@ export function MacPermissionStatus() {
   );
 }
 
-export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
+export function PermissionsStep({ headingRef, dispatch }: StepProps & { os?: Os }) {
   const t = useT();
   const detected = detectOs();
   const mine = detected === "other" ? null : detected;
@@ -516,7 +526,7 @@ export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
         <section className="ob-card" aria-labelledby="ob-perm-mine">
           <h2 id="ob-perm-mine">{t("onboarding.perm.yourSystem", { os: t(OS_LABEL[mine]) })}</h2>
           <PermissionList os={mine} />
-          {mine === "macos" && <MacPermissionStatus />}
+          {mine === "macos" && <MacPermissionStatus onGranted={() => dispatch({ type: "next" })} />}
         </section>
       )}
       <details className="ob-details" open={!mine}>

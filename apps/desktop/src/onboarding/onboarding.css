@@ -126,8 +126,8 @@
 
 .ob-seg-bar {
   display: block;
-  inline-size: var(--space-5);
-  block-size: calc(var(--space-1) * 0.75);
+  inline-size: var(--space-6);
+  block-size: 2px;
   border-radius: var(--space-1);
   background: var(--border);
   transition: background-color var(--dur-2, 180ms) var(--ease-out, ease-out);

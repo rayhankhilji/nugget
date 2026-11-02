@@ -13,8 +13,9 @@ to Heed Cloud. Regenerate them after a UI change:
 | File | What it shows |
 | --- | --- |
 | `home-light.png`, `home-dark.png` | Home: greeting, ask box, suggested questions and the written morning brief with its sources |
-| `needs-you.png` | Needs you: the card list above the approval queue (an email reply and a calendar invite, each as an agent-progress card) |
+| `needs-you.png` | Needs you: the approval queue as a split (one line per action; the email exactly as it will send, with Approve ⌘↵ and Reject ⌫), above the cards |
 | `search.png` | Search across the connected apps, with source filters |
+| `search-cmdk.png` | ⌘K over Home: live results in sections (People, Docs, Mail, Messages), "Open ↵" on the active row, and the key legend |
 | `connections.png` | Heed Cloud connections: four connected apps, Slack still importing, and the app gallery |
 | `account.png` | Account: Heed Pro on trial, the smart-ask usage meter and Upgrade |
 | `welcome.png` | First run: sign in to Heed Cloud over the sky and dither backdrop |

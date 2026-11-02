@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { act } from "react";
 import type { BriefView, CardView } from "../api";
 import type { CloudAction, CloudBrief, CloudSearchResponse, CloudSession } from "../cloud";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { HomePage, NeedsPage } from "./Today";
 import { CloudSearch } from "./CloudSearch";
 import { AccountPage } from "./Account";
+import { Toaster } from "../components/Toast";
+import { SyncPill } from "../components/SyncPill";
+import { CloudPage } from "./Cloud";
 import { webUrl } from "../components/CitedProse";
+import { flushApprovals } from "./today/approvals";
 
 beforeEach(installDomShims);
 afterEach(cleanup);
@@ -74,7 +79,8 @@ describe("signed in to Heed Cloud", () => {
     expect(calls).toContain("cloud_cards");
     expect(calls).toContain("cloud_brief");
     expect(container.textContent).toContain("Margaret is waiting on a time for the Moorland sync");
-    expect(container.querySelector("button.cite")?.getAttribute("aria-label")).toBe("Source 1");
+    expect(container.querySelector("button.cite")?.getAttribute("aria-label")).toBe("Gmail, source 1");
+    expect(container.querySelector(".sources-stack")?.textContent).toContain("1 source");
     expect(container.querySelector(".citations")?.textContent).toContain("Moorland sync");
   });
 
@@ -113,9 +119,86 @@ describe("signed in to Heed Cloud", () => {
     expect(queue.textContent).toContain("Thursday works.");
     expect(approved).toEqual([]);
     await click(byText(queue as HTMLElement, "button", "Approve"));
+    await flush(2);
+    // Held for Undo: gone from the queue, a "Sent" toast, and nothing has reached the cloud yet.
+    expect(container.querySelector(".action-queue")).toBeNull();
+    expect(approved).toEqual([]);
+    flushApprovals();
     await flush(5);
     expect(approved).toEqual([{ id: "a1", digest: "sha-abc" }]);
-    expect(container.querySelector(".action-queue")).toBeNull();
+  });
+
+  it("Undo during the hold stops the approval from being sent", async () => {
+    const approved: unknown[] = [];
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_cards: { cards: [], last_refresh: null },
+      cloud_brief: null,
+      cloud_apps: [],
+      sources_list: [],
+      proactive_metrics: { total: 0, by_state: {}, shown: 0, accepted: 0, dismissed: 0, snoozed: 0, precision: null, by_kind: {}, dismiss_reasons: {}, model_updates: 0 },
+      cloud_actions_list: () => (approved.length ? [] : [action]),
+      cloud_action_approve: (a: unknown) => (approved.push(a), { ...action, status: "succeeded" }),
+    });
+    const { container } = await render(
+      <>
+        <NeedsPage />
+        <Toaster />
+      </>,
+    );
+    await flush(5);
+    await click(byText(container.querySelector(".action-queue") as HTMLElement, "button", "Approve"));
+    await flush(2);
+    const toast = container.querySelector(".toast")!;
+    expect(toast.textContent).toContain("Sent: Reply to Margaret");
+    await click(toast.querySelector<HTMLButtonElement>(".toast-action"));
+    await flush(2);
+    flushApprovals();
+    await flush(3);
+    expect(approved).toEqual([]);
+    expect(container.querySelector(".toast")?.textContent).toContain("Nothing was sent");
+    expect(container.querySelector(".action-queue")?.textContent).toContain("Reply to Margaret");
+  });
+
+  it("Connections filters apps, offers a one-verb repair, and the sync pill shows imports", async () => {
+    const connects: unknown[] = [];
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_connections_list: {
+        connections: [
+          { id: "c1", toolkit: "gmail", status: "FAILED", last_synced_at: null, last_error: "Token expired" },
+          { id: "c2", toolkit: "slack", status: "ACTIVE", last_synced_at: null, last_error: null, syncing: true, items_synced: 1200 },
+        ],
+        available: [
+          { slug: "gmail", name: "Gmail", logo: null, connectable: true },
+          { slug: "slack", name: "Slack", logo: null, connectable: true },
+          { slug: "notion", name: "Notion", logo: null, connectable: true },
+          { slug: "outlook", name: "Outlook", logo: null, connectable: true },
+        ],
+      },
+      cloud_connect: (a: unknown) => (connects.push(a), null),
+    });
+    const { container } = await render(
+      <>
+        <CloudPage />
+        <SyncPill />
+      </>,
+    );
+    await flush(5);
+    await click(byText(container, "button", "Reconnect Gmail"));
+    expect(connects).toHaveLength(1);
+    expect(container.querySelector(".sync-pill")?.textContent).toContain("Importing Slack");
+    await click(byText(container, "button", "Connected"));
+    expect(container.querySelector<HTMLElement>('section[aria-labelledby="cloud-available"]')!.hidden).toBe(true);
+    await click(byText(container, "button", "All"));
+    const box = container.querySelector<HTMLInputElement>(".cloud-filter input")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(box, "out");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(container.querySelector(".cloud-apps")?.textContent).toContain("Outlook");
+    expect(container.querySelector(".cloud-apps")?.textContent).not.toContain("Notion");
   });
 
   it("Search runs against the cloud and only offers web links", async () => {
@@ -163,7 +246,18 @@ describe("signed in to Heed Cloud", () => {
     expect(deleted).toBe(0);
     const dialog = document.querySelector("dialog[open]")!;
     expect(dialog.textContent).toContain("This can't be undone");
-    await click(byText(dialog as HTMLElement, "button", "Delete account"));
+    const del = byText(dialog as HTMLElement, "button", "Delete account") as HTMLButtonElement;
+    // Keep is the primary action; Delete stays off until the email is typed.
+    expect(byText(dialog as HTMLElement, "button", "Keep my account")?.className).toContain("btn-primary");
+    expect(del.disabled).toBe(true);
+    const box = dialog.querySelector<HTMLInputElement>("#delete-email")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      setValue.call(box, "ME@example.com ");
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(del.disabled).toBe(false);
+    await click(del);
     await flush(3);
     expect(deleted).toBe(1);
   });

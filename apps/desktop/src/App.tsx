@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
-import { api, chatHistory, events, errorMessage, proactiveApi, proactiveEvents, type ConnectionInfo, type PageId, type StoredConversation } from "./api";
+import { api, chatHistory, events, errorMessage, isOpenableUrl, proactiveApi, proactiveEvents, type ConnectionInfo, type PageId, type StoredConversation } from "./api";
 import { useEvent } from "./hooks";
-import { requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
+import { requestChatAsk, requestChatOpen, requestNewChat, requestSearch, requestSearchState, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Wordmark } from "./components/Logo";
+import { Toaster } from "./components/Toast";
+import { TrialModal, TrialRow } from "./components/Trial";
+import { SyncPill } from "./components/SyncPill";
 import { Icon, type IconName } from "./components/Icon";
-import { cloudApi } from "./cloud";
+import { appName, cloudApi } from "./cloud";
 import { useCloudSignedIn } from "./cloudSignedIn";
 import { Offline } from "./components/Offline";
 import { RecoveryBanner } from "./components/BackupSettings";
@@ -94,6 +97,16 @@ const SETTINGS_GROUPS: readonly { id: string; label: MessageKey | null; pages: r
 ];
 
 const PAGE_KEY = "nugget.page";
+
+/** ⌘K sections for cloud search results, by item kind. */
+const PALETTE_KIND: Record<string, MessageKey> = {
+  mail: "palette.group.mail",
+  event: "palette.group.events",
+  message: "palette.group.messages",
+  doc: "palette.group.docs",
+  page: "palette.group.docs",
+  file: "palette.group.docs",
+};
 const RECENT_CHATS = 5;
 const PALETTE: Combo = { mod: true, key: "K" };
 
@@ -297,6 +310,54 @@ export function App() {
     return [...pages, ...actions, ...searches];
   }, [t, go, jump, saved, runSaved]);
 
+  const cloudSignedIn = useCloudSignedIn();
+  /** ⌘K live results: the cloud's search when signed in, else this computer's index. */
+  const liveSearch = useCallback(
+    async (q: string): Promise<PaletteItem[]> => {
+      const open = (url: string | null | undefined) => () => {
+        if (url && isOpenableUrl(url)) void api.openUrl(url).catch(() => {});
+        else {
+          requestSearch(q);
+          go("search");
+        }
+      };
+      if (cloudSignedIn) {
+        const r = await cloudApi.search({ q, limit: 20 });
+        const people: PaletteItem[] = r.facets.people.slice(0, 3).map((p) => ({
+          id: `person:${p.value}`,
+          label: p.value,
+          group: t("palette.group.people"),
+          run: () => {
+            requestSearch(`${q} ${p.value}`);
+            go("search");
+          },
+        }));
+        const items = r.results.map<PaletteItem>((x) => ({
+          id: `r:${x.item_id}`,
+          label: x.title || x.snippet.slice(0, 80),
+          group: t(PALETTE_KIND[x.kind] ?? "palette.group.results"),
+          source: x.source,
+          sourceName: appName(x.source),
+          author: x.author,
+          run: open(x.url),
+        }));
+        // People first, then results in the order of their sections' first appearance.
+        const order = [...new Set(items.map((i) => i.group))];
+        return [...people, ...order.flatMap((g) => items.filter((i) => i.group === g))];
+      }
+      const hits = await api.search(q, 12);
+      return hits.map((h, i) => ({
+        id: `h:${h.item.source}:${h.item.key}:${i}`,
+        label: h.title || h.snippet.slice(0, 80),
+        group: t("palette.group.results"),
+        source: h.item.source,
+        sourceName: h.item.source,
+        run: open(h.url),
+      }));
+    },
+    [cloudSignedIn, t, go],
+  );
+
   const searchItem = useCallback(
     (q: string): PaletteItem => ({
       id: "action:search",
@@ -464,6 +525,8 @@ export function App() {
           </nav>
         )}
         <div className="sidebar-foot">
+          <SyncPill />
+          <TrialRow />
           <AccountButton active={inSettings} onOpen={() => go(inSettings ? page : "account")} />
           <ConnectionPill conn={conn} />
         </div>
@@ -489,8 +552,21 @@ export function App() {
       </main>
       <DeepLinks pages={PAGE_IDS} go={jump} />
       <QuitPrompt />
-      {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
+      {palette && (
+        <CommandPalette
+          items={paletteItems}
+          queryItem={searchItem}
+          search={liveSearch}
+          onAsk={(q) => {
+            requestChatAsk(q);
+            go("chat");
+          }}
+          onClose={() => setPalette(false)}
+        />
+      )}
       {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
+      <Toaster />
+      <TrialModal />
     </div>
   );
 }

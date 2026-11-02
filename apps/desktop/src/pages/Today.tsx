@@ -39,6 +39,7 @@ import { BriefProse } from "./today/BriefProse";
 import { cloudApi, type CloudBrief } from "../cloud";
 import { useCloudSignedIn } from "../cloudSignedIn";
 import { HomeComposer } from "./today/HomeComposer";
+import { TrialCard } from "../components/Trial";
 import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
   SNOOZE_CHOICES,
@@ -224,6 +225,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
         <div className="page page-home">
           <PageHeader title={t(greetingKey(new Date(now).getHours()))} description={summary} actions={refreshButton} />
           <ErrorNote error={refreshError} />
+          {cloud && <TrialCard />}
           <HomeComposer suggestions={suggestions(t, now, meetings, visible)} />
           {disabled ? (
             <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
@@ -261,6 +263,7 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
               {t("today.inbox")}
               {list && visible.length > 0 && <span> · {formatNumber(visible.length)}</span>}
             </h2>
+            {cloud && <ActionQueue tick={actionsTick} onDone={setStatus} />}
             <ErrorNote error={cards.error} onRetry={cards.reload} />
             {cards.loading && !list && <Loading label={t("today.loading")} lines={3} />}
             {list &&
@@ -303,7 +306,6 @@ function TodayPage({ view }: { view: "home" | "needs" }) {
                 </ul>
               </div>
             )}
-            {cloud && <ActionQueue tick={actionsTick} onDone={setStatus} />}
           {!cloud &&
             metrics.data &&
               // A rate means something only once a card has been accepted or dismissed.

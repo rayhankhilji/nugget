@@ -17,18 +17,25 @@ export function webUrl(url: string | null | undefined): string | null {
 }
 
 /**
- * Cloud-written text with `[n]` citation chips, then its sources. A chip moves focus to its
- * source; a source with a web link opens it in the browser.
+ * Cloud-written text with citation chips, then its sources. A chip names the app its source came
+ * from ("Gmail"), or shows the bare number when the source names none. After the text, an
+ * "N sources" stack opens the list; a chip opens it at its source. A source with a web link opens
+ * in the browser.
  */
 export function CitedProse({ text, citations, sourcesHeading = true }: { text: string; citations: CloudCitation[]; sourcesHeading?: boolean }) {
   const t = useT();
   const prefix = useId();
   const opener = useOpener();
   const [focused, setFocused] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
   const valid = useMemo(() => new Set(citations.map((c) => c.n)), [citations]);
+  const byN = useMemo(() => new Map(citations.map((c) => [c.n, c])), [citations]);
+  const apps = useMemo(() => [...new Set(citations.map((c) => c.source).filter(Boolean))], [citations]);
   const cite = (n: number) => {
     setFocused(n);
-    document.getElementById(`${prefix}-${n}`)?.focus();
+    setOpen(true);
+    // After the list is shown.
+    requestAnimationFrame(() => document.getElementById(`${prefix}-${n}`)?.focus());
   };
   return (
     <div className="cited">
@@ -41,17 +48,23 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
               p.kind === "text" ? (
                 <span key={i}>{p.text}</span>
               ) : (
-                <button key={i} type="button" className="cite" onClick={() => cite(p.n)} aria-label={t("cloud.ask.citationLabel", { n: p.n })}>
-                  {p.n}
-                </button>
+                <CiteChip key={i} n={p.n} source={byN.get(p.n)?.source ?? null} onClick={() => cite(p.n)} />
               ),
             )}
           </p>
         ))}
       {citations.length > 0 && (
         <>
-          {sourcesHeading && <h3 className="cited-heading">{t("cloud.ask.sources")}</h3>}
-          <ol className="citations">
+          {sourcesHeading && <h3 className="visually-hidden">{t("cloud.ask.sources")}</h3>}
+          <button type="button" className="sources-stack" aria-expanded={open} aria-controls={`${prefix}-list`} onClick={() => setOpen((o) => !o)}>
+            <span className="sources-stack-glyphs" aria-hidden="true">
+              {apps.slice(0, 3).map((a) => (
+                <span key={a}>{appName(a).slice(0, 1)}</span>
+              ))}
+            </span>
+            {t("cite.sources", { count: citations.length })}
+          </button>
+          <ol className="citations" id={`${prefix}-list`} hidden={!open}>
             {citations.map((c) => {
               const title = c.title || t("cloud.ask.untitled");
               const url = webUrl(c.url);
@@ -84,5 +97,26 @@ export function CitedProse({ text, citations, sourcesHeading = true }: { text: s
         </>
       )}
     </div>
+  );
+}
+
+/** A citation chip: the source's app by name, or the bare number when there is none. */
+function CiteChip({ n, source, onClick }: { n: number; source: string | null; onClick: () => void }) {
+  const t = useT();
+  if (!source) {
+    return (
+      <button type="button" className="cite" onClick={onClick} aria-label={t("cloud.ask.citationLabel", { n })}>
+        {n}
+      </button>
+    );
+  }
+  const name = appName(source);
+  return (
+    <button type="button" className="cite cite-app" onClick={onClick} aria-label={t("cite.label", { name, n })}>
+      <span className="cite-glyph" aria-hidden="true">
+        {name.slice(0, 1)}
+      </span>
+      {name}
+    </button>
   );
 }

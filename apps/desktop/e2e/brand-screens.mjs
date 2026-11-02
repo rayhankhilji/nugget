@@ -44,13 +44,7 @@ const SHOTS = [
     name: "needs-you",
     theme: "light",
     page: "needs",
-    async ready(p) {
-      // The approval queue, scrolled up under the card list so the first approval shows whole.
-      const queue = p.locator(".action-queue");
-      await queue.locator(".action-item").first().waitFor();
-      await queue.evaluate((el) => el.scrollIntoView({ block: "start" }));
-      await p.locator("main").evaluate((m) => m.scrollBy(0, -260));
-    },
+    ready: (p) => p.locator(".action-queue .action-item").first().waitFor(),
   },
   {
     name: "search",
@@ -62,6 +56,20 @@ const SHOTS = [
       await box.press("Enter");
       await p.locator(".result").first().waitFor();
       await box.blur();
+    },
+  },
+  {
+    name: "search-cmdk",
+    theme: "light",
+    page: "today",
+    async ready(p) {
+      await p.locator(".brief-prose").first().waitFor();
+      await p.keyboard.press("Control+K");
+      const box = p.getByRole("combobox");
+      await box.fill("harbourline retainer");
+      await p.locator(".palette-section-head", { hasText: "Mail" }).waitFor();
+      await p.keyboard.press("ArrowDown");
+      await p.keyboard.press("ArrowDown");
     },
   },
   { name: "connections", theme: "light", page: "connections", ready: (p) => p.getByText("Slack").first().waitFor() },

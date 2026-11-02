@@ -66,6 +66,9 @@ function Connections() {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [synced, setSynced] = useState<CloudSyncResult[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [show, setShow] = useState<"all" | "connected" | "available">("all");
+  const matches = (name: string) => name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 
   const data = list.data;
   const nameOf = (slug: string) => data?.available.find((a) => a.slug === slug)?.name ?? appName(slug);
@@ -115,7 +118,26 @@ function Connections() {
 
   return (
     <>
-      <section aria-labelledby="cloud-connections">
+      {data && (
+        <div className="cloud-filter">
+          <input
+            type="search"
+            className="input"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("cloud.filter.search")}
+            aria-label={t("cloud.filter.search")}
+          />
+          <div className="segmented" role="group" aria-label={t("cloud.filter.label")}>
+            {(["all", "connected", "available"] as const).map((v) => (
+              <button key={v} type="button" aria-pressed={show === v} onClick={() => setShow(v)}>
+                {t(`cloud.filter.${v}`)}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <section aria-labelledby="cloud-connections" hidden={show === "available"}>
         <h2 id="cloud-connections">{t("cloud.connections.title")}</h2>
         <CloudErrorNote error={list.error} onRetry={list.reload} />
         <CloudErrorNote error={error} />
@@ -130,7 +152,9 @@ function Connections() {
           <ul className="cloud-conns">
             {data.connections.map((c) => {
               const active = isActive(c.status);
-              const app = data.available.find((a) => a.slug === c.toolkit) ?? { name: appName(c.toolkit), logo: null };
+              const app = data.available.find((a) => a.slug === c.toolkit) ?? { slug: c.toolkit, name: appName(c.toolkit), logo: null, connectable: true };
+              if (!matches(app.name)) return null;
+              const broken = !c.syncing && ((!active && c.status.toLowerCase() !== "initiated") || c.last_error != null);
               return (
                 <li key={c.id} className="card cloud-conn">
                   <div className="cloud-conn-head">
@@ -153,9 +177,16 @@ function Connections() {
                       {c.last_error}
                     </p>
                   )}
-                  <button type="button" className="btn btn-small btn-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: app.name })}>
-                    {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
-                  </button>
+                  <div className="cloud-conn-actions">
+                    {broken && (
+                      <button type="button" className="btn btn-small btn-primary" disabled={busy !== null} onClick={() => void connect(app)}>
+                        {busy === `connect:${app.slug}` ? <Spinner /> : t("cloud.reconnect", { name: app.name })}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-small btn-ghost" disabled={busy !== null} onClick={() => void disconnect(c)} aria-label={t("cloud.disconnectLabel", { name: app.name })}>
+                      {busy === `disconnect:${c.id}` ? <Spinner /> : t("cloud.disconnect")}
+                    </button>
+                  </div>
                 </li>
               );
             })}
@@ -183,10 +214,10 @@ function Connections() {
         )}
       </section>
       {data && (
-        <section aria-labelledby="cloud-available">
+        <section aria-labelledby="cloud-available" hidden={show === "connected"}>
           <h2 id="cloud-available">{t("cloud.available.title")}</h2>
           <ul className="cloud-apps">
-            {data.available.filter((a) => !connected.has(a.slug)).map((a) => (
+            {data.available.filter((a) => !connected.has(a.slug) && matches(a.name)).map((a) => (
               <li key={a.slug} className="cloud-app">
                 <AppLogo app={a} />
                 <span className="cloud-app-name">{a.name}</span>
