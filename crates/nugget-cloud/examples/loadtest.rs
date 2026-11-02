@@ -29,8 +29,9 @@ use nugget_cloud::auth::{AuthError, AuthProvider, AuthUser};
 use nugget_cloud::composio::{Account, Composio, ComposioError, Link, Toolkit};
 use nugget_cloud::db::{Db, PoolOptions, UsageKind};
 use nugget_cloud::gateway::{
-    Embedder, Gateway, GatewayError, Llm, LlmRequest, LlmResponse, Plan, Role, Tier,
+    Allowance, Embedder, Gateway, GatewayError, Llm, LlmRequest, LlmResponse, Role,
 };
+use nugget_cloud::plans::{Catalog, ModelTier};
 use nugget_cloud::ratelimit::Limits;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
@@ -599,6 +600,30 @@ struct Server {
     task: tokio::task::JoinHandle<()>,
 }
 
+/// The default plans with placeholder Stripe prices (billing is not exercised here).
+fn catalog() -> Catalog {
+    Catalog::parse(nugget_cloud::plans::DEFAULT_TOML, |k| {
+        k.starts_with("STRIPE_PRICE_").then(|| format!("price_{k}"))
+    })
+    .expect("plans")
+}
+
+/// The plan every load-test user subscribes to (the entry plan).
+const PLAN: &str = "heed";
+
+/// Active subscriptions for `users`, as a verified Stripe webhook would write them.
+async fn subscribe(admin: &Pg, users: &[Uuid]) {
+    admin
+        .execute(
+            "insert into public.subscriptions (id, user_id, plan, interval, status, stripe_price_id)
+             select 'sub_' || replace(u::text, '-', ''), u, $2, 'month', 'active', 'price_test'
+             from unnest($1::uuid[]) u",
+            &[&users, &PLAN],
+        )
+        .await
+        .unwrap();
+}
+
 async fn serve(kv: &str, pool: usize, fakes: &Fakes, embed: bool, limits: Limits) -> Server {
     let db = Db::connect_with(
         kv,
@@ -613,19 +638,15 @@ async fn serve(kv: &str, pool: usize, fakes: &Fakes, embed: bool, limits: Limits
         ("gmail".to_owned(), "ac_gmail".to_owned()),
         ("googlecalendar".to_owned(), "ac_cal".to_owned()),
     ]);
-    let state = Arc::new(
-        AppState::new(
-            db,
-            Arc::new(FakeAuth),
-            Some(fakes.composio.clone() as Arc<dyn Composio>),
-            fakes.gateway(embed),
-            auth_configs,
-            None,
-            "nugget://connections/callback".into(),
-        )
-        .with_limits(limits)
-        .with_client_ip_header(None),
+    let mut state = AppState::new(
+        db,
+        Arc::new(FakeAuth),
+        fakes.gateway(embed),
+        Arc::new(catalog()),
     );
+    state.composio = Some(fakes.composio.clone() as Arc<dyn Composio>);
+    state.auth_configs = auth_configs;
+    let state = Arc::new(state.with_limits(limits).with_client_ip_header(None));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
@@ -1024,8 +1045,9 @@ async fn gateway_overhead(s: &Server, fakes: &Fakes, users: &[Uuid], admin: &Pg)
     let mut parts: Vec<(&str, Lat)> = vec![
         ("month_cost_micros (quota check)", Lat::default()),
         ("record_usage (insert)", Lat::default()),
-        ("Gateway::complete, 1 caller", Lat::default()),
+        ("Gateway::choose + complete, 1 caller", Lat::default()),
     ];
+    let allowance = Allowance::from(catalog().get(PLAN).expect("plan"));
     for i in 0..300 {
         let u = users[i % users.len()];
         let t = Instant::now();
@@ -1037,9 +1059,8 @@ async fn gateway_overhead(s: &Server, fakes: &Fakes, users: &[Uuid], admin: &Pg)
             .unwrap();
         parts[1].1.us.push(t.elapsed().as_micros() as u64);
         let t = Instant::now();
-        gw.complete(&db, u, Plan::Free, Tier::Answer, req())
-            .await
-            .unwrap();
+        let choice = gw.choose(&db, u, allowance, None).await.unwrap();
+        gw.complete(&db, u, choice.tier, req()).await.unwrap();
         parts[2].1.us.push(t.elapsed().as_micros() as u64);
     }
     for (name, mut l) in parts {
@@ -1057,13 +1078,12 @@ async fn gateway_overhead(s: &Server, fakes: &Fakes, users: &[Uuid], admin: &Pg)
             let mut l = Lat::default();
             while Instant::now() < until {
                 let t = Instant::now();
-                // Pro + Fast: Haiku pricing with an 8 USD quota, so 10 s of calls stay under it.
+                // The fast model with no quota check: metering overhead only.
                 let r = gw
                     .complete(
                         &db,
                         u,
-                        Plan::Pro,
-                        Tier::Fast,
+                        ModelTier::Fast,
                         LlmRequest {
                             model: String::new(),
                             system: "s".into(),
@@ -1114,7 +1134,8 @@ async fn quota_race(
         )
         .await
         .unwrap();
-    let quota = Plan::Free.quota_micros();
+    subscribe(admin, &[user]).await;
+    let quota = Allowance::from(catalog().get(PLAN).expect("plan")).hard_cap_micros;
     let headroom = 500i64;
     admin
         .execute(
@@ -1192,6 +1213,7 @@ async fn main() {
             )
             .await
             .unwrap();
+        subscribe(&admin, &users).await;
         let fakes = Fakes::new(&cfg);
         let main_srv = serve(&kv, cfg.pools[0], &fakes, embed, Limits::unlimited()).await;
         println!("seeding:");

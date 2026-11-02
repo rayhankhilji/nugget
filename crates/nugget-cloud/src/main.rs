@@ -11,6 +11,8 @@ use nugget_cloud::config::Config;
 use nugget_cloud::db::Db;
 use nugget_cloud::gateway::Gateway;
 use nugget_cloud::ops;
+use nugget_cloud::plans::Catalog;
+use nugget_cloud::stripe::{HttpStripe, Stripe};
 
 fn init_logs(format: &str) {
     let filter =
@@ -59,32 +61,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::warn!("no LLM key: /v1/ask will answer 503");
     }
     let auth = SupabaseAuth::new(
-        http,
+        http.clone(),
         cfg.supabase_url.clone(),
         cfg.supabase_anon_key.clone(),
         cfg.supabase_service_role_key.clone(),
     );
+    let plans = Catalog::load(|k| std::env::var(k).ok())?;
+    let stripe = cfg.stripe_secret_key.as_ref().map(|key| {
+        Arc::new(HttpStripe {
+            http: http.clone(),
+            base: cfg.stripe_base.clone(),
+            key: key.clone(),
+        }) as Arc<dyn Stripe>
+    });
+    let mut state = AppState::new(db, Arc::new(auth), gateway, Arc::new(plans));
+    state.composio = composio;
+    state.auth_configs = cfg.composio_auth_configs.clone();
+    state.webhook_secret = cfg.composio_webhook_secret.clone();
+    state.connect_callback = cfg.connect_callback.clone();
+    state.stripe = stripe;
+    state.stripe_webhook_secret = cfg.stripe_webhook_secret.clone();
+    state.public_url = cfg.public_url.clone();
+    state.app_scheme = cfg.app_scheme.clone();
     let state = Arc::new(
-        AppState::new(
-            db,
-            Arc::new(auth),
-            composio,
-            gateway,
-            cfg.composio_auth_configs.clone(),
-            cfg.composio_webhook_secret.clone(),
-            cfg.connect_callback.clone(),
-        )
-        .with_limits(cfg.limits)
-        .with_client_ip_header(cfg.client_ip_header.clone()),
+        state
+            .with_limits(cfg.limits)
+            .with_client_ip_header(cfg.client_ip_header.clone()),
     );
 
     let (stop_tx, mut stop_rx) = tokio::sync::watch::channel(false);
     let sync_loop = state.ingest().map(|ingest| {
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(300));
+            let mut tick = tokio::time::interval(Duration::from_secs(60));
             loop {
                 tokio::select! {
-                    _ = tick.tick() => { ingest.run_due(20).await; }
+                    _ = tick.tick() => { ingest.run_due(50).await; }
                     _ = stop_rx.changed() => break,
                 }
             }

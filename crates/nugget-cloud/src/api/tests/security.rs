@@ -11,23 +11,17 @@ fn app_with(h: &Harness, limits: Limits) -> Router {
         "claude-haiku-5-5".into(),
         "claude-sonnet-5-5".into(),
     );
-    let configs = [
+    let plans = Catalog::parse(crate::plans::DEFAULT_TOML, crate::testkit::test_prices).unwrap();
+    let mut state = AppState::new(h.db.clone(), h.auth.clone(), gateway, Arc::new(plans));
+    state.composio = Some(h.composio.clone() as Arc<dyn Composio>);
+    state.auth_configs = [
         ("gmail".to_owned(), "ac_gmail".to_owned()),
         ("googlecalendar".to_owned(), "ac_cal".to_owned()),
     ]
     .into_iter()
     .collect();
-    let state = AppState::new(
-        h.db.clone(),
-        h.auth.clone(),
-        Some(h.composio.clone() as Arc<dyn Composio>),
-        gateway,
-        configs,
-        Some("whsec".into()),
-        "nugget://connections/callback".into(),
-    )
-    .with_limits(limits);
-    router(Arc::new(state))
+    state.webhook_secret = Some("whsec".into());
+    router(Arc::new(state.with_limits(limits)))
 }
 
 async fn raw(app: &Router, req: Request<Body>) -> axum::response::Response {
@@ -47,7 +41,10 @@ async fn asks_and_syncs_are_rate_limited_per_user() {
             ..Limits::unlimited()
         },
     );
-    let (u, other) = (add_user(&h.pool).await, add_user(&h.pool).await);
+    let (u, other) = (
+        subscriber(&h.pool, "heed").await,
+        subscriber(&h.pool, "heed").await,
+    );
     let ask = json!({"question": "lease?"});
     for _ in 0..2 {
         let (s, v) = call(&app, "POST", "/v1/ask", Some(u), Some(ask.clone())).await;
@@ -122,7 +119,7 @@ async fn oversized_bodies_are_refused() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let big = json!({"question": "x".repeat(MAX_BODY_BYTES + 1)}).to_string();
     let req = Request::post("/v1/ask")
         .header("authorization", format!("Bearer tok-{u}"))
@@ -163,7 +160,7 @@ async fn replayed_webhooks_are_not_acted_on() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     connect_and_sync(&h, u).await;
     let (_, ca) = call(&h.app, "GET", "/v1/connections", Some(u), None).await;
     let acc = ca["connections"][0]["composio_account_id"]
@@ -212,7 +209,7 @@ async fn concurrent_scheduler_passes_never_sync_a_connection_twice() {
         return;
     };
     for _ in 0..3 {
-        let u = add_user(&h.pool).await;
+        let u = subscriber(&h.pool, "heed").await;
         for t in ["gmail", "googlecalendar"] {
             call(
                 &h.app,
@@ -229,6 +226,9 @@ async fn concurrent_scheduler_passes_never_sync_a_connection_twice() {
         db: h.db.clone(),
         composio: h.composio.clone(),
         gateway: Gateway::new(None, None, String::new(), String::new()),
+        catalog: Arc::new(
+            Catalog::parse(crate::plans::DEFAULT_TOML, crate::testkit::test_prices).unwrap(),
+        ),
     };
     let (a, b) = (ingest(), ingest());
     let (na, nb) = tokio::join!(a.run_due(10), b.run_due(10));
@@ -243,7 +243,7 @@ async fn export_is_limited_to_once_a_minute() {
         return;
     };
     let app = app_with(&h, Limits::default());
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     let (s, v) = call(&app, "GET", "/v1/export", Some(u), None).await;
     assert_eq!(s, StatusCode::OK, "{v}");
     let (s, _) = call(&app, "GET", "/v1/export", Some(u), None).await;
@@ -255,7 +255,7 @@ async fn an_abandoned_sync_request_still_records_its_result() {
     let Some(h) = harness(false).await else {
         return;
     };
-    let u = add_user(&h.pool).await;
+    let u = subscriber(&h.pool, "heed").await;
     for t in ["gmail", "googlecalendar"] {
         call(
             &h.app,
@@ -295,4 +295,41 @@ async fn an_abandoned_sync_request_still_records_its_result() {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     panic!("the sync was dropped with the request; cursors were never recorded");
+}
+
+#[tokio::test]
+async fn concurrent_first_requests_from_a_new_device_all_succeed() {
+    let Some(h) = harness(false).await else {
+        return;
+    };
+    let u = subscriber(&h.pool, "heed").await;
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..20 {
+        let app = h.app.clone();
+        set.spawn(async move {
+            let req = Request::get("/v1/me")
+                .header("authorization", format!("Bearer tok-{u}"))
+                .header("x-heed-device", "device-abcdef12")
+                .body(Body::empty())
+                .unwrap();
+            app.oneshot(req).await.unwrap().status()
+        });
+    }
+    while let Some(s) = set.join_next().await {
+        assert_eq!(
+            s.unwrap(),
+            StatusCode::OK,
+            "no duplicate-key 500 under concurrency"
+        );
+    }
+    let n: i64 = h
+        .pool
+        .query_one(
+            "select count(*) from public.devices where user_id = $1",
+            &[&u],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(n, 1);
 }

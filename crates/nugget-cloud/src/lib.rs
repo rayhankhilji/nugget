@@ -10,6 +10,9 @@
 //! - [`webhook`]: Composio webhook signature check and replay guard.
 //! - [`ratelimit`]: per-IP and per-user token buckets.
 //! - [`ops`]: request ids, request logs, metrics, error reports, shutdown.
+//! - [`webhook`]: Composio webhook signature check.
+//! - [`plans`]: plans and entitlements (`plans.toml`).
+//! - [`stripe`]: Checkout, portal, subscriptions and Stripe webhook signatures.
 
 pub mod api;
 pub mod ask;
@@ -20,7 +23,9 @@ pub mod db;
 pub mod gateway;
 pub mod ingest;
 pub mod ops;
+pub mod plans;
 pub mod ratelimit;
+pub mod stripe;
 pub mod webhook;
 
 #[cfg(test)]

@@ -19,12 +19,16 @@ use uuid::Uuid;
 use crate::ask;
 use crate::auth::{AuthError, AuthProvider, AuthUser};
 use crate::composio::{Composio, ComposioError, Toolkit, map_status};
-use crate::db::{Db, DbError};
-use crate::gateway::{Gateway, GatewayError, Plan};
+use crate::db::{Db, DbError, SubscriptionRow};
+use crate::gateway::{Allowance, Gateway, GatewayError};
 use crate::ingest::{self, Ingest, SyncReport};
 use crate::ops::{self, METRICS};
+use crate::plans::{Catalog, ModelTier, Plan};
 use crate::ratelimit::{Limits, RateLimiter};
+use crate::stripe::{Stripe, StripeError};
 use crate::webhook::{self, ReplayGuard};
+
+mod billing;
 
 const MAX_QUESTION_CHARS: usize = 2_000;
 const CATALOG_TTL: Duration = Duration::from_secs(3600);
@@ -54,17 +58,25 @@ impl Limiters {
         }
     }
 }
+/// Device id used when a client sends none (counts as one device).
+const UNNAMED_DEVICE: &str = "unnamed-client";
 
 pub struct AppState {
     pub db: Db,
     pub auth: Arc<dyn AuthProvider>,
-    pub composio: Option<Arc<dyn Composio>>,
     pub gateway: Gateway,
+    pub plans: Arc<Catalog>,
+    pub composio: Option<Arc<dyn Composio>>,
     /// Toolkit slug → Composio auth config id.
     pub auth_configs: BTreeMap<String, String>,
     pub webhook_secret: Option<String>,
     pub connect_callback: String,
-    catalog: Mutex<Option<(Instant, Vec<Toolkit>)>>,
+    pub stripe: Option<Arc<dyn Stripe>>,
+    pub stripe_webhook_secret: Option<String>,
+    /// Public https base of this service (Stripe return pages).
+    pub public_url: Option<String>,
+    pub app_scheme: String,
+    toolkits: Mutex<Option<(Instant, Vec<Toolkit>)>>,
     pub limits: Limiters,
     /// Header with the real client IP set by the edge proxy; `None` uses the TCP peer.
     pub client_ip_header: Option<String>,
@@ -72,24 +84,22 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        db: Db,
-        auth: Arc<dyn AuthProvider>,
-        composio: Option<Arc<dyn Composio>>,
-        gateway: Gateway,
-        auth_configs: BTreeMap<String, String>,
-        webhook_secret: Option<String>,
-        connect_callback: String,
-    ) -> Self {
+    /// A state with the required parts; set the optional public fields before sharing it.
+    pub fn new(db: Db, auth: Arc<dyn AuthProvider>, gateway: Gateway, plans: Arc<Catalog>) -> Self {
         Self {
             db,
             auth,
-            composio,
             gateway,
-            auth_configs,
-            webhook_secret,
-            connect_callback,
-            catalog: Mutex::new(None),
+            plans,
+            composio: None,
+            auth_configs: BTreeMap::new(),
+            webhook_secret: None,
+            connect_callback: "nugget://connections/callback".into(),
+            stripe: None,
+            stripe_webhook_secret: None,
+            public_url: None,
+            app_scheme: "nugget".into(),
+            toolkits: Mutex::new(None),
             limits: Limiters::new(Limits::default()),
             client_ip_header: Some("fly-client-ip".into()),
             replay: ReplayGuard::default(),
@@ -113,6 +123,7 @@ impl AppState {
             db: self.db.clone(),
             composio: self.composio.clone()?,
             gateway: self.gateway.clone(),
+            catalog: self.plans.clone(),
         })
     }
 
@@ -239,6 +250,26 @@ impl From<ComposioError> for ApiError {
     }
 }
 
+impl From<StripeError> for ApiError {
+    fn from(e: StripeError) -> Self {
+        match e {
+            StripeError::NotConfigured => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "billing_not_configured",
+                e.to_string(),
+            ),
+            StripeError::Http(m) => {
+                tracing::warn!(%m, "stripe error");
+                Self::new(
+                    StatusCode::BAD_GATEWAY,
+                    "billing_error",
+                    "the payment provider failed; try again",
+                )
+            }
+        }
+    }
+}
+
 impl From<AuthError> for ApiError {
     fn from(e: AuthError) -> Self {
         match e {
@@ -258,6 +289,62 @@ impl From<AuthError> for ApiError {
 }
 
 type ApiResult<T> = Result<T, ApiError>;
+
+/// A signed-in caller and their live subscription, if any.
+struct Caller {
+    user: AuthUser,
+    subscription: Option<SubscriptionRow>,
+    plan: Option<Plan>,
+}
+
+impl Caller {
+    /// The plan, or 402 when there is no live subscription.
+    fn entitled(&self) -> ApiResult<&Plan> {
+        self.plan.as_ref().ok_or_else(|| {
+            ApiError::new(
+                StatusCode::PAYMENT_REQUIRED,
+                "subscription_required",
+                "start a Heed trial or subscription to use this",
+            )
+        })
+    }
+}
+
+/// Signs the caller in, loads their subscription and enforces the plan's device limit.
+async fn caller(s: &AppState, h: &HeaderMap) -> ApiResult<Caller> {
+    let user = user(s, h).await?;
+    let ent = crate::plans::entitlement(&s.db, &s.plans, user.id).await?;
+    let (subscription, plan) = match ent {
+        Some(e) => (Some(e.subscription), Some(e.plan)),
+        None => (None, None),
+    };
+    if let Some(p) = &plan {
+        let device = h
+            .get("x-heed-device")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|d| {
+                (8..=64).contains(&d.len())
+                    && d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            })
+            .unwrap_or(UNNAMED_DEVICE);
+        if !s.db.register_device(user.id, device, p.devices).await? {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "device_limit_reached",
+                format!(
+                    "{} allows {} device(s); remove one in account settings or upgrade",
+                    p.name, p.devices
+                ),
+            ));
+        }
+    }
+    Ok(Caller {
+        user,
+        subscription,
+        plan,
+    })
+}
 
 async fn user(state: &AppState, headers: &HeaderMap) -> ApiResult<AuthUser> {
     let token = headers
@@ -345,6 +432,15 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/v1/webhooks/composio",
             post(composio_webhook).layer(DefaultBodyLimit::max(MAX_WEBHOOK_BYTES)),
         )
+        .route("/v1/billing/plans", get(billing::plans))
+        .route("/v1/billing/checkout", post(billing::checkout))
+        .route("/v1/billing/portal", post(billing::portal))
+        .route(
+            "/v1/webhooks/stripe",
+            // Stripe events can exceed the API's body limit.
+            post(billing::stripe_webhook).layer(DefaultBodyLimit::max(MAX_WEBHOOK_BYTES)),
+        )
+        .route("/billing/done", get(billing::done))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn_with_state(state.clone(), ip_limit))
         .layer(middleware::from_fn(ops::deadline))
@@ -353,15 +449,20 @@ pub fn router(state: Arc<AppState>) -> Router {
 }
 
 async fn me(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
-    let plan = Plan::parse(&s.db.touch_profile(u.id).await?);
-    let cost = s.db.month_cost_micros(u.id).await?;
+    let c = caller(&s, &h).await?;
+    s.db.touch_profile(c.user.id).await?;
+    let cost = s.db.month_cost_micros(c.user.id).await?;
+    let smart =
+        s.db.month_model_calls(c.user.id, s.gateway.model_for(ModelTier::Smart))
+            .await?;
     Ok(Json(json!({
-        "user_id": u.id,
-        "email": u.email,
-        "plan": if plan == Plan::Pro { "pro" } else { "free" },
+        "user_id": c.user.id,
+        "email": c.user.email,
+        "plan": c.subscription.as_ref().map(|x| &x.plan),
         "embeddings": s.gateway.has_embeddings(),
-        "usage": {"month_cost_micros": cost, "quota_micros": plan.quota_micros()},
+        "subscription": c.subscription,
+        "entitlements": c.subscription.as_ref().zip(c.plan.as_ref()).map(|(x, p)| billing::entitlements(&x.plan, p)),
+        "usage": {"month_cost_micros": cost, "smart_asks_used": smart},
     })))
 }
 
@@ -389,7 +490,7 @@ impl AppState {
     /// Composio's catalogue, cached; falls back to what we support if Composio is unreachable.
     async fn catalog(&self) -> Vec<Toolkit> {
         if let Some((at, list)) = self
-            .catalog
+            .toolkits
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .as_ref()
@@ -403,7 +504,7 @@ impl AppState {
         };
         match fetched {
             Some(list) => {
-                *self.catalog.lock().unwrap_or_else(|p| p.into_inner()) =
+                *self.toolkits.lock().unwrap_or_else(|p| p.into_inner()) =
                     Some((Instant::now(), list.clone()));
                 list
             }
@@ -469,8 +570,25 @@ async fn connect(
     h: HeaderMap,
     Json(b): Json<ConnectBody>,
 ) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
+    let c = caller(&s, &h).await?;
+    let plan = c.entitled()?;
+    let u = &c.user;
     let slug = b.toolkit.to_ascii_lowercase();
+    if let Some(max) = plan.max_connections {
+        let live =
+            s.db.connections(u.id)
+                .await?
+                .iter()
+                .filter(|x| x.status != "failed" && x.toolkit != slug)
+                .count();
+        if live >= max as usize {
+            return Err(ApiError::new(
+                StatusCode::FORBIDDEN,
+                "connection_limit_reached",
+                format!("{} allows {max} connected apps", plan.name),
+            ));
+        }
+    }
     if !s.connectable(&slug) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
@@ -517,7 +635,9 @@ async fn disconnect(
 }
 
 async fn sync(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Value>> {
-    let u = user(&s, &h).await?;
+    let c = caller(&s, &h).await?;
+    c.entitled()?;
+    let u = c.user;
     let ingest = s.ingest().ok_or(ComposioError::NotConfigured)?;
     s.limits
         .sync
@@ -551,6 +671,7 @@ async fn sync(State(s): State<Arc<AppState>>, h: HeaderMap) -> ApiResult<Json<Va
 struct AskBody {
     question: String,
     conversation_id: Option<Uuid>,
+    model: Option<ModelTier>,
 }
 
 async fn ask_route(
@@ -558,7 +679,8 @@ async fn ask_route(
     h: HeaderMap,
     Json(b): Json<AskBody>,
 ) -> ApiResult<Json<ask::AskResponse>> {
-    let u = user(&s, &h).await?;
+    let c = caller(&s, &h).await?;
+    let plan = c.entitled()?;
     let q = b.question.trim();
     if q.is_empty() || q.chars().count() > MAX_QUESTION_CHARS {
         return Err(ApiError::new(
@@ -569,11 +691,21 @@ async fn ask_route(
     }
     s.limits
         .ask
-        .check(&u.id)
+        .check(&c.user.id)
         .map_err(|w| ApiError::rate_limited("ask", w))?;
-    let plan = Plan::parse(&s.db.touch_profile(u.id).await?);
+    s.db.touch_profile(c.user.id).await?;
+    let allowance = Allowance::from(plan);
     Ok(Json(
-        ask::ask(&s.db, &s.gateway, u.id, plan, q, b.conversation_id).await?,
+        ask::ask(
+            &s.db,
+            &s.gateway,
+            c.user.id,
+            allowance,
+            b.model,
+            q,
+            b.conversation_id,
+        )
+        .await?,
     ))
 }
 

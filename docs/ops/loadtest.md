@@ -28,6 +28,12 @@ quoting any of it.
   `POST /v1/sync`: 8,000 items and 13,000 chunks in all. Questions use a 2,000-word synthetic
   vocabulary, so each question matches a few items per user, like real topics.
 
+**After the billing merge:** the example was ported to subscriptions (every user is on the `heed`
+plan) and to `Gateway::choose`. A short re-run (20 users) found 500s when one user's first requests
+from a new device arrived together: `register_device` raced on its insert. That is fixed, with a
+regression test (`concurrent_first_requests_from_a_new_device_all_succeed`). The full results below
+come from the pre-billing run.
+
 ## How to run
 
 ```sh

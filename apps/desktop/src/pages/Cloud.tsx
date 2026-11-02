@@ -1,10 +1,10 @@
 import { useMemo, useState, type FormEvent } from "react";
 import { splitCitations } from "../citations";
-import { cloudApi, type CloudAnswer, type CloudApp, type CloudConnection, type CloudSyncResult } from "../cloud";
+import { CloudError, cloudApi, type BillingInterval, type CloudAnswer, type CloudApp, type CloudConnection, type CloudPlan, type CloudSubscription, type CloudSyncResult } from "../cloud";
 import { formatRelative, formatTime } from "../format";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
-import { useT } from "../i18n";
+import { formatDate, formatNumber, useT, type TFunction } from "../i18n";
 import { SignIn } from "./SignIn";
 
 /**
@@ -68,6 +68,7 @@ function SignedIn({ email, onSignedOut }: { email: string | null; onSignedOut: (
         }
       />
       <ErrorNote error={error} />
+      <Billing />
       <Connections />
       <CloudAsk />
     </div>
@@ -123,8 +124,8 @@ function Connections() {
     <>
       <section aria-labelledby="cloud-connections">
         <h2 id="cloud-connections">{t("cloud.connections.title")}</h2>
-        <ErrorNote error={list.error} onRetry={list.reload} />
-        <ErrorNote error={error} />
+        <CloudErrorNote error={list.error} onRetry={list.reload} />
+        <CloudErrorNote error={error} />
         {notice && (
           <p className="note" role="status">
             {notice}
@@ -261,9 +262,14 @@ function CloudAsk() {
           </button>
         )}
       </form>
-      <ErrorNote error={error} />
+      <CloudErrorNote error={error} />
       {answer && (
         <div className="cloud-answer">
+          {answer.downgraded && (
+            <p className="note" role="status">
+              {t("cloud.ask.downgraded")}
+            </p>
+          )}
           <p dir="auto">
             {splitCitations(answer.answer, valid).map((p, i) =>
               p.kind === "text" ? (
@@ -305,6 +311,147 @@ function CloudAsk() {
             </>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+const BILLING_HEADING = "cloud-billing";
+
+/** Plan errors get their own sentence; `subscription_required` points at Plan & billing. */
+function CloudErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const t = useT();
+  const code = error instanceof CloudError ? error.cloud : null;
+  if (code === "subscription_required") {
+    const go = () => {
+      const h = document.getElementById(BILLING_HEADING);
+      h?.scrollIntoView?.();
+      h?.focus();
+    };
+    return (
+      <div className="note" role="alert">
+        <span className="note-text">{t("cloud.billing.required")}</span>
+        <button type="button" className="btn btn-small" onClick={go}>
+          {t("cloud.billing.seePlans")}
+        </button>
+      </div>
+    );
+  }
+  if (code === "device_limit_reached" || code === "connection_limit_reached") {
+    return (
+      <div className="note note-error" role="alert">
+        <span className="note-text">{t(code === "device_limit_reached" ? "cloud.billing.deviceLimit" : "cloud.billing.connectionLimit")}</span>
+      </div>
+    );
+  }
+  return <ErrorNote error={error} onRetry={onRetry} />;
+}
+
+const gbp = (n: number) => formatNumber(n, { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+const day = (iso: string | null) => (iso && !Number.isNaN(new Date(iso).getTime()) ? formatDate(iso) : null);
+/** Stripe statuses that no longer grant access: offer the plans again. */
+const ENDED = ["canceled", "incomplete_expired", "unpaid"];
+
+function statusText(s: CloudSubscription, t: TFunction): string {
+  const end = day(s.current_period_end);
+  if (s.cancel_at_period_end && end) return t("cloud.billing.status.cancels", { date: end });
+  if (s.status === "trialing") {
+    const until = day(s.trial_end);
+    return until ? t("cloud.billing.status.trialUntil", { date: until }) : t("cloud.billing.status.trialing");
+  }
+  if (s.status === "active") return t("cloud.billing.status.active");
+  if (s.status === "past_due") return t("cloud.billing.status.pastDue");
+  return s.status;
+}
+
+function Billing() {
+  const t = useT();
+  const me = useAsync(cloudApi.me);
+  const plans = useAsync(cloudApi.plans);
+  useEvent(cloudApi.onBillingChanged, () => {
+    me.reload();
+    plans.reload();
+  });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const act = async (key: string, fn: () => Promise<void>) => {
+    setBusy(key);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      setNotice(t("cloud.billing.inBrowser"));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const checkout = (p: CloudPlan, interval: BillingInterval) => act(`checkout:${p.id}:${interval}`, () => cloudApi.checkout(p.id, interval));
+  const portal = (key: string) => act(key, cloudApi.portal);
+
+  const sub = me.data?.subscription;
+  const subscribed = sub && !ENDED.includes(sub.status);
+  const ent = me.data?.entitlements;
+  const offers = plans.data?.plans ?? [];
+  const maxPlan = offers.find((p) => p.id === "heed_max");
+
+  return (
+    <section aria-labelledby={BILLING_HEADING}>
+      <h2 id={BILLING_HEADING} tabIndex={-1}>
+        {t("cloud.billing.title")}
+      </h2>
+      <CloudErrorNote error={me.error} onRetry={me.reload} />
+      <CloudErrorNote error={error} />
+      {notice && (
+        <p className="note" role="status">
+          {notice}
+        </p>
+      )}
+      {me.loading && !me.data && <Loading lines={2} />}
+      {me.data && subscribed && sub && (
+        <div className="cloud-subscription">
+          <p>
+            <strong>{ent?.name ?? offers.find((p) => p.id === sub.plan)?.name ?? sub.plan}</strong>{" "}
+            <Badge tone={sub.status === "past_due" ? "bad" : sub.cancel_at_period_end ? "warn" : "good"}>{statusText(sub, t)}</Badge>
+          </p>
+          {ent && <p>{t("cloud.billing.smartAsks", { used: me.data.usage.smart_asks_used, limit: ent.smart_asks_per_month })}</p>}
+          <p>
+            <button type="button" className="btn" disabled={busy !== null} onClick={() => void portal("portal")}>
+              {busy === "portal" ? <Spinner /> : t("cloud.billing.manage")}
+            </button>{" "}
+            {sub.plan !== "heed_max" && (
+              <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void portal("upgrade")}>
+                {/* i18n-ignore: the plan's brand name, when the plans list hasn't loaded */}
+                {busy === "upgrade" ? <Spinner /> : t("cloud.billing.upgrade", { name: maxPlan?.name ?? "Heed Max" })}
+              </button>
+            )}
+          </p>
+        </div>
+      )}
+      {me.data && !subscribed && (
+        <>
+          <p>{t("cloud.billing.choose")}</p>
+          <CloudErrorNote error={plans.error} onRetry={plans.reload} />
+          {plans.loading && !plans.data && <Loading lines={2} />}
+          <ul className="cloud-plans">
+            {offers.map((p) => (
+              <li key={p.id}>
+                <h3>{p.name}</h3>
+                <p>{t("cloud.billing.prices", { monthly: gbp(p.monthly_gbp), annual: gbp(p.annual_gbp) })}</p>
+                {p.trial_days > 0 && <p className="small muted">{t("cloud.billing.trial", { days: p.trial_days })}</p>}
+                <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void checkout(p, "month")} aria-label={t("cloud.billing.startMonthlyLabel", { name: p.name })}>
+                  {busy === `checkout:${p.id}:month` ? <Spinner /> : t("cloud.billing.startMonthly")}
+                </button>{" "}
+                <button type="button" className="btn" disabled={busy !== null} onClick={() => void checkout(p, "year")} aria-label={t("cloud.billing.startAnnualLabel", { name: p.name })}>
+                  {busy === `checkout:${p.id}:year` ? <Spinner /> : t("cloud.billing.startAnnual")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );
