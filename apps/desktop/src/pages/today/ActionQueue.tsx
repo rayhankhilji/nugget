@@ -73,7 +73,7 @@ export function ActionQueue({ tick, onDone }: { tick: number; onDone: (status: s
               <div className="action-head">
                 <AppLogo app={target} />
                 <div className="action-what">
-                  <span className="small muted">
+                  <span className="action-meta">
                     {t(KIND[a.kind] ?? "needs.actions.kind.other")} · {t("needs.actions.in", { app: target.name })} · {t("needs.actions.expires", { when: formatRelative(a.expires_at, Date.now()) })}
                   </span>
                   <h3 className="action-summary" dir="auto">
@@ -81,6 +81,22 @@ export function ActionQueue({ tick, onDone }: { tick: number; onDone: (status: s
                   </h3>
                 </div>
               </div>
+              {!denied && (
+                <ol className="action-steps" aria-label={t("needs.actions.steps")}>
+                  <li data-state="done">
+                    <StepDot state="done" />
+                    {t("needs.actions.step.drafted")}
+                  </li>
+                  <li data-state="done">
+                    <StepDot state="done" />
+                    {t("needs.actions.step.preview")}
+                  </li>
+                  <li data-state="now" aria-current="step">
+                    <StepDot state="now" />
+                    {t("needs.actions.step.waiting")}
+                  </li>
+                </ol>
+              )}
               {a.preview.fields.length > 0 && (
                 <dl className="action-fields">
                   {a.preview.fields.map((f, i) => (
@@ -141,5 +157,18 @@ export function ActionQueue({ tick, onDone }: { tick: number; onDone: (status: s
         })}
       </ul>
     </section>
+  );
+}
+
+/** A step marker: a drawn check when done, a turning ring while waiting. */
+function StepDot({ state }: { state: "done" | "now" }) {
+  return (
+    <span className={`step-dot ${state}`} aria-hidden="true">
+      {state === "done" && (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M2 5.2 4.2 7.4 8 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </span>
   );
 }

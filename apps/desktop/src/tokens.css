@@ -25,6 +25,8 @@
   --brand: var(--heed-signal);
   --accent: var(--heed-signal-fill);
   --accent-strong: var(--heed-signal-hover);
+  /* A primary button's hover fill: a shade deeper than the fill, so white text keeps AA. */
+  --accent-hover: color-mix(in srgb, #000 12%, var(--heed-signal-fill));
   --accent-soft: var(--heed-signal-wash);
   --accent-contrast: var(--heed-on-signal);
   --accent-text: var(--heed-signal-ink);

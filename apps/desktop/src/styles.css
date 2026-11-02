@@ -445,7 +445,7 @@ main {
 }
 
 .btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
-  background: var(--accent-strong);
+  background: var(--accent-hover);
   filter: none;
 }
 
@@ -876,23 +876,23 @@ textarea:focus-visible {
 
 progress {
   width: 100%;
-  height: 8px;
+  height: 6px;
   appearance: none;
   border: 0;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--accent-soft);
   overflow: hidden;
 }
 
 progress::-webkit-progress-bar {
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--accent-soft);
   border-radius: 999px;
 }
 
 progress::-webkit-progress-value {
   background: var(--accent);
   border-radius: 999px;
-  transition: width 0.2s ease;
+  transition: width var(--dur-3) var(--ease-in);
 }
 
 progress::-moz-progress-bar {
@@ -3426,13 +3426,18 @@ tr[aria-current="true"] {
   padding: 0;
 }
 
+.home-suggestions > li {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .home-suggestion {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 28px;
   max-width: 100%;
-  padding: 0 10px;
+  padding: 4px 10px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -3447,9 +3452,7 @@ tr[aria-current="true"] {
 }
 
 .home-suggestion bdi {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .home-suggestion .icon {
@@ -3781,6 +3784,374 @@ tr[aria-current="true"] {
 
 @media (prefers-reduced-motion: reduce) {
   .cloud-conn-meter {
+    animation: none;
+  }
+}
+
+/* ======================================================================================
+   Heed v4 surfaces: Fraunces for display, Geist for the UI, Geist Mono for numbers; calm
+   white cards over cream; ultramarine as a field, not a hairline. Colours, type and motion
+   come from brand/tokens.css.
+   ====================================================================================== */
+
+/* Display type: Fraunces, soft and a little wonky, light and tight. 28px and up only. */
+.page-header h1,
+.empty-title,
+.home-empty-title,
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: var(--heed-display-weight);
+  letter-spacing: var(--heed-display-tracking);
+}
+
+.page-header h1 {
+  font-size: var(--fs-2xl);
+  line-height: 1.08;
+}
+
+.page-home .page-header h1 {
+  font-size: var(--fs-3xl);
+  letter-spacing: -0.025em;
+}
+
+/* Numbers, times, counts and shortcuts in Geist Mono with tabular figures. */
+kbd,
+.nav-count,
+.mono,
+.num,
+.stat-value,
+.result-meta,
+.needs-item-kind,
+.cloud-conn-sync,
+.action-meta {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+kbd {
+  font-size: 11px;
+}
+
+/* Buttons: flat and calm. Filled ultramarine for the one primary action. */
+.btn {
+  border-radius: var(--radius-small);
+  border: 1px solid var(--heed-line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  box-shadow: 0 1px 2px rgb(7 7 152 / 0.25);
+}
+
+.btn-primary:hover:where(:not(:disabled):not([aria-disabled="true"])) {
+  background: var(--accent-hover);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* Cards: white, soft and low, 16px radius. */
+.card,
+.source,
+.home-composer,
+.composer,
+.citation,
+.cloud-conn {
+  border-radius: var(--radius-large);
+}
+
+/* The sidebar: cream (light) or ink-blue night (dark), hairline edge. */
+.sidebar {
+  border-inline-end: 1px solid var(--hairline);
+}
+
+.nav-item[aria-current="page"] {
+  background: color-mix(in srgb, var(--heed-signal) 10%, transparent);
+}
+
+.nav-item[aria-current="page"] .icon {
+  color: var(--accent-text);
+}
+
+/* Home: a sky band behind the greeting and the ask box, which float on it like cards. */
+.page-home {
+  position: relative;
+  isolation: isolate;
+  padding-block-start: var(--space-7);
+}
+
+.page-home::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset-block-start: 0;
+  inset-inline: calc(50% - 50vw);
+  height: 360px;
+  background:
+    linear-gradient(to bottom, transparent 40%, var(--bg)),
+    url("./brand/img/sky.webp") center 30% / cover no-repeat;
+  opacity: 0.9;
+  animation: sky-drift 40s var(--ease-in) infinite alternate;
+}
+
+@media (prefers-color-scheme: dark) {
+  .page-home::before {
+    background:
+      linear-gradient(to bottom, rgb(11 11 26 / 0.55), var(--bg) 92%),
+      url("./brand/img/sky.webp") center 30% / cover no-repeat;
+    opacity: 0.75;
+  }
+}
+
+/* The brand moment: a slow drift of at most 12px. */
+@keyframes sky-drift {
+  to {
+    background-position:
+      0 0,
+      calc(50% + 12px) 32%;
+  }
+}
+
+.page-home .page-header p,
+.page-home .page-header .btn {
+  color: var(--text-2);
+}
+
+.home-composer {
+  box-shadow: var(--heed-shadow-3);
+}
+
+.brief-prose .cited-text {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 100, "WONK" 0;
+  font-weight: 350;
+  font-size: 19px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+}
+
+/* Empty states: a dot-grid field, a Fraunces line, one action. */
+.empty {
+  border-radius: var(--radius-large);
+  background:
+    radial-gradient(color-mix(in srgb, var(--heed-signal) 22%, transparent) 1px, transparent 1.4px) 0 0 / 14px 14px,
+    var(--surface-2);
+  mask-image: none;
+}
+
+.empty-title {
+  font-size: var(--fs-2xl);
+  margin-block-end: var(--space-2);
+}
+
+.home-empty-title {
+  font-size: var(--fs-2xl);
+}
+
+/* Agent-progress card: the approval queue's steps, meter and counts. */
+.action-steps {
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.action-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.action-steps li[data-state="todo"] {
+  color: var(--muted);
+}
+
+.step-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.step-dot.done {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.step-dot.done path {
+  stroke-dasharray: 14;
+  stroke-dashoffset: 14;
+  animation: step-draw 180ms var(--ease-out) forwards;
+}
+
+@keyframes step-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.step-dot.now {
+  border: 2px solid var(--accent-text);
+  border-block-start-color: transparent;
+  animation: spin 0.9s linear infinite;
+}
+
+.step-dot.todo {
+  border: 1.5px solid var(--control-border);
+}
+
+.action-steps li[data-state="now"] {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--heed-signal) 8%, transparent), transparent) 0 0 / 200% 100%;
+  animation: row-shimmer 2.4s linear infinite;
+  border-radius: var(--radius-small);
+}
+
+@keyframes row-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.meter {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  overflow: hidden;
+}
+
+.meter > b {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--heed-signal);
+  transition: width var(--dur-3) var(--ease-in);
+}
+
+.action-meta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* Plan & billing: plan cards with a Fraunces price and a mono usage meter. */
+.cloud-plans {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.cloud-plans > li {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.cloud-plans > li:last-child {
+  background: var(--heed-signal-deep);
+  color: #fff;
+}
+
+.cloud-plans > li:last-child .muted,
+.cloud-plans > li:last-child .small {
+  color: rgb(255 255 255 / 0.78);
+}
+
+.cloud-plans > li:last-child .btn:not(.btn-primary) {
+  background: transparent;
+  color: #fff;
+  border-color: rgb(255 255 255 / 0.4);
+}
+
+.cloud-plans h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: 380;
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.02em;
+}
+
+.plan-price {
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
+  font-weight: 340;
+  font-size: var(--fs-3xl);
+  letter-spacing: -0.025em;
+  line-height: 1;
+}
+
+.cloud-subscription {
+  padding: var(--space-5);
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.usage {
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+}
+
+.usage-numbers {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* Lists stagger by 30ms, at most 8 items. */
+.needs-list > li:nth-child(4),
+.results > li:nth-child(4),
+.source-list > li:nth-child(4) {
+  animation-delay: 90ms;
+}
+
+.needs-list > li:nth-child(5),
+.results > li:nth-child(5) {
+  animation-delay: 120ms;
+}
+
+.needs-list > li:nth-child(6),
+.results > li:nth-child(6) {
+  animation-delay: 150ms;
+}
+
+.needs-list > li:nth-child(n + 7),
+.results > li:nth-child(n + 7) {
+  animation-delay: 180ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-home::before,
+  .action-steps li[data-state="now"],
+  .step-dot.now {
+    animation: none;
+  }
+
+  .step-dot.done path {
+    stroke-dashoffset: 0;
     animation: none;
   }
 }

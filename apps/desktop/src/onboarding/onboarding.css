@@ -12,6 +12,61 @@
   max-inline-size: 55rem;
   margin-inline: auto;
   padding-inline: var(--space-5);
+  isolation: isolate;
+}
+
+/* The welcome backdrop: a washed daylight sky above, an ultramarine dither horizon below. Both
+   sit far enough under the canvas that text over them keeps its contrast. */
+.onboarding::before,
+.onboarding::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  inset-inline: 0;
+  pointer-events: none;
+}
+
+.onboarding::before {
+  inset-block-start: 0;
+  height: 70vh;
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--bg) 45%, transparent), var(--bg)),
+    url("../brand/img/sky.webp") center 20% / cover no-repeat;
+  animation: ob-drift 36s var(--ease-in) infinite alternate;
+}
+
+.onboarding::after {
+  inset-block-end: 0;
+  height: 22vh;
+  background: url("../brand/img/dither-landscape.png") center bottom / cover no-repeat;
+  opacity: 0.1;
+  image-rendering: pixelated;
+}
+
+@keyframes ob-drift {
+  to {
+    background-position:
+      0 0,
+      calc(50% + 12px) 22%;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .onboarding::before {
+    background:
+      linear-gradient(to bottom, color-mix(in srgb, var(--bg) 70%, transparent), var(--bg)),
+      url("../brand/img/sky.webp") center 20% / cover no-repeat;
+  }
+
+  .onboarding::after {
+    opacity: 0.16;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding::before {
+    animation: none;
+  }
 }
 
 /* Keep a hidden control's slot so the header doesn't change height between steps. */
@@ -103,8 +158,10 @@
 /* A big, confident heading and a short lead, centred over the step. */
 .ob-main h1 {
   margin-block: 0 var(--space-2);
+  font-family: var(--font-display);
+  font-variation-settings: var(--heed-display-settings);
   font-size: var(--fs-3xl, 2.5rem);
-  font-weight: 650;
+  font-weight: var(--heed-display-weight, 360);
   line-height: 1.1;
   letter-spacing: -0.025em;
   text-align: center;
@@ -830,7 +887,8 @@ button.ob-app-tile:disabled {
   gap: var(--space-2);
   padding-block: var(--space-3) var(--space-4);
   border-block-start: 1px solid var(--border);
-  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 /* Content continues under the footer: a shadow says there's more to scroll. */

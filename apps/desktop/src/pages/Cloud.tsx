@@ -412,7 +412,14 @@ export function Billing() {
             <strong>{ent?.name ?? offers.find((p) => p.id === sub.plan)?.name ?? sub.plan}</strong>{" "}
             <Badge tone={sub.status === "past_due" ? "bad" : sub.cancel_at_period_end ? "warn" : "good"}>{statusText(sub, t)}</Badge>
           </p>
-          {ent && <p>{t("cloud.billing.smartAsks", { used: me.data.usage.smart_asks_used, limit: ent.smart_asks_per_month })}</p>}
+          {ent && (
+            <div className="usage">
+              <span className="usage-numbers">{t("cloud.billing.smartAsks", { used: me.data.usage.smart_asks_used, limit: ent.smart_asks_per_month })}</span>
+              <span className="meter" aria-hidden="true">
+                <b style={{ width: `${Math.min(100, (100 * me.data.usage.smart_asks_used) / Math.max(1, ent.smart_asks_per_month))}%` }} />
+              </span>
+            </div>
+          )}
           <p>
             <button type="button" className="btn" disabled={busy !== null} onClick={() => void portal("portal")}>
               {busy === "portal" ? <Spinner /> : t("cloud.billing.manage")}
@@ -435,7 +442,10 @@ export function Billing() {
             {offers.map((p) => (
               <li key={p.id}>
                 <h3>{p.name}</h3>
-                <p>{t("cloud.billing.prices", { monthly: gbp(p.monthly_gbp), annual: gbp(p.annual_gbp) })}</p>
+                <p className="plan-price" aria-hidden="true">
+                  {gbp(p.monthly_gbp)}
+                </p>
+                <p className="small">{t("cloud.billing.prices", { monthly: gbp(p.monthly_gbp), annual: gbp(p.annual_gbp) })}</p>
                 {p.trial_days > 0 && <p className="small muted">{t("cloud.billing.trial", { days: p.trial_days })}</p>}
                 <button type="button" className="btn btn-primary" disabled={busy !== null} onClick={() => void checkout(p, "month")} aria-label={t("cloud.billing.startMonthlyLabel", { name: p.name })}>
                   {busy === `checkout:${p.id}:month` ? <Spinner /> : t("cloud.billing.startMonthly")}

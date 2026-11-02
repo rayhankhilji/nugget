@@ -42,10 +42,11 @@
 @media (prefers-contrast: more) {
   :root {
     --border: #8a8478;
+    --hairline: #8a8478;
     --control-border: #57524a;
     --muted: #4d4840;
-    --link: #0f4aa3;
-    --focus: #0b4fb3;
+    --link: #0a1fb8;
+    --focus: #0a1fb8;
     --graph-edge: rgb(60 54 45 / 0.55);
   }
 
@@ -82,6 +83,7 @@
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
   :root {
     --border: #78726a;
+    --hairline: #78726a;
     --control-border: #b4aea3;
     --muted: #cfc9be;
     --link: #a9cbff;
