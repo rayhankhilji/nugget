@@ -1,4 +1,4 @@
-// Benchmark dashboard for the Nugget book: draws one small line chart per headline metric from
+// Benchmark dashboard for the Heed book: draws one small line chart per headline metric from
 // history.json (written by scripts/bench-dashboard.py). Plain DOM and SVG, no dependencies.
 (function () {
   "use strict";

@@ -23,7 +23,7 @@ pub const HOST_NAME: &str = "dev.nugget.browser";
 pub const CHROMIUM_DEV_EXTENSION_ID: &str = "gljflghdpajgdddaibpdgjibnkeggchn";
 /// Firefox add-on id (`browser_specific_settings.gecko.id` in the Firefox build).
 pub const FIREFOX_EXTENSION_ID: &str = "browser@nugget.dev";
-const DESCRIPTION: &str = "Nugget browser bridge";
+const DESCRIPTION: &str = "Heed browser bridge";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]

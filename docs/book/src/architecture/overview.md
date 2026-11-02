@@ -1,6 +1,6 @@
 # Architecture overview
 
-Nugget is one per-user daemon, `nuggetd`, and the apps that talk to it. The daemon owns the encrypted
+Heed is one per-user daemon, `nuggetd`, and the apps that talk to it. The daemon owns the encrypted
 store, the connectors, every model call and the MCP server. The desktop app holds the OS permissions
 the daemon should not have (accessibility, the global hotkey) and talks to the daemon over the
 [local IPC protocol](../reference/ipc.md). The browser extension reaches the daemon through the

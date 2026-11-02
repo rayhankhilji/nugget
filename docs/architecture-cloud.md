@@ -1,8 +1,8 @@
-# Nugget Cloud architecture
+# Heed Cloud architecture
 
 Status: design plus M1 build in progress, on branch `ar/cloud`. Date: 2026-11-02.
 
-Nugget moves from local-first to **cloud-first SaaS**:
+Heed moves from local-first to **cloud-first SaaS**:
 - Users have accounts.
 - Their mail, events and docs are indexed in our cloud.
 - The AI runs server-side with our provider keys.
@@ -22,14 +22,14 @@ The desktop app stays the only client. Everything that needs the local OS stays 
               │ browser sign-in          └──┬──────────┬───────────┬─────┘
               ▼                             │ SQL      │ HTTPS     │ HTTPS
  Supabase Auth (magic link,  ◀──────────────┤          ▼           ▼
- Google) → nugget://auth/callback           │     Composio     Anthropic /
+ Google) → heed://auth/callback             │     Composio     Anthropic /
                                             ▼     (OAuth,      OpenAI
                                    Supabase Postgres  tools,    (LLM, embeddings)
                                    + pgvector + Storage triggers)
 ```
 
 ### Supabase (Pro plan)
-- **Auth:** email magic link and Google sign-in in M1. Apple sign-in waits until M4, because it needs an Apple Developer account ($99/yr). The desktop app uses the PKCE flow through the system browser, and the redirect URL is `nugget://auth/callback` (allow-listed in Auth → URL Configuration). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
+- **Auth:** email magic link and Google sign-in in M1. Apple sign-in waits until M4, because it needs an Apple Developer account ($99/yr). The desktop app uses the PKCE flow through the system browser, and the redirect URL is `heed://auth/callback`. In the Supabase dashboard, add it under Auth → URL Configuration → Redirect URLs (the app still accepts `nugget://auth/callback` from before the rename to Heed, but new setups only need `heed://auth/callback`). Supabase issues the JWTs. The cloud service checks each token by calling `GET /auth/v1/user`, and caches the result for 60 seconds per token hash. Because of this, the service works whichever JWT signing scheme the project uses (legacy HS256 or asymmetric keys).
 - **Postgres + pgvector.** The schema is in `supabase/migrations/`. Every table has a `user_id` column and Row-Level Security enabled:
   - `profiles`: created by a trigger on `auth.users`. It records when the user was last active.
   - `billing_customers`, `subscriptions` and `devices` are described in [Plans and billing](#6-plans-and-billing).
@@ -69,7 +69,7 @@ These run inside `nugget-cloud`, as a tokio task per process:
 ## 2. Composio
 - **Identity.** The Composio `user_id` is the Supabase user UUID. One Composio project serves all users, and the API key lives only in the server environment (`COMPOSIO_API_KEY`). The REST base URL is `https://backend.composio.dev/api/v3.1`, with the header `x-api-key`. `v3` is frozen but still supported.
 - **Auth configs.** These are created once per toolkit in the Composio dashboard, using Composio-managed OAuth for Gmail and Google Calendar. Their ids go in `COMPOSIO_AUTH_CONFIGS`, for example `gmail=ac_…,googlecalendar=ac_…`.
-- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = nugget://connections/callback` → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
+- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = heed://connections/callback` (`NUGGET_CONNECT_CALLBACK` overrides it; the app also accepts the pre-rename `nugget://connections/callback`) → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
 - **Triggers or polling.** Composio's Gmail and Calendar triggers are themselves polling-based, with a 2–15 minute floor. They cost **$0.003 per event** on the paid tier, ten times the price of a tool call ($0.0003). A user receiving 1,000 emails a month would cost $3 in trigger events alone. **M1 therefore polls with tool calls**, adaptively as described above, which costs about 1,500–3,000 calls per active user per month. `POST /v1/webhooks/composio` is implemented: it verifies the signature, and for an event it only marks that connection due (it does not ingest the payload). This lets us switch triggers on per toolkit later, for example for low-volume apps, without a second ingest path.
 - **Actions** (M3) are sending mail and creating events. The agent proposes a tool call, and `nugget-policy` assesses it: Send-class actions are always `Confirm`. The proposal is stored as a `pending_actions` row (added in M3) with a preview. The desktop shows the existing confirmation UI, and only `POST /v1/actions/{id}/approve` executes `tools/execute`. Each step is written to the hash-chained action log. Composio never acts without that approval.
 - **Pricing** (composio.dev/pricing, for signups after 2026-08-15):
@@ -96,7 +96,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
 ## 4. Desktop app changes
 - **Sign-in:**
   1. A new crate, `crates/nugget-cloud-client`, builds the PKCE `authorize` URL (for Google; Apple is added in M4) or sends the magic-link request (`POST /auth/v1/otp` with a code challenge). The system browser opens it.
-  2. Supabase redirects to `nugget://auth/callback?code=…`.
+  2. Supabase redirects to `heed://auth/callback?code=…`.
   3. `deeplink.rs` validates the link and hands the code over, and the client exchanges it with `grant_type=pkce`. The verifier lives only in memory and is valid for 10 minutes.
   4. The **refresh token** is stored in the OS keychain (entry `nugget/cloud-session`, using the same `keyring` backends as `nugget-store`). The access token is kept only in memory and refreshed 60 seconds before it expires. Signing out revokes the session (`POST /auth/v1/logout`) and deletes the keychain entry.
 - **Cloud API client:** the same crate provides a typed client for `/v1/*`. The Tauri commands are `cloud_sign_in`, `cloud_session`, `cloud_sign_out`, `cloud_connections_list`, `cloud_connect`, `cloud_sync` and `cloud_ask`.

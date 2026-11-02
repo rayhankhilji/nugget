@@ -23,7 +23,7 @@
 //! | OS / session | Escape ×3 | Notes |
 //! |---|---|---|
 //! | macOS | NSEvent global key-down monitor | Needs Accessibility permission; without it the monitor sees nothing (the tray still works). |
-//! | Windows | `WH_KEYBOARD_LL` hook | Passed through with `CallNextHookEx`. Elevated windows are not observed unless Nugget is elevated. |
+//! | Windows | `WH_KEYBOARD_LL` hook | Passed through with `CallNextHookEx`. Elevated windows are not observed unless Heed is elevated. |
 //! | Linux X11 | XInput2 raw events | |
 //! | Linux Wayland | Unsupported | Falls back to the [`FALLBACK_CHORD`] chord through the GlobalShortcuts portal (the desktop may ask the user to confirm the binding). |
 //! | Headless / other | Unsupported | Logged; only the tray item works. |

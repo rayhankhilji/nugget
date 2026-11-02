@@ -24,7 +24,7 @@ use tauri::{
 
 use crate::daemon::CmdError;
 
-/// Passed by a compositor key binding: toggle the quick-ask window in the running Nugget.
+/// Passed by a compositor key binding: toggle the quick-ask window in the running Heed.
 pub const QUICK_ASK_ARG: &str = "--quick-ask";
 /// The window's label.
 pub const LABEL: &str = "quickask";
@@ -89,7 +89,7 @@ pub fn parse_shortcut(shortcut: &str, platform: Platform) -> Result<Chord, Strin
     for reserved in RESERVED {
         if parse_chord_for(reserved, platform).is_ok_and(|r| r == chord) {
             return Err(format!(
-                "{} is already used by Nugget; pick another shortcut",
+                "{} is already used by Heed; pick another shortcut",
                 chord.accelerator_for(platform)
             ));
         }
@@ -314,7 +314,7 @@ pub fn setup(app: &App) {
 
 fn create_window(app: &App) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("quickask.html".into()))
-        .title("Nugget Quick Ask")
+        .title("Heed Quick Ask")
         .inner_size(SIZE.0, SIZE.1)
         .decorations(false)
         .resizable(false)

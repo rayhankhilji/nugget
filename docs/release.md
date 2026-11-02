@@ -194,7 +194,7 @@ the beta channel receives.
 
   ```sh
   git switch main && git pull --ff-only
-  git tag -s v1.0.0-rc.1 -m "Nugget 1.0.0-rc.1
+  git tag -s v1.0.0-rc.1 -m "Heed 1.0.0-rc.1
 
   Release candidate. - what changed, for users"
   git push origin v1.0.0-rc.1
@@ -215,27 +215,27 @@ the beta channel receives.
 
 - [ ] **Contents**: every installer of §1 (arm64 may be missing), a `.sig` per updater payload,
   `latest.json` + `.sig`, `SHA256SUMS`, three SBOMs; no bundle reports or smoke logs.
-- [ ] `sha256sum -c SHA256SUMS` and `gh attestation verify Nugget_1.0.0-rc.1_amd64.AppImage -R $R`.
+- [ ] `sha256sum -c SHA256SUMS` and `gh attestation verify Heed_1.0.0-rc.1_amd64.AppImage -R $R`.
 - [ ] **Updater signatures** (the `sign` job already checks them with
   `packaging/scripts/check_release_keys.py`) and **macOS** (both architectures):
 
   ```sh
   gh variable get NUGGET_UPDATER_PUBKEY -R $R | base64 -d > updater.pub
-  base64 -d Nugget_1.0.0-rc.1_amd64.AppImage.sig > appimage.minisig
-  minisign -V -p updater.pub -m Nugget_1.0.0-rc.1_amd64.AppImage -x appimage.minisig
+  base64 -d Heed_1.0.0-rc.1_amd64.AppImage.sig > appimage.minisig
+  minisign -V -p updater.pub -m Heed_1.0.0-rc.1_amd64.AppImage -x appimage.minisig
   base64 -d latest.json.sig > latest.minisig && minisign -V -p updater.pub -m latest.json -x latest.minisig
-  codesign --verify --deep --strict --verbose=2 /Applications/Nugget.app
-  codesign -dv --verbose=4 /Applications/Nugget.app/Contents/MacOS/nuggetd   # Authority=Developer ID Application: …
-  spctl -a -vv /Applications/Nugget.app                                      # source=Notarized Developer ID
-  xcrun stapler validate /Applications/Nugget.app
+  codesign --verify --deep --strict --verbose=2 /Applications/Heed.app
+  codesign -dv --verbose=4 /Applications/Heed.app/Contents/MacOS/nuggetd   # Authority=Developer ID Application: …
+  spctl -a -vv /Applications/Heed.app                                      # source=Notarized Developer ID
+  xcrun stapler validate /Applications/Heed.app
   ```
 
 - [ ] **Windows** (each *Valid*, the validated signer, timestamped):
 
   ```powershell
-  signtool verify /pa /all /v Nugget_1.0.0-rc.1_x64-setup.exe
-  signtool verify /pa /all /v Nugget_1.0.0-rc.1_x64_en-US.msi
-  Get-AuthenticodeSignature "$env:LOCALAPPDATA\Nugget\nugget-desktop.exe", "$env:LOCALAPPDATA\Nugget\nuggetd.exe", "$env:LOCALAPPDATA\Nugget\uninstall.exe" |
+  signtool verify /pa /all /v Heed_1.0.0-rc.1_x64-setup.exe
+  signtool verify /pa /all /v Heed_1.0.0-rc.1_x64_en-US.msi
+  Get-AuthenticodeSignature "$env:LOCALAPPDATA\Heed\nugget-desktop.exe", "$env:LOCALAPPDATA\Heed\nuggetd.exe", "$env:LOCALAPPDATA\Heed\uninstall.exe" |
     Format-Table Status, @{n='Signer';e={$_.SignerCertificate.Subject}}, @{n='Timestamp';e={$_.TimeStamperCertificate.Subject}}
   ```
 
@@ -245,7 +245,7 @@ the beta channel receives.
 ## Step 9. Cut v1.0.0
 
 - [ ] Bump to `1.0.0` as in Step 7, merge, Step 6.
-- [ ] `git tag -s v1.0.0 -m "Nugget 1.0.0 …"` and `git push origin v1.0.0`.
+- [ ] `git tag -s v1.0.0 -m "Heed 1.0.0 …"` and `git push origin v1.0.0`.
 - [ ] Watch, approve `sign` (second maintainer, `git tag -v`), Step 8, Publish.
 - [ ] `channels` logs `beta -> v1.0.0` and `stable -> v1.0.0`; verify the feed:
   `gh release download updater-feed -R $R -p 'stable.json*' -D feed`, then `minisign` as above.
@@ -277,8 +277,8 @@ updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line 
 
 | Platform | Runner | Target | Installers | Updater payload |
 |---|---|---|---|---|
-| macOS Apple silicon | `macos-15` | `aarch64-apple-darwin` | `.app`, `.dmg` | `Nugget_<v>_aarch64.app.tar.gz` |
-| macOS Intel | `macos-15-intel` | `x86_64-apple-darwin` | `.app`, `.dmg` | `Nugget_<v>_x64.app.tar.gz` |
+| macOS Apple silicon | `macos-15` | `aarch64-apple-darwin` | `.app`, `.dmg` | `Heed_<v>_aarch64.app.tar.gz` |
+| macOS Intel | `macos-15-intel` | `x86_64-apple-darwin` | `.app`, `.dmg` | `Heed_<v>_x64.app.tar.gz` |
 | Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | NSIS `-setup.exe` (per-user), MSI | both |
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three |
 | Linux arm64 | `ubuntu-22.04-arm` | `aarch64-unknown-linux-gnu` | AppImage, `.deb`, `.rpm` | all three (may fail without blocking) |
@@ -294,8 +294,8 @@ updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line 
 
 The daemon ships as a Tauri sidecar (`bundle.externalBin`), staged as
 `apps/desktop/src-tauri/binaries/nuggetd-<target-triple>[.exe]` and installed next to the app,
-where `daemon::find_nuggetd()` looks first: `Nugget.app/Contents/MacOS/nuggetd` (signed with the
-app), `%LOCALAPPDATA%\Nugget\nuggetd.exe` (NSIS), `C:\Program Files\Nugget\nuggetd.exe` (MSI),
+where `daemon::find_nuggetd()` looks first: `Heed.app/Contents/MacOS/nuggetd` (signed with the
+app), `%LOCALAPPDATA%\Heed\nuggetd.exe` (NSIS), `C:\Program Files\Heed\nuggetd.exe` (MSI),
 `/usr/bin/nuggetd` (deb/rpm), `$APPDIR/usr/bin/nuggetd` (AppImage). It is in an overlay config
 because `tauri-build` refuses to compile when an `externalBin` file is missing.
 
@@ -357,7 +357,7 @@ Installing one: [install guide](book/src/guide/install.md#dry-run-installers).
 
 `smoke-appimage.sh` (Linux x64, under Xvfb), `smoke-macos.sh` (aarch64 dmg) and
 `smoke-windows.ps1` (NSIS, silent install and uninstall) launch the app with throwaway
-`HOME`/`NUGGET_HOME`, wait for a `Nugget` window, `starting nuggetd` and `connected to nuggetd`,
+`HOME`/`NUGGET_HOME`, wait for a `Heed` window, `starting nuggetd` and `connected to nuggetd`,
 close it as a user would, expect a clean exit, stop the daemon (SIGTERM; `CTRL_BREAK` on Windows)
 and require `stopped`. `package-smoke.yml` and `real-os.yml` run them weekly and on demand
 (`gh workflow run real-os.yml --ref <branch>`).

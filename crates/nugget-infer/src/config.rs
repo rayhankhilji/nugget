@@ -750,7 +750,7 @@ mod tests {
         for name in ["anthropic-beta", "X-Title", "HTTP-Referer", "user-agent"] {
             assert!(!is_sensitive_header(name), "{name}");
         }
-        cfg(&format!("{base}headers = {{ \"X-Title\" = \"Nugget\" }}")).unwrap();
+        cfg(&format!("{base}headers = {{ \"X-Title\" = \"Heed\" }}")).unwrap();
     }
 
     #[test]
@@ -769,14 +769,14 @@ mod tests {
             id = "a"
             kind = "anthropic"
             model = "m"
-            headers = { "proxy-authorization" = "env:GW_TOKEN", "cookie" = "keychain:cookie", "X-Title" = "Nugget" }
+            headers = { "proxy-authorization" = "env:GW_TOKEN", "cookie" = "keychain:cookie", "X-Title" = "Heed" }
         "#)
         .unwrap();
         let h = resolve_headers(&c, &Fake).unwrap();
         let get = |n: &str| h.iter().find(|(k, _)| k.as_str() == n).unwrap().1.clone();
         assert_eq!(get("proxy-authorization").to_str().unwrap(), "Bearer abc");
         assert_eq!(get("cookie").to_str().unwrap(), "sid=1");
-        assert_eq!(get("x-title").to_str().unwrap(), "Nugget");
+        assert_eq!(get("x-title").to_str().unwrap(), "Heed");
         assert!(h.iter().all(|(_, v)| v.is_sensitive()));
         let mut missing = c.clone();
         missing

@@ -1,6 +1,6 @@
-# Nugget plugin template
+# Heed plugin template
 
-A working plugin with one **connector** (pulls items from a JSON API into Nugget) and one **tool**
+A working plugin with one **connector** (pulls items from a JSON API into Heed) and one **tool**
 (`word_count`, for the agent), native tests, and a manifest. Start here; the author guide is
 [`docs/plugins.md`](../../docs/plugins.md).
 
@@ -23,7 +23,7 @@ You need Rust (stable, 1.88 or newer) and the wasm target: `rustup target add wa
 cp -r plugins/template ~/my-plugin && cd ~/my-plugin
 ```
 
-- In `Cargo.toml`, rename the crate (`name = "my-nugget-plugin"`). Outside the Nugget repository,
+- In `Cargo.toml`, rename the crate (`name = "my-nugget-plugin"`). Outside the Heed repository,
   switch the SDK dependency to the git line in the comment above it.
 - In `nugget-plugin.toml`, set your own reverse-DNS `id` (say `com.yourname.notes`), `name` and
   `description`, and list the hosts you will really call under `capabilities.hosts`.
@@ -36,7 +36,7 @@ cargo test-native
 
 This runs `src/tests.rs` on your machine's own target. Every SDK host call goes to
 `nugget_plugin_sdk::testing::TestHost`, built from your `nugget-plugin.toml`: canned HTTP responses
-(an undeclared host is denied, as in Nugget), an in-memory key-value store and secrets, a fake
+(an undeclared host is denied, as in Heed), an in-memory key-value store and secrets, a fake
 clock, file roots and a sink that records what the connector sent. Nothing touches the network.
 
 **3. Build the component.**
@@ -46,7 +46,7 @@ cargo build --release
 # -> target/wasm32-wasip2/release/my_nugget_plugin.wasm
 ```
 
-**4. Package and sign** with a throwaway development key. From a checkout of the Nugget repository:
+**4. Package and sign** with a throwaway development key. From a checkout of the Heed repository:
 
 ```sh
 mkdir -p dist/my-plugin
@@ -60,7 +60,7 @@ cargo run -p nugget-plugin --example sign-plugin -- dist/my-plugin --out dist/my
 `sign-plugin` validates the manifest with the same parser the daemon uses, writes
 `dist/my-plugin.nuggetplugin` and prints the signer's public key.
 
-**5. Install.** Add the printed public key to `trusted_keys` in the `[plugins]` section of Nugget's
+**5. Install.** Add the printed public key to `trusted_keys` in the `[plugins]` section of Heed's
 `config.toml` (see the data-directory reference for where it lives) and restart the daemon:
 
 ```toml

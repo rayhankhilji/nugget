@@ -22,7 +22,7 @@ cat >ca.cnf <<'EOF'
 distinguished_name = dn
 prompt = no
 [dn]
-CN = Nugget release rehearsal CA (throwaway, test only)
+CN = Heed release rehearsal CA (throwaway, test only)
 [ext]
 basicConstraints = critical, CA:TRUE, pathlen:0
 keyUsage = critical, keyCertSign, cRLSign

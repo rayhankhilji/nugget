@@ -1,4 +1,4 @@
-//! Nugget's own agent loop for computer use and multi-step tasks.
+//! Heed's own agent loop for computer use and multi-step tasks.
 //!
 //! [`Agent::run`] drives model turns with [`Tool`]s: each call is validated, given an idempotent
 //! action id ([`ledger`]), checked against the [`PolicyGate`](nugget_policy::PolicyGate) (with

@@ -37,9 +37,9 @@ pub(crate) struct ExportResult {
     pub damaged_items: u64,
 }
 
-const README: &str = "# Nugget export
+const README: &str = "# Heed export
 
-This folder holds everything Nugget stored, in open formats. It is **not encrypted**: keep it
+This folder holds everything Heed stored, in open formats. It is **not encrypted**: keep it
 somewhere safe and delete it when you no longer need it.
 
 | File | Contents |
@@ -48,7 +48,7 @@ somewhere safe and delete it when you no longer need it.
 | `graph.json` | The knowledge graph: `{\"format\": 1, \"entities\": [...], \"claims\": [...], \"mentions\": [...]}`. Entities carry aliases and identifiers, claims their evidence. Merged and deleted entities are included. |
 | `audit.csv` | The audit log, oldest first: `seq,at,actor,action,target,detail,prev_hash,hash`. |
 | `egress.csv` | The egress ledger: every request that left this computer. |
-| `vault/` | The Markdown vault, one page per entity (Nugget's internal `.nugget/` state is left out). |
+| `vault/` | The Markdown vault, one page per entity (Heed's internal `.nugget/` state is left out). |
 
 CSV files are RFC 4180 (CRLF line ends, quoted cells), written verbatim: import them as text in
 a spreadsheet if their contents are untrusted.

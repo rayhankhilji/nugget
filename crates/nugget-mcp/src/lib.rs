@@ -1,4 +1,4 @@
-//! `nugget-mcp`: Nugget's [Model Context Protocol](https://modelcontextprotocol.io) server.
+//! `nugget-mcp`: Heed's [Model Context Protocol](https://modelcontextprotocol.io) server.
 //!
 //! It lets MCP apps (Claude Desktop, Claude Code, Cursor, ...) query the user's knowledge, and
 //! nothing more:

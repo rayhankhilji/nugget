@@ -2,7 +2,7 @@
 //! learn their shortcut without touching another app.
 //!
 //! While the field has focus the page sends its state ([`PracticeField`]). When the trigger fires
-//! and Nugget's main window is in front with that state set, the flow drafts for real (the same
+//! and Heed's main window is in front with that state set, the flow drafts for real (the same
 //! `draft.begin`, the user's chosen provider) from a sandbox context: a sample message to answer
 //! and the practice field's text. Nothing is read from or inserted into another app: Insert sends
 //! the text to the page ([`Action::Insert`]). Practice drafts send no `draft.feedback` (they are
@@ -87,7 +87,7 @@ impl PracticeField {
     pub fn app() -> AppInfo {
         AppInfo {
             id: Some(APP_ID.into()),
-            name: "Nugget practice".into(),
+            name: "Heed practice".into(),
             window_title: None,
             url: None,
         }

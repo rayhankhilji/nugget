@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when the Nugget book drifts from the code.
+"""Fail when the Heed book drifts from the code.
 
 Run from anywhere: `python3 docs/book/check-refs.py`. Exit status 1 lists every problem.
 Standard library only (Python 3.11+ for tomllib). See docs/book/src/contributing/docs.md.

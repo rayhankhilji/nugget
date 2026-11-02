@@ -246,7 +246,7 @@ fn register_text_fn(conn: &Connection, name: &str, f: fn(&str) -> String) -> rus
     )
 }
 
-/// Register Nugget's FTS functions on `conn`: `fts_normalize` ([`index_form`]) and
+/// Register Heed's FTS functions on `conn`: `fts_normalize` ([`index_form`]) and
 /// `fts_reversed` ([`reversed_form`]), which the FTS triggers call, so every connection that
 /// writes items or chunks needs them; and `fts_segment` ([`segment`] alone), the index form
 /// before v12, which migrations use.

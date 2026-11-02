@@ -8,7 +8,7 @@
 //! when: Double Tap is off; the kill switch is engaged; the field is secure or its label or
 //! placeholder names a secret (password, PIN, one-time code, card number…); the app is
 //! excluded (the user's list and the accessibility deny list), a terminal (unless allowed) or
-//! Nugget itself; the field is a search box. Automatic suggestions additionally need the
+//! Heed itself; the field is a search box. Automatic suggestions additionally need the
 //! automatic setting on, a precise caret (not a frame guess), an empty selection, text before the
 //! caret and nothing but whitespace after it on its line. The daemon gates every request again
 //! (`draft.begin`), and the draft engine's grounding, injection filter, sensitivity rules and
@@ -17,7 +17,7 @@
 //! # The window
 //!
 //! One transparent, undecorated, always-on-top window (`overlay.html#ghost`) that ignores the
-//! mouse and is never focused: it is shown without activating Nugget (`orderFrontRegardless` on
+//! mouse and is never focused: it is shown without activating Heed (`orderFrontRegardless` on
 //! macOS, a no-activate window elsewhere), so the keyboard stays in the user's app. When the
 //! field's frame is known the window spans the field from the caret's line down, and the text
 //! starts with an indent up to the caret, so it wraps like text typed there.
@@ -99,7 +99,7 @@ fn create_window(app: &tauri::App) -> tauri::Result<()> {
         GHOST_LABEL,
         WebviewUrl::App("overlay.html#ghost".into()),
     )
-    .title("Nugget suggestion")
+    .title("Heed suggestion")
     .inner_size(MAX_WIDTH, 40.0)
     .decorations(false)
     .resizable(false)
@@ -326,7 +326,7 @@ fn names_payment(label: &str) -> bool {
 }
 
 /// Why no suggestion may be shown in this field, if one may not. `own`: the field is in a
-/// Nugget window.
+/// Heed window.
 pub fn refusal(
     r: &CaretRead,
     s: &DoubleTapSettings,
@@ -759,7 +759,7 @@ pub fn layout(g: &CaretGeometry, rtl: bool, units: Units, monitors: &[Monitor]) 
 mod native {
     //! A plain NSWindow made to behave like a non-activating panel: it ignores the mouse, floats
     //! above normal windows on every Space (full-screen apps included), and is ordered front
-    //! with `orderFrontRegardless`, which never makes it key or activates Nugget. That gives the
+    //! with `orderFrontRegardless`, which never makes it key or activates Heed. That gives the
     //! nonactivatingPanel behaviour without swapping the class of Tauri's own window subclass at
     //! runtime.
 

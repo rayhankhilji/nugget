@@ -2120,7 +2120,7 @@ mod tests {
         let app = AppInfo {
             id: Some("google-chrome".into()),
             name: "Google Chrome".into(),
-            window_title: Some("Nugget fixture: Mail compose - Google Chrome".into()),
+            window_title: Some("Heed fixture: Mail compose - Google Chrome".into()),
             url: None,
         };
         let ctx = extract(&snap, &app, "Draft:", &ThreadLimits::default());

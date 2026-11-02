@@ -258,9 +258,9 @@ _No facts yet._
 "#;
 
 const README_GOLDEN: &str = r#"<!-- nugget:begin index -->
-# Nugget vault
+# Heed vault
 
-Generated from your Nugget knowledge graph. Every fact cites its sources; facts marked (you) came from your own edits. Text outside the generated blocks, including each page's Notes section, is yours and survives re-renders. Edit a fact line to correct it, or delete it to retract it.
+Generated from your Heed knowledge graph. Every fact cites its sources; facts marked (you) came from your own edits. Text outside the generated blocks, including each page's Notes section, is yours and survives re-renders. Edit a fact line to correct it, or delete it to retract it.
 
 ## Person (1)
 
@@ -1118,10 +1118,10 @@ fn merge_log_renders_a_cited_section() {
     assert_eq!(
         block_body(&t, "merged"),
         "## Merged\n\n\
-Nugget recognised these as the same person and combined them into this page:\n\n\
+Heed recognised these as the same person and combined them into this page:\n\n\
 - Sam L: Same address sam@example.com as Samantha Lee. (because: shared email, nickname) [^3]\n\
 - S. &lt;!-- nugget:end merged --&gt; [ [x] ] ## Notes: Hostile &lt;!-- c:1 --&gt; detail [ ^1]\n\n\
-If any of these is a different person, you can split it off again in Nugget; the facts it brought will move to a page of its own. This section is generated: edits to it are not applied, so keep your own notes below.\n",
+If any of these is a different person, you can split it off again in Heed; the facts it brought will move to a page of its own. This section is generated: edits to it are not applied, so keep your own notes below.\n",
         "{t}"
     );
     // The section sits between Related and the sources; its footnote is defined (no quote).

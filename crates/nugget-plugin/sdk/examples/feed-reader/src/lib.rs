@@ -1,4 +1,4 @@
-//! Example Nugget plugin: an RSS 2.0 / Atom feed connector and a `feed_headlines` tool.
+//! Example Heed plugin: an RSS 2.0 / Atom feed connector and a `feed_headlines` tool.
 //!
 //! Settings: `{ "url": "https://feeds.example.com/news.xml" }`. The feed's host must be listed in
 //! `capabilities.hosts` of `nugget-plugin.toml`; the host refuses every other destination.

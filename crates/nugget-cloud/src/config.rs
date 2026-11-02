@@ -89,7 +89,7 @@ impl Config {
             model_fast: opt("NUGGET_MODEL_FAST"),
             model_smart: opt("NUGGET_MODEL_SMART"),
             connect_callback: opt("NUGGET_CONNECT_CALLBACK")
-                .unwrap_or_else(|| "nugget://connections/callback".into()),
+                .unwrap_or_else(|| "heed://connections/callback".into()),
             stripe_secret_key: opt("STRIPE_SECRET_KEY"),
             stripe_webhook_secret: opt("STRIPE_WEBHOOK_SECRET"),
             stripe_base: opt("NUGGET_STRIPE_BASE_URL")
@@ -97,7 +97,7 @@ impl Config {
             public_url: opt("NUGGET_PUBLIC_URL").map(|u| u.trim_end_matches('/').to_owned()),
             app_scheme: opt("NUGGET_APP_SCHEME")
                 .filter(|s| s.chars().all(|c| c.is_ascii_lowercase()))
-                .unwrap_or_else(|| "nugget".into()),
+                .unwrap_or_else(|| "heed".into()),
         })
     }
 }

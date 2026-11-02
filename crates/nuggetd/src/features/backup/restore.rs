@@ -169,7 +169,7 @@ pub(crate) fn stage(paths: &Paths, req: &StageRequest<'_>) -> Result<Ready> {
     let manifest = Manifest::read(dir)?;
     if manifest.schema_version > nugget_store::SCHEMA_VERSION {
         return Err(Error::Unsupported(format!(
-            "the backup was made by a newer Nugget (store schema {}, this one reads up to {}); update Nugget first",
+            "the backup was made by a newer Heed (store schema {}, this one reads up to {}); update Heed first",
             manifest.schema_version,
             nugget_store::SCHEMA_VERSION
         )));

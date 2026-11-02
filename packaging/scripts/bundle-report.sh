@@ -49,11 +49,11 @@ echo
 echo "### Sidecar layout"
 case "$target" in
   *apple-darwin)
-    app="$bundle/macos/Nugget.app"
+    app="$bundle/macos/Heed.app"
     echo
-    echo "\`Nugget.app\`: $(du -sk "$app" | awk '{ printf "%.1f MiB", $1 / 1024 }') on disk"
-    listing "Nugget.app/Contents/MacOS" ls -l "$app/Contents/MacOS"
-    listing "Nugget.app (all files)" find "$app" -type f
+    echo "\`Heed.app\`: $(du -sk "$app" | awk '{ printf "%.1f MiB", $1 / 1024 }') on disk"
+    listing "Heed.app/Contents/MacOS" ls -l "$app/Contents/MacOS"
+    listing "Heed.app (all files)" find "$app" -type f
     listing "codesign (ad-hoc on a dry run)" codesign -dv "$app"
     ;;
   *windows*)

@@ -1,9 +1,9 @@
-; "Your Nugget data": the uninstaller page that says what an uninstall leaves behind and offers to
+; "Your Heed data": the uninstaller page that says what an uninstall leaves behind and offers to
 ; remove it. Included from installer-hooks.nsh, so it lands near the top of Tauri's
 ; installer.nsi template, before the template's own uninstaller pages: this page comes first, then
 ; Tauri's confirm page, then the progress page.
 ;
-; What Nugget keeps, per user (see docs/book/src/reference/data-dir.md and guide/uninstall.md):
+; What Heed keeps, per user (see docs/book/src/reference/data-dir.md and guide/uninstall.md):
 ;   %LOCALAPPDATA%\Nugget\Nugget\data     models, the encrypted store, logs (nugget-core paths.rs:
 ;                                         directories::ProjectDirs("dev", "Nugget", "Nugget"))
 ;   %LOCALAPPDATA%\Nugget\Nugget\cache
@@ -16,14 +16,14 @@
 ;
 ; Rules:
 ; - Nothing is removed unless the user ticks a box. Both boxes start unticked.
-; - The vault box is enabled only once "Remove models and Nugget's data" is ticked, and asks again
+; - The vault box is enabled only once "Remove models and Heed's data" is ticked, and asks again
 ;   before it is accepted. Keeping the data and deleting only the notes is not offered: the index
 ;   would keep pointing at pages that are gone, and the vault is the part people care about most.
 ; - A vault at a folder the user chose ([vault] path in config.toml) is listed but never deleted.
 ; - Updates (/UPDATE) never show the page and never remove anything. Silent (/S) and passive (/P)
 ;   uninstalls keep everything, unless the command line asks with /REMOVEDATA (and /REMOVEVAULT).
 ; - Tauri's own "Delete the application data" box on the next page removes only the
-;   dev.nugget.desktop folders. Removing Nugget's data here includes them, so it turns that on too.
+;   dev.nugget.desktop folders. Removing Heed's data here includes them, so it turns that on too.
 ;
 ; Variables Tauri declares later in the template ($UpdateMode, $PassiveMode,
 ; $DeleteAppDataCheckboxState) are only used from the hook macros in installer-hooks.nsh, which are
@@ -53,7 +53,7 @@ Var NuggetList
 
 ; The confirm page that follows is Tauri's; say what its checkbox does, so the two pages don't read
 ; as two answers to one question. (Consumed by the template's MUI_UNPAGE_CONFIRM.)
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "Nugget will be uninstalled from the following folder. The box below clears only the app window's settings and cache. Models, data and your vault are kept unless you chose otherwise on the previous page."
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "Heed will be uninstalled from the following folder. The box below clears only the app window's settings and cache. Models, data and your vault are kept unless you chose otherwise on the previous page."
 
 UninstPage custom un.NuggetDataPage un.NuggetDataLeave
 
@@ -281,7 +281,7 @@ Function un.NuggetDataPage
   ${EndIf}
   Call un.NuggetFindVault
 
-  ; Nothing to say when Nugget never ran.
+  ; Nothing to say when Heed never ran.
   ${IfNot} ${FileExists} "$LOCALAPPDATA\Nugget\Nugget\*.*"
   ${AndIfNot} ${FileExists} "$APPDATA\Nugget\Nugget\*.*"
   ${AndIfNot} ${FileExists} "$APPDATA\dev.nugget.desktop\*.*"
@@ -291,7 +291,7 @@ Function un.NuggetDataPage
     Abort
   ${EndIf}
 
-  !insertmacro MUI_HEADER_TEXT "Your Nugget data" "Nothing below is deleted unless you tick a box."
+  !insertmacro MUI_HEADER_TEXT "Your Heed data" "Nothing below is deleted unless you tick a box."
   nsDialogs::Create 1018
   Pop $R0
   ${If} $R0 == error
@@ -299,7 +299,7 @@ Function un.NuggetDataPage
   ${EndIf}
   StrCpy $NuggetPageShown 1
 
-  ${NSD_CreateLabel} 0 0 100% 18u "Uninstalling removes the Nugget app. These stay on this computer, so a reinstall picks up where you left off:"
+  ${NSD_CreateLabel} 0 0 100% 18u "Uninstalling removes the Heed app. These stay on this computer, so a reinstall picks up where you left off:"
   Pop $R0
 
   nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}|${ES_AUTOVSCROLL}" "${WS_EX_CLIENTEDGE}" 0 19u 100% 58u ""
@@ -345,7 +345,7 @@ Function un.NuggetDataPage
   !insertmacro NUGGET_LIST_LINE "Backups you made stay where you saved them."
   SendMessage $NuggetList ${EM_SETSEL} 0 0
 
-  ${NSD_CreateCheckbox} 0 80u 100% 11u "&Remove models and Nugget's data (index, settings, logs, saved keys)"
+  ${NSD_CreateCheckbox} 0 80u 100% 11u "&Remove models and Heed's data (index, settings, logs, saved keys)"
   Pop $NuggetDataCheck
   ${NSD_OnClick} $NuggetDataCheck un.NuggetDataClick
 
@@ -446,7 +446,7 @@ Function un.NuggetRemoveKeys
   InitPluginsDir
   File "/oname=$PLUGINSDIR\remove-nugget-keys.ps1" "${NUGGET_WIN_DIR}\remove-nugget-keys.ps1"
   System::Call 'kernel32::SetEnvironmentVariable(t "NUGGET_REMOVE_KEYS_PS1", t "$PLUGINSDIR\remove-nugget-keys.ps1") i'
-  DetailPrint "Removing Nugget's saved keys from Windows Credential Manager"
+  DetailPrint "Removing Heed's saved keys from Windows Credential Manager"
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -Command "& ([scriptblock]::Create([IO.File]::ReadAllText($$env:NUGGET_REMOVE_KEYS_PS1))); exit $$LASTEXITCODE"'
   Pop $R0
   ${If} $R0 != 0
@@ -465,13 +465,13 @@ Function un.NuggetRemoveAll
   StrCpy $NuggetLeftovers ""
   ${If} $LOCALAPPDATA == ""
   ${OrIf} $APPDATA == ""
-    DetailPrint "Nugget's data was kept: the AppData folders could not be resolved"
+    DetailPrint "Heed's data was kept: the AppData folders could not be resolved"
     Pop $R1
     Pop $R0
     Return
   ${EndIf}
   ; Read config.toml again (a silent uninstall without /REMOVEVAULT never did): a vault the user
-  ; put inside Nugget's own folders keeps that folder.
+  ; put inside Heed's own folders keeps that folder.
   Call un.NuggetFindVault
 
   ; Keys first, so a failure to delete files never leaves keys without their data's owner knowing.
@@ -479,7 +479,8 @@ Function un.NuggetRemoveAll
 
   !insertmacro NUGGET_RMDIR_KEEP_VAULT "$LOCALAPPDATA\Nugget\Nugget"  ; data (models, store, logs), cache
   !insertmacro NUGGET_RMDIR_KEEP_VAULT "$APPDATA\Nugget\Nugget"       ; config
-  RMDir "$LOCALAPPDATA\Nugget"  ; only when empty; usually the install folder itself
+  ; The data folders keep their pre-rename parent, Nugget (nugget-core paths.rs).
+  RMDir "$LOCALAPPDATA\Nugget"  ; only when empty
   RMDir "$APPDATA\Nugget"
   RMDir "$INSTDIR"
   ; Tauri's own removal uses RmDir /r and may fail on a locked WebView file; report it too.
@@ -497,7 +498,7 @@ Function un.NuggetRemoveAll
 
   ${If} $NuggetLeftovers != ""
     DetailPrint "Could not remove:$NuggetLeftovers"
-    MessageBox MB_OK|MB_ICONEXCLAMATION "Some of Nugget's data could not be removed:$\r$\n$NuggetLeftovers$\r$\n$\r$\nDelete it yourself; the Nugget guide's Uninstall page lists every location." /SD IDOK
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Some of Heed's data could not be removed:$\r$\n$NuggetLeftovers$\r$\n$\r$\nDelete it yourself; the Heed guide's Uninstall page lists every location." /SD IDOK
   ${EndIf}
   Pop $R1
   Pop $R0

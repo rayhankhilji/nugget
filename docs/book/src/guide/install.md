@@ -12,11 +12,11 @@ Every installer bundles the desktop app (`nugget-desktop`) and the background se
 
 | Platform | File | Installs to |
 |---|---|---|
-| macOS 11+, Apple Silicon / Intel | `Nugget_<v>_aarch64.dmg` / `Nugget_<v>_x64.dmg` | `/Applications/Nugget.app` (you drag it there) |
-| Windows 10 and 11, x64 | `Nugget_<v>_x64-setup.exe` (recommended) | `%LOCALAPPDATA%\Nugget`, for your user only; no admin rights |
-| Windows 10 and 11, x64 | `Nugget_<v>_x64_en-US.msi` | `C:\Program Files\Nugget`, needs admin rights |
-| Linux x64 | `Nugget_<v>_amd64.AppImage`, `.deb`, `.rpm` | AppImage: anywhere; packages: `/usr/bin/` |
-| Linux arm64 (experimental, may be missing) | `Nugget_<v>_aarch64.AppImage`, `_arm64.deb`, `.aarch64.rpm` | As for x64 |
+| macOS 11+, Apple Silicon / Intel | `Heed_<v>_aarch64.dmg` / `Heed_<v>_x64.dmg` | `/Applications/Heed.app` (you drag it there) |
+| Windows 10 and 11, x64 | `Heed_<v>_x64-setup.exe` (recommended) | `%LOCALAPPDATA%\Heed`, for your user only; no admin rights |
+| Windows 10 and 11, x64 | `Heed_<v>_x64_en-US.msi` | `C:\Program Files\Heed`, needs admin rights |
+| Linux x64 | `Heed_<v>_amd64.AppImage`, `.deb`, `.rpm` | AppImage: anywhere; packages: `/usr/bin/` |
+| Linux arm64 (experimental, may be missing) | `Heed_<v>_aarch64.AppImage`, `_arm64.deb`, `.aarch64.rpm` | As for x64 |
 
 Linux packages need glibc 2.35+, WebKitGTK 4.1, GTK 3 and libayatana-appindicator (the `.deb` and
 `.rpm` pull these in). On Wayland the [Double Tap](double-tap.md) global shortcut does not fire yet;
@@ -30,19 +30,19 @@ catches a damaged download. To check a file was built by this repository's relea
 [GitHub CLI](https://cli.github.com/) (after `gh auth login`):
 
 ```sh
-gh attestation verify Nugget_<v>_aarch64.dmg -R rayhankhilji/nugget \
+gh attestation verify Heed_<v>_aarch64.dmg -R rayhankhilji/nugget \
   --signer-workflow rayhankhilji/nugget/.github/workflows/release.yml
 ```
 
 ## Install
 
-- **macOS:** open the `.dmg`, drag **Nugget** to **Applications**, and open it from there (run from
+- **macOS:** open the `.dmg`, drag **Heed** to **Applications**, and open it from there (run from
   the disk image, it can't start the background service at login). [Double Tap](double-tap.md) and
   [the agent](agent.md) need **System Settings → Privacy & Security → Accessibility**; macOS asks the
   first time.
 - **Windows:** run the `setup.exe`, or the `.msi` for a machine-wide install. WebView2 is downloaded
   if missing.
-- **Linux:** `chmod +x` and run the AppImage, or `sudo apt install ./Nugget_<v>_amd64.deb` (or
+- **Linux:** `chmod +x` and run the AppImage, or `sudo apt install ./Heed_<v>_amd64.deb` (or
   `dnf`/`zypper install` the `.rpm`). There is no package repository and packages aren't GPG-signed;
   updates come through the [in-app updater](#updates). Double Tap and the agent need AT-SPI enabled.
 
@@ -54,7 +54,7 @@ Installers are unsigned until the project has signing certificates, so the OS wa
 
 - **macOS:** Control-click the app → **Open** → **Open**. On macOS 15+, try to open it once, then
   click **Open Anyway** in **System Settings → Privacy & Security**. If macOS says the app *is
-  damaged*, use **Open Anyway** or run `xattr -dr com.apple.quarantine /Applications/Nugget.app`.
+  damaged*, use **Open Anyway** or run `xattr -dr com.apple.quarantine /Applications/Heed.app`.
   macOS may ask for Accessibility again after you install a different build.
 - **Windows:** SmartScreen: **More info → Run anyway**. Linux shows no warning.
 
@@ -70,12 +70,12 @@ They have no checksums, attestations or updater; install a newer one over the ol
 
 Both settings are on the **Status** page:
 
-- **Start the Nugget background service at login** registers a per-user service (launchd agent,
+- **Start the Heed background service at login** registers a per-user service (launchd agent,
   `systemd --user` unit, or Task Scheduler task) so sources stay indexed without the app open. Not
   available for an AppImage or an app run from the disk image. From a terminal:
   `nuggetd install-service` / `nuggetd uninstall-service` (on macOS the binary is
-  `/Applications/Nugget.app/Contents/MacOS/nuggetd`; see [the command line](../reference/cli.md)).
-- **Open Nugget in the tray when I log in** starts the app hidden in the tray or menu bar.
+  `/Applications/Heed.app/Contents/MacOS/nuggetd`; see [the command line](../reference/cli.md)).
+- **Open Heed in the tray when I log in** starts the app hidden in the tray or menu bar.
 
 ## Updates
 
@@ -84,7 +84,7 @@ The **Updates** card on the Status page (also **Updates…** in the tray menu):
 | Setting | Default | What it does |
 |---|---|---|
 | Channel | Not chosen (nothing is checked) | **Stable**: releases. **Beta**: also prereleases. **Off**: never check. |
-| Download updates automatically and install them when I quit Nugget | Off | Off: notify only; nothing downloads until you click **Install … and restart**. |
+| Download updates automatically and install them when I quit Heed | Off | Off: notify only; nothing downloads until you click **Install … and restart**. |
 
 Setup asks for a channel. Then the app checks a minute after launch, daily, and on **Check now**,
 fetching only the signed feed from GitHub with no identifiers (logged in the
@@ -121,7 +121,7 @@ Windows `setup.exe` uninstaller offers to remove it; elsewhere, see [Uninstall](
     librsvg2-dev libxdo-dev libsoup-3.0-dev libssl-dev file
   ```
 
-### macOS: build Nugget.app
+### macOS: build Heed.app
 
 On an Intel or Apple Silicon Mac, one script builds the app, signs it ad hoc (no Apple Developer ID
 needed) and tells you where it is. Paste each block into Terminal as it is.
@@ -149,21 +149,21 @@ needed) and tells you where it is. Paste each block into Terminal as it is.
    ```
 
    The script builds `nuggetd` and the app (with the frontend embedded), trusts the repository's
-   development model-manifest key so managed model downloads work, and signs `Nugget.app` ad hoc.
-   It ends by printing where `Nugget.app` is: `target/x86_64-apple-darwin/release/bundle/macos/`
+   development model-manifest key so managed model downloads work, and signs `Heed.app` ad hoc.
+   It ends by printing where `Heed.app` is: `target/x86_64-apple-darwin/release/bundle/macos/`
    on Intel, `target/aarch64-apple-darwin/release/bundle/macos/` on Apple Silicon.
 
-3. Move it to Applications and open it from there. Either drag `Nugget.app` into Applications in
+3. Move it to Applications and open it from there. Either drag `Heed.app` into Applications in
    Finder, or (on Intel; on Apple Silicon use `aarch64-apple-darwin`):
 
    ```sh
-   rm -rf /Applications/Nugget.app
-   ditto target/x86_64-apple-darwin/release/bundle/macos/Nugget.app /Applications/Nugget.app
-   open /Applications/Nugget.app
+   rm -rf /Applications/Heed.app
+   ditto target/x86_64-apple-darwin/release/bundle/macos/Heed.app /Applications/Heed.app
+   open /Applications/Heed.app
    ```
 
    Don't start it with `./target/.../nugget-desktop` from Terminal: macOS then files the
-   permissions below under Terminal instead of Nugget.
+   permissions below under Terminal instead of Heed.
 
 4. Turn on the permissions. Setup and the Double Tap page show what is missing, with a button that
    opens the right page of System Settings → Privacy & Security, and check again when you come
@@ -172,9 +172,9 @@ needed) and tells you where it is. Paste each block into Terminal as it is.
    - **Input Monitoring**: notice your Double Tap key.
    - **Full Disk Access**: only if you add a Messages source (it reads `~/Library/Messages`).
 
-   If Nugget isn't in a list, add it with **+** from Applications. Each build is signed afresh, so
-   after a rebuild macOS can show Nugget as on but still refuse it. Reset its entries, reopen
-   Nugget and turn them on again:
+   If Heed isn't in a list, add it with **+** from Applications. Each build is signed afresh, so
+   after a rebuild macOS can show Heed as on but still refuse it. Reset its entries, reopen
+   Heed and turn them on again:
 
    ```sh
    tccutil reset Accessibility dev.nugget.desktop

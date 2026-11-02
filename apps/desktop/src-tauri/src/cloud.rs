@@ -1,4 +1,4 @@
-//! Nugget Cloud from the shell (docs/architecture-cloud.md, section 4): sign-in, the session,
+//! Heed Cloud from the shell (docs/architecture-cloud.md, section 4): sign-in, the session,
 //! Composio connections, sync and ask, and billing (Stripe Checkout and portal), through
 //! `nugget-cloud-client`.
 //!
@@ -53,7 +53,7 @@ impl Cloud {
         match built {
             Ok(api) => Self::Ready(api),
             Err(e) => {
-                tracing::info!(reason = %e, "Nugget Cloud is off");
+                tracing::info!(reason = %e, "Heed Cloud is off");
                 Self::Off(e.to_string())
             }
         }

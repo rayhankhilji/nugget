@@ -1,4 +1,4 @@
-<!-- Nugget app icon master (original artwork, Apache-2.0). Regenerate the platform icons with
+<!-- Heed app icon master (original artwork, Apache-2.0). Regenerate the platform icons with
      packaging/scripts/icons.sh; never edit apps/desktop/src-tauri/icons/* by hand. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64">
   <rect x="2" y="2" width="60" height="60" rx="14" fill="#1f1d1a"/>

@@ -192,14 +192,14 @@ async fn respond(stream: &mut TcpStream, ok: bool) -> std::io::Result<()> {
         write_response(
             stream,
             "200 OK",
-            "Nugget is connected. You can close this tab.",
+            "Heed is connected. You can close this tab.",
         )
         .await
     } else {
         write_response(
             stream,
             "400 Bad Request",
-            "Authorization failed. You can close this tab and try again in Nugget.",
+            "Authorization failed. You can close this tab and try again in Heed.",
         )
         .await
     }
@@ -211,7 +211,7 @@ async fn write_response(
     message: &str,
 ) -> std::io::Result<()> {
     let body = format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Nugget</title></head>\
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Heed</title></head>\
          <body style=\"font-family:system-ui,sans-serif;margin:3rem\"><p>{message}</p></body></html>"
     );
     let resp = format!(

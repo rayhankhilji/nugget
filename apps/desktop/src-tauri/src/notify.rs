@@ -470,7 +470,7 @@ mod tests {
     /// Real OS (run by `.github/workflows/real-os.yml`, job `notify-*`): the title the workflow
     /// looks for on screen.
     #[cfg(any(windows, target_os = "macos"))]
-    const REAL_TITLE: &str = "Nugget notification click test";
+    const REAL_TITLE: &str = "Heed notification click test";
 
     /// Real OS: the ignored tests below run only with this set (`1`); otherwise they say so and
     /// return.

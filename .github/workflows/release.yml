@@ -346,7 +346,7 @@ jobs:
               cp "$bundle"/dmg/*.dmg "$out/"
               # The updater payload: the signed (and stapled) .app as a tarball.
               tar -C "$bundle/macos" --uid 0 --gid 0 --numeric-owner -czf \
-                "$out/Nugget_${version}_${{ matrix.arch }}.app.tar.gz" Nugget.app ;;
+                "$out/Heed_${version}_${{ matrix.arch }}.app.tar.gz" Heed.app ;;
             Windows)
               cp "$bundle"/nsis/*-setup.exe "$bundle"/msi/*.msi "$out/" ;;
             Linux)
@@ -610,7 +610,7 @@ jobs:
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag $prerelease \
-            --title "Nugget ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
+            --title "Heed ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
             "$RUNNER_TEMP"/dist/*
 
   channels:
@@ -646,7 +646,7 @@ jobs:
           if ! gh release view updater-feed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create updater-feed --repo "$GITHUB_REPOSITORY" --prerelease \
               --target "${{ github.event.repository.default_branch }}" --title "Update feed" \
-              --notes "Channel manifests read by installed Nugget apps. Moved automatically when a release is published; do not edit by hand."
+              --notes "Channel manifests read by installed Heed apps. Moved automatically when a release is published; do not edit by hand."
           fi
           channels="beta"
           [ "$PRERELEASE" = "true" ] || channels="beta stable"

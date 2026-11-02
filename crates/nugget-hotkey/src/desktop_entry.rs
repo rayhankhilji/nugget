@@ -103,7 +103,7 @@ fn ensure_with(env: &Env) -> io::Result<Option<PathBuf>> {
         Plan::Foreign(path) => {
             tracing::warn!(
                 path = %path.display(),
-                "a desktop entry Nugget did not write is in the way and cannot be loaded; the \
+                "a desktop entry Heed did not write is in the way and cannot be loaded; the \
                  desktop portal will not know this app's id"
             );
             Ok(None)
@@ -413,8 +413,8 @@ fn render_entry(appimage: &str) -> Option<String> {
     Some(format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=Nugget\n\
-         Comment=Lets the desktop portal identify Nugget run from an AppImage\n\
+         Name=Heed\n\
+         Comment=Lets the desktop portal identify Heed run from an AppImage\n\
          Exec={exec}\n\
          Icon={ICON}\n\
          StartupWMClass={WM_CLASS}\n\
@@ -537,10 +537,10 @@ mod tests {
     #[test]
     fn quoting_round_trips_through_unescape_and_parse() {
         for path in [
-            "/home/u/Apps/Nugget_0.0.1_amd64.AppImage",
-            "/home/u/My Apps/Nugget.AppImage",
+            "/home/u/Apps/Heed_0.0.1_amd64.AppImage",
+            "/home/u/My Apps/Heed.AppImage",
             r#"/tmp/we"ird/$HOME/`x`/back\slash/'q'/#;&|<>*?()~=.AppImage"#,
-            "/tmp/ünïcödé/Nugget.AppImage",
+            "/tmp/ünïcödé/Heed.AppImage",
         ] {
             let quoted = quote_exec_arg(path).unwrap();
             assert!(quoted.starts_with('"') && quoted.ends_with('"'), "{quoted}");
@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn writes_then_keeps_then_refreshes() {
         let sb = Sandbox::new();
-        let first = sb.root.join("dl/Nugget one.AppImage");
+        let first = sb.root.join("dl/Heed one.AppImage");
         exe(&first);
         let written = ensure_with(&sb.env(&first)).unwrap();
         assert_eq!(written.as_deref(), Some(sb.user_file().as_path()));
@@ -683,7 +683,7 @@ mod tests {
         assert_eq!(ensure_with(&sb.env(&first)).unwrap(), None);
 
         // The AppImage moved: our file is rewritten for the new path.
-        let second = sb.root.join("dl/Nugget-2.AppImage");
+        let second = sb.root.join("dl/Heed-2.AppImage");
         exe(&second);
         fs::remove_file(&first).unwrap();
         assert_eq!(
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn honours_xdg_data_home() {
         let sb = Sandbox::new();
-        let app = sb.root.join("Nugget.AppImage");
+        let app = sb.root.join("Heed.AppImage");
         exe(&app);
         let mut env = sb.env(&app);
         env.xdg_data_home = Some(sb.root.join("data").into());
@@ -712,7 +712,7 @@ mod tests {
     #[test]
     fn a_usable_system_entry_wins() {
         let sb = Sandbox::new();
-        let app = sb.root.join("Nugget.AppImage");
+        let app = sb.root.join("Heed.AppImage");
         exe(&app);
         exe(&sb.root.join("bin/nugget-desktop"));
         put(
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn a_broken_system_entry_is_shadowed() {
         let sb = Sandbox::new();
-        let app = sb.root.join("Nugget.AppImage");
+        let app = sb.root.join("Heed.AppImage");
         exe(&app);
         // The first match decides (GLib does not fall back), even with a good one after it.
         put(
@@ -748,7 +748,7 @@ mod tests {
     #[test]
     fn never_overwrites_a_foreign_file() {
         let sb = Sandbox::new();
-        let app = sb.root.join("Nugget.AppImage");
+        let app = sb.root.join("Heed.AppImage");
         exe(&app);
         let foreign = "[Desktop Entry]\nType=Application\nExec=/nowhere/nugget\nName=Mine\n";
         put(&sb.user_file(), foreign);

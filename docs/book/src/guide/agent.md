@@ -21,7 +21,7 @@ you when the daemon stopped is not resumed; it shows as interrupted.
 | Tools | What they do |
 |---|---|
 | Built-in | `finish` (end the task), `ask_user` (ask you a question), `note` (keep a working note) |
-| Browser | Read a page, click, type, select, scroll, navigate, submit, wait. Only on sites you allowed in the Nugget browser extension |
+| Browser | Read a page, click, type, select, scroll, navigate, submit, wait. Only on sites you allowed in the Heed browser extension |
 | Computer use | Act on desktop apps through the accessibility APIs (elements, never screen coordinates). On by default; `computer_use = false` under `[agent]` turns it off |
 | Plugins | Read-only tools from installed [plugins](plugins.md) |
 

@@ -1,8 +1,8 @@
 //! Wayland: chords through the XDG desktop portal's `GlobalShortcuts` interface (`ashpd`).
 //!
-//! The compositor owns the binding. Nugget asks for a preferred trigger; the desktop may show a
+//! The compositor owns the binding. Heed asks for a preferred trigger; the desktop may show a
 //! dialog and the user may pick a different key, so the portal, not this crate, decides what
-//! finally fires. Activation is all the portal reports: no key events reach Nugget.
+//! finally fires. Activation is all the portal reports: no key events reach Heed.
 //!
 //! Each listener binds one shortcut under a stable id ([`crate::DOUBLE_TAP_SHORTCUT_ID`] or
 //! [`crate::KILL_SWITCH_SHORTCUT_ID`]). Desktops that ask for consent (GNOME, Plasma 6) remember
@@ -54,11 +54,11 @@ fn portal_err(e: impl std::fmt::Display) -> Error {
     ))
 }
 
-/// The portal refused a session after it could not put a name on Nugget.
+/// The portal refused a session after it could not put a name on Heed.
 fn unnamed_app_err(create: impl std::fmt::Display, register: impl std::fmt::Display) -> Error {
     Error::Unsupported(format!(
         "the XDG desktop portal refused a GlobalShortcuts session ({create}) because it has no \
-         app id for Nugget: registering the app id {APP_ID} failed ({register}). The portal \
+         app id for Heed: registering the app id {APP_ID} failed ({register}). The portal \
          needs {APP_ID}.desktop in its XDG_DATA_DIRS (or ~/.local/share/applications), with an \
          Exec program that exists on its PATH: install the .deb or .rpm package, or start the \
          AppImage, which registers it under ~/.local/share/applications"

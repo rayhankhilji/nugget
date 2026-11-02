@@ -1,7 +1,7 @@
-# Nugget browser extension
+# Heed browser extension
 
 Manifest V3 extension for Chrome, Chromium, Edge (`dist/chromium`) and Firefox 128+ (`dist/firefox`).
-It lets the local Nugget daemon read and act on **sites the user has allowed**. Its only channel out is
+It lets the local Heed daemon read and act on **sites the user has allowed**. Its only channel out is
 native messaging to `nugget-browser-host` (`crates/nugget-browser`): no network access and no localhost ports.
 
 ```sh
@@ -25,7 +25,7 @@ Bundles are plain esbuild IIFEs; the build fails if `eval`, `new Function`, `imp
 - `background.ts`: native port, consent checks (`router.ts`), kill switch. Navigation goes only to granted sites.
 - `content.ts` → `agent.ts`: per-document element registry, snapshots (`snapshot.ts`), validated actions
   (`actions.ts`), post-action snapshot + diff (`diff.ts`), and the overlay (`overlay.ts`, closed shadow root, Stop button).
-- `popup.ts`: allow/remove site, Stop, and "Let Nugget act again" (only the user can resume after a Stop).
+- `popup.ts`: allow/remove site, Stop, and "Let Heed act again" (only the user can resume after a Stop).
 - `framing.ts`: message validation and size caps (1 MiB host→extension, 4 MiB extension→host).
 - `protocol.ts`: wire types; mirrored in `crates/nugget-browser/src/{protocol,snapshot,action}.rs`.
   `test/contract.test.ts` writes the shared fixtures in `crates/nugget-browser/tests/fixtures`.

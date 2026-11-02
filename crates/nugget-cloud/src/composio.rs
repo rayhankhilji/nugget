@@ -247,7 +247,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/connected_accounts/link"))
             .and(header("x-api-key", "ck"))
-            .and(body_json(json!({"auth_config_id": "ac_1", "user_id": "u1", "callback_url": "nugget://connections/callback"})))
+            .and(body_json(json!({"auth_config_id": "ac_1", "user_id": "u1", "callback_url": "heed://connections/callback"})))
             .respond_with(ResponseTemplate::new(201).set_body_json(json!({
                 "link_token": "t", "redirect_url": "https://connect/x", "expires_at": "2026-11-02T00:00:00Z",
                 "connected_account_id": "ca_1"
@@ -256,7 +256,7 @@ mod tests {
             .mount(&server)
             .await;
         let l = client(&server)
-            .create_link("u1", "ac_1", "nugget://connections/callback")
+            .create_link("u1", "ac_1", "heed://connections/callback")
             .await
             .unwrap();
         assert_eq!(

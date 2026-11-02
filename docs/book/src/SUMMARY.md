@@ -61,4 +61,4 @@
 
 ---
 
-[Nugget and Sentient OS](comparison.md)
+[Heed and Sentient OS](comparison.md)

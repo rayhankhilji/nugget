@@ -1,4 +1,4 @@
-//! Nugget desktop shell: a Tauri 2 window plus tray icon that talks to `nuggetd` over local IPC.
+//! Heed desktop shell: a Tauri 2 window plus tray icon that talks to `nuggetd` over local IPC.
 
 // No console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -26,7 +26,7 @@ mod window_state;
 use tauri::menu::{Menu, MenuItem, MenuItemKind};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, WindowEvent};
 
-/// Passed by a compositor key binding: start a Double Tap draft in the running Nugget.
+/// Passed by a compositor key binding: start a Double Tap draft in the running Heed.
 const DOUBLE_TAP_ARG: &str = "--double-tap";
 
 /// Whether a second launch's arguments (program name first) ask for a Double Tap draft.
@@ -45,7 +45,7 @@ const APP_QUIT_ID: &str = "app-quit";
 
 /// macOS: the default app menu's Quit (and ⌘Q) sends `terminate:`, which ends the app without
 /// `RunEvent::ExitRequested`, so the quit question could never be asked. It is replaced by an
-/// item that quits like the tray's Quit Nugget (`app.exit`). Not used elsewhere: Windows and
+/// item that quits like the tray's Quit Heed (`app.exit`). Not used elsewhere: Windows and
 /// Linux windows have no menu bar.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -338,7 +338,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("failed to build the Nugget app");
+        .expect("failed to build the Heed app");
 
     app.run(|handle, event| match event {
         // Every way to quit (tray, app menu, closing the window without a tray) arrives here

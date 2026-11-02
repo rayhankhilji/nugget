@@ -1,4 +1,4 @@
-// "Nugget is acting" banner with a Stop button, in a closed shadow root so the page can neither
+// "Heed is acting" banner with a Stop button, in a closed shadow root so the page can neither
 // read nor restyle it. Stop engages the kill switch (see background.ts).
 
 const OVERLAY_ATTR = "data-nugget-overlay";
@@ -45,7 +45,7 @@ export function createOverlay(doc: Document, onStop: () => void): Overlay {
     const stop = doc.createElement("button");
     stop.type = "button";
     stop.textContent = "Stop";
-    stop.setAttribute("aria-label", "Stop Nugget");
+    stop.setAttribute("aria-label", "Stop Heed");
     stop.addEventListener("click", (e) => {
       e.stopPropagation();
       onStop();
@@ -68,7 +68,7 @@ export function createOverlay(doc: Document, onStop: () => void): Overlay {
   };
 
   return {
-    show(label = "Nugget is acting on this page") {
+    show(label = "Heed is acting on this page") {
       if (!host) build();
       labelEl!.textContent = label;
       shown = true;

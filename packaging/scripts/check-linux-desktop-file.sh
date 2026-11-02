@@ -15,7 +15,7 @@ pkg="$2"
 [ -f "$pkg" ] || { echo "check-desktop: no such file: $pkg" >&2; exit 2; }
 
 app_id_file="usr/share/applications/dev.nugget.Nugget.desktop"
-tauri_file="usr/share/applications/Nugget.desktop"
+tauri_file="usr/share/applications/Heed.desktop"
 binary="/usr/bin/nugget-desktop"
 icon="nugget-desktop"
 

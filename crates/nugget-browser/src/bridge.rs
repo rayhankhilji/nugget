@@ -43,7 +43,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BridgeError {
-    #[error("no browser is connected (is the Nugget extension installed and the browser open?)")]
+    #[error("no browser is connected (is the Heed extension installed and the browser open?)")]
     NotConnected,
     #[error("the browser did not answer in time")]
     Timeout,

@@ -1,4 +1,4 @@
-//! "Start Nugget at login": runs the bundled `nuggetd install-service` / `uninstall-service`
+//! "Start Heed at login": runs the bundled `nuggetd install-service` / `uninstall-service`
 //! (launchd, systemd --user, Task Scheduler), only when the user says yes in the app.
 //!
 //! Installers don't do this themselves: deb/rpm scripts run as root for the whole machine, and
@@ -20,7 +20,7 @@ pub fn transient_location(exe: &Path, appimage: bool) -> Option<&'static str> {
     let s = exe.to_string_lossy();
     if cfg!(target_os = "macos") && (s.starts_with("/Volumes/") || s.contains("/AppTranslocation/"))
     {
-        return Some("Move Nugget to your Applications folder first, then try again.");
+        return Some("Move Heed to your Applications folder first, then try again.");
     }
     None
 }
@@ -84,7 +84,7 @@ mod tests {
         let installed = Path::new("/usr/bin/nuggetd");
         assert!(transient_location(installed, true).is_some());
         assert_eq!(transient_location(installed, false), None);
-        let dmg = Path::new("/Volumes/Nugget/Nugget.app/Contents/MacOS/nuggetd");
+        let dmg = Path::new("/Volumes/Heed/Heed.app/Contents/MacOS/nuggetd");
         assert_eq!(
             transient_location(dmg, false).is_some(),
             cfg!(target_os = "macos")

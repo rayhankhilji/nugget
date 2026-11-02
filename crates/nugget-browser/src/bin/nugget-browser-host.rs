@@ -1,4 +1,4 @@
-//! `nugget-browser-host`: the native-messaging host the Nugget browser extension talks to.
+//! `nugget-browser-host`: the native-messaging host the Heed browser extension talks to.
 //!
 //! Launched by the browser (Chrome passes the caller's origin, Firefox the manifest path and the
 //! add-on id): relays between stdio and the daemon. stdout carries the protocol, so this binary

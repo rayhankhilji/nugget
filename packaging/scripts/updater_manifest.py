@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release helpers for Nugget's signed updates (standard library only).
+"""Release helpers for Heed's signed updates (standard library only).
 
   payloads DIR                list the files in DIR the updater can install (to be signed)
   manifest DIR ...            write the Tauri updater manifest (latest.json) for a release

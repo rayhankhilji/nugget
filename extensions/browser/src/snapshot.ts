@@ -107,7 +107,7 @@ class Walker {
     if (node.nodeType !== 1 /* ELEMENT_NODE */) return;
     const el = node as Element;
     // The overlay is recognised by identity, not by its attribute: a page could otherwise hide
-    // its own content from Nugget by copying the attribute.
+    // its own content from Heed by copying the attribute.
     if (SKIP_TAGS.has(el.tagName) || isOverlay(el)) return;
 
     const style = el.ownerDocument.defaultView?.getComputedStyle(el);

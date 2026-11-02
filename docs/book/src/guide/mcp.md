@@ -1,6 +1,6 @@
 # Connecting AI apps over MCP
 
-Nugget includes a [Model Context Protocol](https://modelcontextprotocol.io) server, so apps such as
+Heed includes a [Model Context Protocol](https://modelcontextprotocol.io) server, so apps such as
 Claude Desktop, Claude Code, Cursor, VS Code and Zed can search your knowledge and cite it. MCP is on
 by default (`[mcp] enabled`, see [config.toml](../reference/config.md#mcp)). With the daemon running,
 the quickest way to connect an app is:
@@ -76,7 +76,7 @@ your shell history):
 claude mcp add --transport stdio --scope user --env NUGGET_MCP_TOKEN=ngt_YOUR_TOKEN nugget -- nuggetd mcp --client mcp_YOUR_CLIENT_ID
 ```
 
-`--scope user` makes Nugget available in every project; check with `claude mcp list`. Over HTTP:
+`--scope user` makes Heed available in every project; check with `claude mcp list`. Over HTTP:
 
 ```sh
 claude mcp add --transport http --scope user nugget http://127.0.0.1:7319/mcp --header "Authorization: Bearer ngt_YOUR_TOKEN"
@@ -112,7 +112,7 @@ secret storage:
 ```json
 {
   "inputs": [
-    { "type": "promptString", "id": "nugget-token", "description": "Nugget MCP token (ngt_...)", "password": true }
+    { "type": "promptString", "id": "nugget-token", "description": "Heed MCP token (ngt_...)", "password": true }
   ],
   "servers": {
     "nugget": {
@@ -130,7 +130,7 @@ Over HTTP:
 ```json
 {
   "inputs": [
-    { "type": "promptString", "id": "nugget-token", "description": "Nugget MCP token (ngt_...)", "password": true }
+    { "type": "promptString", "id": "nugget-token", "description": "Heed MCP token (ngt_...)", "password": true }
   ],
   "servers": {
     "nugget": {
@@ -184,10 +184,10 @@ unless listed in `[mcp] allowed_origins`.
 
 | What the app reports | Meaning |
 |---|---|
-| `nuggetd is not running` (stdio; the app's MCP log) | Start Nugget, then reconnect the app. |
+| `nuggetd is not running` (stdio; the app's MCP log) | Start Heed, then reconnect the app. |
 | `unknown or revoked MCP client, or wrong token` (stdio) / HTTP 401 `missing or invalid bearer token` | The client was revoked or the token is wrong. Create a new client. |
 | `rate limited; retry after N s` (HTTP 429 with `Retry-After`) | More than 60 requests at once, or over 120 a minute. |
-| A tool result marked as an error (`invalid arguments`, `entity not found`) | The call reached Nugget; the model can fix its arguments and retry. |
+| A tool result marked as an error (`invalid arguments`, `entity not found`) | The call reached Heed; the model can fix its arguments and retry. |
 | JSON-RPC `-32602` | Unknown tool, or a stale `resources/list` cursor (start the listing again). |
 | JSON-RPC `-32002` (`-32602` from protocol 2026-07-28) | Unknown resource URI, or one outside the client's scopes. |
 | HTTP 403 `forbidden origin` | A browser page tried to connect. Add its origin to `[mcp] allowed_origins` only if you trust it. |
@@ -200,5 +200,5 @@ unless listed in `[mcp] allowed_origins`.
 `[mcp]` and restart the daemon.
 
 **Prompt injection:** content from your sources could contain text written to manipulate an AI.
-Nugget marks it as untrusted data, which reduces the risk but cannot remove it, so give apps only the
+Heed marks it as untrusted data, which reduces the risk but cannot remove it, so give apps only the
 sources they need.

@@ -31,10 +31,10 @@ pub struct Settings {
     /// The user picked the channel (in setup, the Updates card, or by any change to it). Until
     /// then nothing checks for updates, whatever `channel` says.
     pub channel_chosen: bool,
-    /// Opt-in: download verified updates in the background and install them when Nugget quits.
+    /// Opt-in: download verified updates in the background and install them when Heed quits.
     /// Off (the default) means notify only; nothing is downloaded until the user asks.
     pub auto_install: bool,
-    /// The user's answer to "start Nugget at login?": `None` until asked.
+    /// The user's answer to "start Heed at login?": `None` until asked.
     pub start_at_login: Option<bool>,
     /// Open the desktop app (hidden in the tray) at login. Distinct from `start_at_login`, which
     /// is about the `nuggetd` service. Mirrors the OS entry `autostart.rs` writes.

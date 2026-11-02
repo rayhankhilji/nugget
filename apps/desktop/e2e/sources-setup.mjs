@@ -22,7 +22,7 @@ export async function sourcesSetupScenario({ browser, bin }) {
   const notes = path.join(scratch, "Notes");
   fs.mkdirSync(pics);
   fs.mkdirSync(notes);
-  // Types Nugget doesn't read (images are read, so none here).
+  // Types Heed doesn't read (images are read, so none here).
   fs.writeFileSync(path.join(pics, "song.mp3"), Buffer.alloc(64));
   fs.writeFileSync(path.join(pics, "clip.mp4"), Buffer.alloc(64));
   fs.writeFileSync(path.join(notes, "saffron.md"), "# Saffron rice\n\nToast the saffron, then steep it in warm stock for ten minutes.\n");

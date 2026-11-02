@@ -106,7 +106,7 @@ fn spawn_quiet(home: &Path) -> Daemon {
 #[test]
 fn version_status_without_a_daemon_and_invalid_config() {
     let out = Command::new(EXE).arg("--version").output().unwrap();
-    let want = format!("nuggetd {}", env!("CARGO_PKG_VERSION"));
+    let want = format!("nuggetd {} (Heed)", env!("CARGO_PKG_VERSION"));
     assert_eq!(text(&out.stdout).trim(), want);
     let tmp = tempfile::tempdir().unwrap();
     let out = run(tmp.path(), &["status"]);

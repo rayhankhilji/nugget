@@ -9,9 +9,9 @@
 //! accessibility API) that the frontmost app is the one the draft was read from; if another app
 //! stays in front, nothing is inserted (`doubletap.error.insert_failed`).
 //!
-//! - **macOS:** hiding a window leaves Nugget active, so the target is reactivated with
+//! - **macOS:** hiding a window leaves Heed active, so the target is reactivated with
 //!   `open -b <bundle id>` (Launch Services; no Apple Events permission needed), or by hiding
-//!   Nugget (`NSApp hide`, which activates the previous app) when there is no bundle id.
+//!   Heed (`NSApp hide`, which activates the previous app) when there is no bundle id.
 //! - **Windows:** hiding the active overlay activates the next window in z-order, which is the
 //!   window it was opened over. (Forcing the foreground window would need `unsafe` Win32 calls.)
 //! - **Linux:** X11 window managers and Wayland compositors return focus to the previously
@@ -383,7 +383,7 @@ pub async fn fire(app: AppHandle) {
     start(&app, generation, request).await;
 }
 
-/// The practice field, when it has focus in Nugget's main window (frontmost).
+/// The practice field, when it has focus in Heed's main window (frontmost).
 pub(super) fn practice_target(app: &AppHandle) -> Option<PracticeField> {
     let field = lock(&app.state::<DoubleTap>().practice).clone()?;
     let main = app.get_webview_window(MAIN_LABEL)?;

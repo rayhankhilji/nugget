@@ -1,6 +1,6 @@
 # Today: proactive cards and the morning brief
 
-Nugget reads your indexed mail, calendar and knowledge graph and suggests what needs your attention
+Heed reads your indexed mail, calendar and knowledge graph and suggests what needs your attention
 as **cards**. Each card says why it is there and offers an action you can preview first.
 
 <picture>
@@ -33,7 +33,7 @@ situation resolves itself (you replied, the meeting started) closes on its own; 
 
 | Action | What it does | Risk class |
 |---|---|---|
-| Draft reply | Drafts a reply in your voice to copy or send from your mail app; Nugget never sends it | Edit |
+| Draft reply | Drafts a reply in your voice to copy or send from your mail app; Heed never sends it | Edit |
 | Create event | Adds an event (through CalDAV if you have a CalDAV source, otherwise an `.ics` file) | Edit; Send with attendees |
 | Reminder | Stores a reminder and shows a notification | Edit |
 | Archive thread | Archives it (IMAP and Gmail only) | Destroy |

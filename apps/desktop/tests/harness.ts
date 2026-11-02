@@ -60,7 +60,7 @@ export interface Call {
 export const errors = {
   rpc: (message = "Something went wrong", code = -32000) => ({ kind: "rpc", message, code }),
   methodNotFound: () => ({ kind: "rpc", message: "method not found", code: METHOD_NOT_FOUND }),
-  notRunning: (message = "Nugget isn't running") => ({ kind: "not_running", message }),
+  notRunning: (message = "Heed isn't running") => ({ kind: "not_running", message }),
   disconnected: (message = "connection lost") => ({ kind: "disconnected", message }),
 };
 

@@ -16,7 +16,7 @@ The desktop app is available in nine languages:
 
 ## Choosing a language
 
-Nugget follows your OS language by default, using the closest match (`pt-PT` gets Brazilian
+Heed follows your OS language by default, using the closest match (`pt-PT` gets Brazilian
 Portuguese, `zh-TW` Simplified Chinese) or English. To choose, use the **Language** menu at the
 bottom of the sidebar or in first-run setup; **System** goes back to the OS. The choice is stored on
 this device only.

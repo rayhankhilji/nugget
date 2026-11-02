@@ -2007,7 +2007,7 @@ pub struct CardLearned {
     pub contribution: f64,
 }
 
-/// `proactive.learning`: what Nugget learned from the user's feedback.
+/// `proactive.learning`: what Heed learned from the user's feedback.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProactiveLearning {
     /// Strongest adjustment first.
