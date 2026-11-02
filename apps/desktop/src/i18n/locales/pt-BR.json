@@ -2262,6 +2262,7 @@
   "doubletap.overlay.refineMissed": "Desta vez não deu para fazer essa mudança. Este é o rascunho mais próximo.",
   "doubletap.error.field_changed": "O cursor foi para outro campo, então nada foi inserido. O rascunho está na área de transferência.",
   "doubletap.error.field_changed_no_copy": "O cursor foi para outro campo, então nada foi inserido. O rascunho está em Rascunhos recentes, na página do Double Tap.",
+  "doubletap.error.held_back": "O Nugget segurou este rascunho: ele incluiria um valor privado, um link ou um detalhe que suas mensagens não confirmam. Nada foi inserido.",
   "status.disk.full": "Seu disco está quase cheio ({free} livres). O Nugget não consegue indexar nem salvar alterações até você liberar espaço. Nada se perde, e a indexação recomeça sozinha assim que houver espaço.",
   "status.disk.fullUnknown": "Seu disco está cheio. O Nugget não consegue indexar nem salvar alterações até você liberar espaço. Nada se perde, e a indexação recomeça sozinha assim que houver espaço.",
   "status.disk.low": "Seu disco está ficando cheio ({free} livres). Libere espaço para o Nugget continuar indexando.",

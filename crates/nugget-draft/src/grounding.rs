@@ -47,6 +47,8 @@ pub struct GroundingReport {
     pub contacts_dropped: u32,
     /// Sentences dropped for repeating a message from someone else, or signing as them (GG7-1).
     pub copies_dropped: u32,
+    /// Sentences cut back to their leading clauses that passed (the rest was dropped).
+    pub clauses_dropped: u32,
     /// Facts marked superseded in the prompt.
     pub superseded_facts: u32,
     /// Every content sentence was dropped, so nothing (not even the greeting) was emitted.
@@ -95,8 +97,9 @@ pub struct Corpus {
     /// The user's instruction or field text mentions an attachment: a draft may say one is
     /// attached.
     attachment_ok: bool,
-    /// Messages from other people, [`squash`]ed: the reply must not repeat them.
-    others: Vec<String>,
+    /// Messages from other people, [`squash`]ed, and whether each asks a question: the reply
+    /// must not repeat them.
+    others: Vec<(String, bool)>,
     /// Other people's names (whole and first), [`squash`]ed: the reply is not signed by them.
     other_names: Vec<String>,
 }
@@ -120,7 +123,8 @@ impl Corpus {
                 c.add(t);
             }
             if m.from_me != Some(true) {
-                c.others.push(squash(&m.text));
+                c.others
+                    .push((squash(&m.text), m.text.contains(['?', '？', '؟'])));
                 if let Some(a) = m.author.as_deref() {
                     // "Ravi Menon <ravi@example.com>" → "ravimenon" and "ravi".
                     let name = a.split('<').next().unwrap_or(a).trim();
@@ -183,9 +187,17 @@ impl Corpus {
 
     /// Whether `text` ([`squash`]ed, at least `min` characters) is part of a message from
     /// someone else.
+    ///
+    /// A statement that repeats someone's question is an answer, not a copy ("ok to send it to
+    /// the whole list today" to "ok to send it to the whole list today?").
     fn repeats_other(&self, text: &str, min: usize) -> bool {
         let sq = squash(text);
-        sq.chars().count() >= min && self.others.iter().any(|o| o.contains(sq.as_str()))
+        let asks = text.trim_end().ends_with(['?', '？', '؟']);
+        sq.chars().count() >= min
+            && self
+                .others
+                .iter()
+                .any(|(o, question)| o.contains(sq.as_str()) && (asks || !question))
     }
 
     /// Add a text the user is answering or wrote: its links and contact details may be used too.
@@ -437,6 +449,10 @@ pub struct Grounder {
     report: GroundingReport,
     /// Check values (amounts, dates, numbers) at all; off when grounding is.
     values: bool,
+    /// A sentence was dropped and nothing standing on its own followed yet: `held` waits.
+    after_drop: bool,
+    /// Content words of the non-filler sentences in `held`.
+    held_content: usize,
 }
 
 impl Grounder {
@@ -459,6 +475,8 @@ impl Grounder {
             finished: false,
             report,
             values: true,
+            after_drop: false,
+            held_content: 0,
         }
     }
 
@@ -548,13 +566,18 @@ impl Grounder {
         if !body.is_empty() {
             self.unit(&rest[..start], body, &mut out);
         }
-        if !self.body_ok {
-            if self.report.sentences_dropped > 0 {
-                self.report.fallback = true;
-            } else if !self.held.is_empty() {
+        if self.after_drop {
+            // What follows a dropped sentence goes out only if it stands on its own.
+            if self.held_content >= MIN_TAIL_WORDS {
                 out.push_str(&std::mem::take(&mut self.held));
                 self.emitted_any = true;
             }
+        } else if !self.body_ok && self.report.sentences_dropped == 0 {
+            out.push_str(&std::mem::take(&mut self.held));
+            self.emitted_any |= !out.is_empty();
+        }
+        if !self.emitted_any && self.report.sentences_dropped > 0 {
+            self.report.fallback = true;
         }
         out
     }
@@ -565,6 +588,12 @@ impl Grounder {
     }
 
     /// Check one unit (leading whitespace and a sentence or line) and emit it or drop it.
+    ///
+    /// Greetings, sign-offs and filler ("Sure.", "Let me know if you need anything else.")
+    /// wait for a content sentence. When a sentence is dropped before any content went out (it
+    /// was probably the answer), everything after it waits too, and goes out only when it holds
+    /// at least [`MIN_TAIL_WORDS`] content words: a reply whose answer was dropped is empty,
+    /// never just its tail ("Rotate in January.").
     fn unit(&mut self, ws: &str, sentence: &str, out: &mut String) {
         let sentence = sentence.trim_end();
         if sentence.is_empty() {
@@ -572,29 +601,43 @@ impl Grounder {
             return;
         }
         self.report.sentences_checked += 1;
-        if !self.check(sentence) {
+        let salvaged;
+        let sentence = if self.check(sentence) {
+            sentence
+        } else if let Some(kept) = self.leading_clauses(sentence) {
+            // "The total is $9,120, due November 14, and you can pay into account …": the
+            // clauses before the one that failed stand on their own (MM1 on GG1).
+            self.report.clauses_dropped += 1;
+            salvaged = kept;
+            salvaged.as_str()
+        } else {
             self.report.sentences_dropped += 1;
             self.carry = stronger(&self.carry, ws).to_owned();
+            // Dropped before any content went out: it was probably the answer.
+            self.after_drop |= !self.body_ok;
             return;
-        }
+        };
         let ws = stronger(&self.carry, ws).to_owned();
         self.carry.clear();
         self.remember(sentence);
-        if !self.body_ok {
-            // `emitted_any` is still false here: the body starts with the held lines.
-            if !self.held.is_empty() {
+        let filler = is_filler(sentence);
+        if self.after_drop || !self.body_ok {
+            if !self.held.is_empty() || self.emitted_any {
                 self.held.push_str(&ws);
             }
             self.held.push_str(sentence);
-            let filler = is_signoff(sentence) || {
-                let ended = sentence
-                    .trim_end_matches(['"', '\'', ')', ']', '’', '”'])
-                    .ends_with(['.', '!', '?']);
-                // A greeting line, or a short line such as a name.
-                !ended && (is_greeting_line(sentence) || sentence.split_whitespace().count() <= 3)
-            };
             if !filler {
+                self.held_content += content_words(sentence);
+            }
+            let release = if self.after_drop {
+                self.held_content >= MIN_TAIL_WORDS
+            } else {
+                !filler
+            };
+            if release {
                 self.body_ok = true;
+                self.after_drop = false;
+                self.held_content = 0;
                 out.push_str(&std::mem::take(&mut self.held));
                 self.emitted_any = true;
             }
@@ -605,6 +648,36 @@ impl Grounder {
         }
         out.push_str(sentence);
         self.emitted_any = true;
+    }
+
+    /// The longest run of leading clauses of a failed sentence (cut at a comma, semicolon or
+    /// " and ") that passes the check and has at least three content words, ended like the
+    /// sentence. The report and the credential memory are left as they were for the tries.
+    fn leading_clauses(&mut self, sentence: &str) -> Option<String> {
+        let end = sentence
+            .trim_end()
+            .chars()
+            .next_back()
+            .filter(|c| matches!(c, '.' | '!' | '?'))
+            .unwrap_or('.');
+        let cuts: Vec<usize> = sentence
+            .match_indices([',', ';'])
+            .map(|(i, _)| i)
+            .chain(sentence.match_indices(" and ").map(|(i, _)| i))
+            .collect();
+        let saved = (self.report.clone(), self.tail.clone(), self.digits.clone());
+        let mut best: Option<String> = None;
+        for &cut in &cuts {
+            let head = sentence[..cut].trim_end_matches([',', ';', ' ']);
+            if content_words(head) < 3 || best.as_ref().is_some_and(|b| b.len() > head.len()) {
+                continue;
+            }
+            if self.check(head) {
+                best = Some(format!("{head}{end}"));
+            }
+            (self.report, self.tail, self.digits) = saved.clone();
+        }
+        best
     }
 
     /// Whether `text`, after what was emitted before it, copies a credential from a sensitive
@@ -741,6 +814,65 @@ impl Grounder {
         self.report.names_flagged += unknown_names(sentence, &self.corpus.words);
         ok
     }
+}
+
+/// Content words (stopwords left out: about six plain words) a sentence must bring after a
+/// dropped one to go out ([`Grounder`]).
+const MIN_TAIL_WORDS: usize = 3;
+
+/// Words that carry no content of their own.
+const FILLER_WORDS: &[&str] = &[
+    "the", "and", "you", "are", "was", "were", "for", "with", "that", "this", "its", "our", "your",
+    "will", "can", "has", "have", "not", "but", "from", "they", "them", "she", "his", "her", "him",
+    "let", "know", "need", "just", "all", "any", "sure", "yes", "yeah", "okay", "thanks", "thank",
+    "please", "too", "also", "very", "really", "here", "there",
+];
+
+/// Openings of sentences that only close a message.
+const CLOSERS: &[&str] = &[
+    "let me know",
+    "feel free",
+    "hope this",
+    "i hope",
+    "thanks",
+    "thank you",
+    "have a ",
+    "talk soon",
+    "looking forward",
+    "any questions",
+    "if you need",
+    "if you have",
+];
+
+/// Words of three or more letters or digits that are not [`FILLER_WORDS`]; a script without
+/// spaces counts by characters.
+fn content_words(sentence: &str) -> usize {
+    if sentence
+        .chars()
+        .any(|c| nugget_voice::unspaced_weight(c).is_some())
+    {
+        return nugget_voice::word_units(sentence);
+    }
+    sentence
+        .split(|c: char| !(c.is_alphanumeric() || matches!(c, '\'' | '’' | ',' | '.')))
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|w| w.chars().count() >= 3 && !FILLER_WORDS.contains(&w.as_str()))
+        .count()
+}
+
+/// A greeting, sign-off, name line, closing courtesy or a sentence with under two content words.
+fn is_filler(sentence: &str) -> bool {
+    let ended = sentence
+        .trim_end_matches(['"', '\'', ')', ']', '’', '”'])
+        .ends_with(['.', '!', '?', '。', '！', '？']);
+    let lower = sentence.trim().to_lowercase();
+    is_signoff(sentence)
+        || (!ended && (is_greeting_line(sentence) || sentence.split_whitespace().count() <= 3))
+        || CLOSERS.iter().any(|c| lower.starts_with(c))
+        || content_words(sentence) < 2
 }
 
 /// The whitespace with more line breaks (the first on a tie or when the other is empty).
@@ -1769,8 +1901,8 @@ mod tests {
         assert_eq!(g.push("Dear Ravi,\n\n"), "");
         assert_eq!(g.push("The budget is $310,000. "), "");
         assert_eq!(
-            g.push("It was approved at $275,000. More"),
-            "Dear Ravi,\n\nIt was approved at $275,000."
+            g.push("It was approved at $275,000 for the Atlas launch and trade shows. More"),
+            "Dear Ravi,\n\nIt was approved at $275,000 for the Atlas launch and trade shows."
         );
     }
 
@@ -1903,12 +2035,14 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
             &[
                 "Hi Ravi,\n\nThe VPN password is tangerine-",
                 "Otter-42. The card is 4111-1111-",
-                "1111-1111. The team has 12 people.\n\nKind regards,\nHenrik",
+                "1111-1111. The team has 12 people across design, sales and support.\n\nKind \
+regards,\nHenrik",
             ],
         );
         assert_eq!(
             out,
-            "Hi Ravi,\n\nThe team has 12 people.\n\nKind regards,\nHenrik"
+            "Hi Ravi,\n\nThe team has 12 people across design, sales and support.\n\nKind \
+regards,\nHenrik"
         );
         assert_eq!(g.report().secrets_dropped, 2);
         assert_eq!(
@@ -1946,6 +2080,40 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         }
     }
 
+    /// MM1 on GG1 (real 4B): when the answering sentence is dropped, its tail never goes out
+    /// alone ("Rotate in January.", "Let me know if you need anything else. Best, Dana").
+    #[test]
+    fn a_dropped_answer_leaves_no_tail() {
+        for draft in [
+            "Hi Sam,\n\nThe guest wifi password is tangerine-Otter-42. Rotate in January.\n\nBest,\nDana",
+            "Sure! The password is tangerine-Otter-42. Let me know if you need anything else.\n\nBest,\nDana",
+            "Hi Sam, the signed SOW is attached. Thanks!",
+        ] {
+            let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+            assert_eq!(stream(&mut g, &[draft]), "", "{draft}");
+            assert!(g.report().fallback, "{draft}");
+        }
+    }
+
+    /// MM1 on GG1 (safe-mixed-legit-default): the supported total and due date survive when the
+    /// same sentence goes on to an account number nothing supports.
+    #[test]
+    fn supported_clauses_survive_a_failing_one() {
+        let mut g = grounder().with_check(GroundingCheck::Secrets);
+        let out = stream(
+            &mut g,
+            &[
+                "Hi Ravi, the board approved $275,000 for the Q4 marketing budget, and you can pay \
+into account 40112277.",
+            ],
+        );
+        assert_eq!(
+            out,
+            "Hi Ravi, the board approved $275,000 for the Q4 marketing budget."
+        );
+        assert_eq!(g.report().clauses_dropped, 1);
+    }
+
     /// MM1 on GG1: a number the thread states passes even when its digits, joined with the
     /// next number's, spell a sensitive reference.
     #[test]
@@ -1973,13 +2141,14 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         let out = stream(
             &mut g,
             &[
-                "Hi Ravi,\n\nThe budget is $310,000. It was approved at $275,000. The cap is \
-twelve thousand dollars. See you Friday at 3 pm.",
+                "Hi Ravi,\n\nThe budget is $310,000. It was approved at $275,000 for the Atlas \
+launch and trade shows. The cap is twelve thousand dollars. See you Friday at 3 pm.",
             ],
         );
         assert_eq!(
             out,
-            "Hi Ravi,\n\nIt was approved at $275,000. See you Friday at 3 pm."
+            "Hi Ravi,\n\nIt was approved at $275,000 for the Atlas launch and trade shows. See you \
+Friday at 3 pm."
         );
         assert_eq!(g.report().values_superseded, 1);
         assert_eq!(
@@ -2032,11 +2201,24 @@ ravi.menon@northwind.example.com.",
             &mut g,
             &[
                 "hey henrik, weißt du noch wann genau der workshop im dezember ist? ",
-                "Ich glaube, er ist am Freitag.\n\nRavi",
+                "Ich glaube, der Workshop ist am Freitag im Raum Elbe.\n\nRavi",
             ],
         );
-        assert_eq!(out, "Ich glaube, er ist am Freitag.");
+        assert_eq!(out, "Ich glaube, der Workshop ist am Freitag im Raum Elbe.");
         assert_eq!(g.report().copies_dropped, 2);
+        // MM1 on GG1 (cls-slack-desktop): a statement echoing their question answers it.
+        let (mut ctx, cr) = henrik();
+        ctx.thread[0].text = "ok to send it to the whole list today?".into();
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["yep, ok to send it to the whole list today!"]);
+        assert_eq!(out, "yep, ok to send it to the whole list today!");
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        assert_eq!(
+            stream(&mut g, &["ok to send it to the whole list today!"]),
+            "ok to send it to the whole list today!"
+        );
     }
 
     #[test]
@@ -2115,9 +2297,14 @@ ravi.menon@northwind.example.com.",
         let mut g = with_secrets();
         let out = stream(
             &mut g,
-            &["The card is ٤١١١ ١١١١ ١١١١ ١١١١. The team has 12 people."],
+            &[
+                "The card is ٤١١١ ١١١١ ١١١١ ١١١١. The team has 12 people across design, sales and support.",
+            ],
         );
-        assert_eq!(out, "The team has 12 people.");
+        assert_eq!(
+            out,
+            "The team has 12 people across design, sales and support."
+        );
         assert_eq!(g.report().secrets_dropped, 1);
         let (mut ctx, _) = henrik();
         ctx.thread[0].text = "Is the workshop still on for 2026-11-20?".into();
@@ -2136,8 +2323,17 @@ ravi.menon@northwind.example.com.",
         assert_eq!(keys("12,345 درهم"), keys("١٢٬٣٤٥ درهم"));
         // The start of a credential at the end of a line is held back with it.
         let mut g = with_secrets();
-        let out = stream(&mut g, &["Sure, it is tangerine-\nOtter-42. We are 12."]);
-        assert_eq!(out, "We are 12.");
+        let out = stream(
+            &mut g,
+            &[
+                "Sure, it is tangerine-\nOtter-42. The team has 12 people across design, sales and support.",
+            ],
+        );
+        assert_eq!(
+            out,
+            "The team has 12 people across design, sales and support."
+        );
+        assert_eq!(g.report().secrets_dropped, 2);
     }
 
     #[test]

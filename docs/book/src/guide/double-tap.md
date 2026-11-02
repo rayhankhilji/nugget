@@ -102,7 +102,9 @@ falls back to the chat model.
   amount or date the thread and your items don't support. `[draft] grounding = false` keeps the
   credential and link checks but stops checking values; `grounding_check = "sentences"` also
   checks times and small numbers (see [Configuration](../reference/config.md#draft)). Each
-  sentence appears once it is checked, so a draft never stops mid-sentence.
+  sentence appears once it is checked, so a draft never stops mid-sentence. If the sentence
+  that answered was dropped, the rest is not offered on its own: the overlay says the draft was
+  held back, and nothing is inserted.
 - **Record keystrokes.** For a double tap only modifier presses are observed; a chord is registered
   with the OS. No key or text is logged.
 
