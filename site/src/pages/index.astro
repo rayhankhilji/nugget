@@ -2,7 +2,6 @@
 import Base from "../layouts/Base.astro";
 import AppIcon from "../components/AppIcon.astro";
 import AppMark from "../components/AppMark.astro";
-import HomeWindow from "../components/HomeWindow.astro";
 import ApprovalCard from "../components/cards/ApprovalCard.astro";
 import GhostCard from "../components/cards/GhostCard.astro";
 import StepCard from "../components/cards/StepCard.astro";
@@ -63,7 +62,11 @@ const faqLd = {
   <section class="showcase" aria-label="The Heed app">
     <div class="wrap">
       <div class="canvas" data-bg>
-        <div class="window-wrap" data-reveal><HomeWindow /></div>
+        <figure class="window-wrap shot" data-reveal>
+          <img class="l" src="/screens/home-light.webp" srcset="/screens/home-light-960.webp 960w, /screens/home-light.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
+          <img class="d" src="/screens/home-dark.webp" srcset="/screens/home-dark-960.webp 960w, /screens/home-dark.webp 1440w" sizes="(max-width: 1160px) 92vw, 1080px" width="1440" height="900" alt="The Heed Home screen: greeting, ask box, suggested questions and the morning brief with its sources" loading="lazy" decoding="async" />
+          <figcaption>The Home screen in Heed. Real screenshot; every name in it is fictional.</figcaption>
+        </figure>
       </div>
       <ul class="apps" data-apps aria-label="Apps Heed connects to">
         <li class="apps-k">Works with</li>
@@ -408,7 +411,45 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
   }
   .window-wrap {
     max-width: 1080px;
-    margin-inline: auto;
+    margin: 0 auto;
+  }
+  /* DS1's real screenshot (docs/brand/screens, 1440x900), framed like a Mac window. The light or dark
+     shot follows the site theme; the hidden one never loads (lazy + display:none). */
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1440 / 900;
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow:
+      0 0 0 1px rgb(20 17 15 / 0.14),
+      0 40px 90px -30px rgb(7 7 50 / 0.6),
+      0 10px 24px -10px rgb(7 7 50 / 0.3);
+  }
+  .shot .d {
+    display: none;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root:not([data-theme="light"])) .shot .l {
+      display: none;
+    }
+    :global(:root:not([data-theme="light"])) .shot .d {
+      display: block;
+    }
+  }
+  :global(:root[data-theme="dark"]) .shot .l {
+    display: none;
+  }
+  :global(:root[data-theme="dark"]) .shot .d {
+    display: block;
+  }
+  .shot figcaption {
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: rgb(255 255 255 / 0.92);
+    text-shadow: 0 1px 2px rgb(0 0 40 / 0.6);
   }
   .apps {
     list-style: none;
@@ -730,8 +771,9 @@ git clone https://github.com/rayhankhilji/nugget</code></pre>
   .install {
     margin: 24px 0 0;
     padding: 14px 16px;
-    max-width: 30em;
-    overflow-x: auto;
+    max-width: 34em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
     border-radius: 4px;
     background: #0b0b1a;
     color: #f3f1ec;

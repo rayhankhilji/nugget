@@ -195,6 +195,8 @@ export const FREE_TIER = {
     "The full Mac app, Apache-2.0",
     "Bring your own AI: ChatGPT sign-in, API key or a local model",
     "Connect apps with your own OAuth, IMAP or CalDAV",
+    "Ghost text, Needs you and the daily brief",
+    "Agent tasks and computer use, on your Mac",
     "Syncs while your Mac is awake",
     "Your data stays on your Mac",
     "Community support",
