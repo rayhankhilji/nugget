@@ -1,4 +1,3 @@
-import "../tokens.css";
 import { mount } from "../mount";
 import { Overlay } from "./Overlay";
 import { Ghost } from "./Ghost";

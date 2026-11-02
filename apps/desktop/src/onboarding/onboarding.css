@@ -7,7 +7,7 @@
   grid-template-rows: auto auto auto auto;
   align-content: start;
   min-height: 100%;
-  max-inline-size: var(--onboarding-max);
+  max-inline-size: 880px;
   margin-inline: auto;
   padding-inline: var(--space-5);
 }
@@ -21,44 +21,44 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: 12px;
   flex-wrap: wrap;
-  padding-block: var(--space-4) var(--space-2);
+  padding-block: 18px 10px;
 }
 
 .ob-top .brand {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  font-weight: var(--fw-heading);
+  gap: 8px;
+  font-weight: 650;
 }
 
 .ob-top-actions {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .ob-progress ol {
   display: flex;
-  gap: var(--space-1);
+  gap: 4px;
   flex-wrap: wrap;
   margin: 0;
   padding: 0;
   list-style: none;
-  border-block-end: var(--hairline) solid var(--border);
-  padding-block-end: var(--space-2);
+  border-block-end: 1px solid var(--border);
+  padding-block-end: 10px;
 }
 
 .ob-step button {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  min-height: var(--control-h);
-  padding-block: var(--space-1);
-  padding-inline: var(--space-2);
-  border: var(--hairline) solid transparent;
+  gap: 6px;
+  min-height: 32px;
+  padding-block: 4px;
+  padding-inline: 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-small);
   background: transparent;
   color: var(--muted);
@@ -75,17 +75,17 @@
   color: var(--text);
   border-color: var(--accent);
   background: var(--accent-soft);
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .ob-step-num {
   display: inline-grid;
   place-items: center;
-  inline-size: var(--size-icon-lg);
-  block-size: var(--size-icon-lg);
+  inline-size: 20px;
+  block-size: 20px;
   border-radius: 50%;
-  border: var(--hairline) solid currentColor;
-  font-size: var(--fs-xs);
+  border: 1px solid currentColor;
+  font-size: 11px;
 }
 
 .ob-step-done .ob-step-num {
@@ -106,12 +106,12 @@
 }
 
 .ob-main {
-  padding-block: var(--space-4) var(--space-6);
+  padding-block: 18px var(--space-6);
 }
 
 /* Sections revealed by a choice scroll into view clear of the sticky footer. */
 .ob-main h2 {
-  scroll-margin-block-end: calc(3 * var(--space-6));
+  scroll-margin-block-end: 96px;
 }
 
 .ob-main h1:focus {
@@ -119,69 +119,69 @@
 }
 
 .ob-main h1:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus);
-  outline-offset: var(--focus-ring-offset);
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
 }
 
 .ob-count {
-  margin-block-end: var(--space-1);
+  margin-block-end: 4px;
 }
 
 .ob-lead {
-  font-size: var(--fs-md);
+  font-size: 15px;
   max-inline-size: 64ch;
-  margin-block: var(--space-2) var(--space-4);
+  margin-block: 8px 16px;
 }
 
 .ob-panel {
-  animation: ob-enter var(--dur-2) var(--ease-out);
+  animation: ob-enter 180ms ease-out;
 }
 
 @keyframes ob-enter {
   from {
     opacity: 0;
-    transform: translateY(var(--motion-shift));
+    transform: translateY(6px);
   }
 }
 
 .ob-columns {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--tile-min-lg), 1fr));
-  gap: var(--space-3);
-  margin-block: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-block: 12px;
 }
 
 .ob-card {
-  padding-block: var(--space-1) var(--space-2);
-  padding-inline: var(--space-4);
-  border: var(--hairline) solid var(--border);
+  padding-block: 4px 8px;
+  padding-inline: 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
 }
 
 .ob-card h2 {
-  margin-block: var(--space-3) var(--space-1);
+  margin-block: 12px 6px;
 }
 
 .ob-card ul,
 .ob-perm-list {
   min-inline-size: 0;
   margin: 0;
-  padding-inline-start: var(--list-indent);
+  padding-inline-start: 20px;
   display: grid;
-  gap: var(--space-1);
+  gap: 6px;
 }
 
 .ob-fieldset {
   border: 0;
-  margin: 0 0 var(--space-3);
+  margin: 0 0 12px;
   padding: 0;
 }
 
 .ob-choices .kind-label {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
 }
 
 .ob-section {
@@ -194,7 +194,7 @@
 
 /* Model cards: three short cards share one row in a wide window instead of leaving one orphaned. */
 .cards.ob-models {
-  grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 .ob-models-group {
@@ -209,7 +209,7 @@
 /* On a selected (accent-soft) choice card the accent badge would lose its pill: give it a surface. */
 .kind-option:has(input:checked) .badge-accent {
   background: var(--surface);
-  box-shadow: inset 0 0 0 var(--hairline) color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 /* Stacked label-over-control fields, capped so they don't stretch across the whole step. */
@@ -217,12 +217,12 @@
 .ob-byok-fields .field,
 .ob-byok-form > .field,
 .ob-fields .field {
-  max-inline-size: var(--form-max);
+  max-inline-size: 480px;
 }
 
 .ob-fields .field {
   margin: 0;
-  min-inline-size: var(--field-min);
+  min-inline-size: 200px;
 }
 
 .ob-byok-form {
@@ -235,7 +235,7 @@
 
 /* One search model would stretch across the row: keep it card-sized. */
 .cards.ob-models-search {
-  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
 .ob-fields {
@@ -247,7 +247,7 @@
 
 /* Two trigger kinds: fill the row rather than leave an empty third column. */
 .kind-picker.ob-choices-two {
-  grid-template-columns: repeat(auto-fit, minmax(var(--tile-min), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
 /* "Your trigger: [Ctrl] [Alt] [Space]" as key caps, not a full-width band. */
@@ -257,7 +257,7 @@
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-block: var(--space-3) var(--space-1);
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .ob-trigger-summary kbd,
@@ -279,10 +279,10 @@
   margin-block: var(--space-4);
   padding-block: var(--space-3);
   padding-inline: var(--space-4);
-  border: var(--hairline) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  max-inline-size: var(--prose-max);
+  max-inline-size: 640px;
 }
 
 .ob-summary > div {
@@ -298,30 +298,30 @@
 
 .ob-summary dd {
   margin: 0;
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .ob-summary-unset dd {
-  font-weight: var(--fw-regular);
+  font-weight: 400;
   color: var(--muted);
 }
 
 .ob-guide {
   display: grid;
-  gap: var(--space-2);
-  padding-inline-start: var(--list-indent);
+  gap: 8px;
+  padding-inline-start: 20px;
 }
 
 .ob-guide h3 {
-  font-size: var(--fs-md);
-  margin-block: var(--space-2) var(--space-1);
+  font-size: 14px;
+  margin-block: 8px 4px;
 }
 
 .ob-snippet {
   display: flex;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: 8px;
   margin-block: var(--space-2);
 }
 
@@ -329,19 +329,19 @@
   flex: 1;
   min-inline-size: 0;
   margin: 0;
-  padding: var(--space-2) var(--space-3);
+  padding: 8px 12px;
   overflow-x: auto;
-  border: var(--hairline) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-small);
   background: color-mix(in srgb, var(--text) 4%, var(--surface));
   font-family: var(--mono);
-  font-size: var(--fs-xs);
+  font-size: 12px;
   text-align: start;
   white-space: pre;
 }
 
 .ob-details {
-  margin-block: var(--space-3);
+  margin-block: 12px;
 }
 
 /* Disclosures: a drawn chevron instead of the browser's triangle, turned when open. */
@@ -356,7 +356,7 @@
   border-radius: var(--radius-small);
   list-style: none;
   cursor: pointer;
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .ob-details summary::-webkit-details-marker,
@@ -367,12 +367,12 @@
 .ob-details summary::before,
 .ob-manual > summary::before {
   content: "";
-  inline-size: var(--size-dot);
-  block-size: var(--size-dot);
-  border-block-end: var(--border-strong) solid currentColor;
-  border-inline-end: var(--border-strong) solid currentColor;
+  inline-size: 6px;
+  block-size: 6px;
+  border-block-end: 2px solid currentColor;
+  border-inline-end: 2px solid currentColor;
   transform: rotate(-45deg);
-  transition: transform var(--dur-1) var(--ease-out);
+  transition: transform 120ms ease-out;
 }
 
 /* The inline-end border flips sides in right-to-left text, so the turns mirror too. */
@@ -397,15 +397,15 @@
 }
 
 .ob-details h3 {
-  font-size: var(--fs-md);
-  margin-block: var(--space-3) var(--space-1);
+  font-size: 14px;
+  margin-block: 12px 4px;
 }
 
 .ob-pending {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1);
-  margin: 0 0 var(--space-3);
+  gap: 6px;
+  margin: 0 0 12px;
   padding: 0;
   list-style: none;
 }
@@ -413,8 +413,8 @@
 /* Live indexing progress for the sources added during setup. */
 .ob-index {
   display: grid;
-  gap: var(--space-1);
-  margin: 0 0 var(--space-3);
+  gap: 6px;
+  margin: 0 0 12px;
   padding: 0;
   list-style: none;
 }
@@ -422,7 +422,7 @@
 .ob-index > li {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   margin: 0;
 }
 
@@ -433,7 +433,7 @@
 
 .ob-row-start {
   justify-content: flex-start;
-  margin-block: var(--space-2);
+  margin-block: 8px;
 }
 
 .ob-actions {
@@ -442,15 +442,21 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-2);
-  padding-block: var(--space-3) var(--space-4);
-  border-block-start: var(--hairline) solid var(--border);
+  gap: 8px;
+  padding-block: 12px 18px;
+  border-block-start: 1px solid var(--border);
   background: var(--bg);
 }
 
 /* Content continues under the footer: a shadow says there's more to scroll. */
 .ob-actions-stuck {
-  box-shadow: var(--shadow-scroll-edge);
+  box-shadow: 0 -10px 12px -10px rgb(0 0 0 / 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ob-actions-stuck {
+    box-shadow: 0 -12px 14px -10px rgb(0 0 0 / 0.8);
+  }
 }
 
 .ob-hint {
@@ -473,13 +479,13 @@
 /* Language: the label always sits above a full-width select. */
 .sidebar-language {
   display: grid;
-  gap: var(--space-half);
+  gap: 2px;
   min-inline-size: 0;
   color: var(--muted);
 }
 
 .sidebar-language label {
-  padding-inline: var(--space-half);
+  padding-inline: 2px;
 }
 
 .sidebar-settings select {

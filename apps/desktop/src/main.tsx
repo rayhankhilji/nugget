@@ -1,4 +1,3 @@
-import "./tokens.css";
 import { App } from "./App";
 import { mount } from "./mount";
 import "./styles.css";

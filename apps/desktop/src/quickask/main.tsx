@@ -1,4 +1,3 @@
-import "../tokens.css";
 import { mount } from "../mount";
 import { QuickAsk } from "./QuickAsk";
 import "../styles.css";

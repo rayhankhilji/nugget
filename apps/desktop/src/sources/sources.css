@@ -2,9 +2,9 @@
 
 .kind-group {
   grid-column: 1 / -1;
-  margin: var(--space-2) 0 0;
+  margin: 8px 0 0;
   font-size: 0.8rem;
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
 }
@@ -16,10 +16,10 @@
 .device-code {
   display: grid;
   justify-items: start;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-3);
-  padding: var(--space-3) var(--space-3);
-  border: var(--hairline) solid var(--border);
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
@@ -28,9 +28,9 @@
 }
 
 .device-code-value {
-  font-family: var(--mono);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 1.6rem;
-  font-weight: var(--fw-bold);
+  font-weight: 700;
   letter-spacing: 0.12em;
 }
 
@@ -39,7 +39,7 @@
 .kind-note {
   grid-column: 1 / -1;
   margin: 0;
-  padding-inline-start: var(--space-1);
+  padding-inline-start: 4px;
 }
 
 .messaging-fda p {
@@ -51,18 +51,18 @@
 }
 
 .messaging-error > p {
-  margin-block: 0 var(--space-1);
+  margin-block: 0 6px;
 }
 
 .messaging-error ol {
-  margin-block: var(--space-1) 0;
-  padding-inline-start: var(--list-indent);
+  margin-block: 6px 0;
+  padding-inline-start: 20px;
 }
 
 .messaging-options .messaging-checks {
   display: grid;
-  gap: var(--space-2);
-  margin-block-end: var(--space-2);
+  gap: 8px;
+  margin-block-end: 10px;
 }
 
 .messaging-since {

@@ -35,17 +35,26 @@
 }
 
 /* ---- prefers-contrast: more ----
-   The colours and the thicker focus ring are tokens (tokens.css); here controls take the stronger
-   border, the ring and the selected tab's underline thicken, and placeholders are as readable
-   as muted text. */
+   Dividers become as strong as control borders, controls stronger still; muted text, links and
+   the focus ring darken (lighten in dark mode); the focus ring is thicker; placeholders are as
+   readable as muted text. */
 
 @media (prefers-contrast: more) {
+  :root {
+    --border: #8a8478;
+    --control-border: #57524a;
+    --muted: #4d4840;
+    --link: #0f4aa3;
+    --focus: #0b4fb3;
+    --graph-edge: rgb(60 54 45 / 0.55);
+  }
+
   :focus-visible,
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible,
   .switch input:focus-visible + .switch-track {
-    outline-width: var(--focus-ring-width);
+    outline-width: 3px;
   }
 
   ::placeholder {
@@ -66,7 +75,18 @@
   }
 
   .tab[aria-selected="true"] {
-    border-block-end-width: var(--border-heavy);
+    border-block-end-width: 3px;
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --border: #78726a;
+    --control-border: #b4aea3;
+    --muted: #cfc9be;
+    --link: #a9cbff;
+    --focus: #a8caff;
+    --graph-edge: rgb(236 232 225 / 0.45);
   }
 }
 
@@ -86,22 +106,22 @@
 
   /* Its focus cue is an inset shadow, which forced colours drop. */
   .palette-input:focus-within {
-    outline: var(--focus-ring-width) solid Highlight;
+    outline: 2px solid Highlight;
   }
 
   /* Buttons keep a visible edge even when their normal style has none. */
   button:not(.tab):not(.nav-item),
   [role="button"] {
-    border: var(--hairline) solid ButtonText;
+    border: 1px solid ButtonText;
   }
 
   .nav-item[aria-current="page"] {
-    outline: var(--focus-ring-width) solid CanvasText;
-    outline-offset: var(--focus-ring-inset);
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
   }
 
   .nav-item:focus-visible {
-    outline: var(--focus-ring-width) solid Highlight;
+    outline: 2px solid Highlight;
   }
 
   .tab[aria-selected="true"] {
@@ -118,7 +138,7 @@
 
   .switch-track {
     forced-color-adjust: none;
-    border: var(--hairline) solid CanvasText;
+    border: 1px solid CanvasText;
     background: Canvas;
   }
 
@@ -144,7 +164,7 @@
   .kind-dot,
   .conn .dot {
     forced-color-adjust: none;
-    border: var(--hairline) solid CanvasText;
+    border: 1px solid CanvasText;
   }
 }
 
@@ -156,9 +176,9 @@
 @media (max-width: 720px) {
   .sidebar {
     flex-wrap: wrap;
-    gap: var(--space-1) var(--space-2);
-    padding-block: var(--space-1);
-    padding-inline: var(--space-2);
+    gap: 4px 8px;
+    padding-block: 6px;
+    padding-inline: 8px;
     overflow-x: visible;
     overflow-y: auto;
     max-block-size: 45vh;
@@ -183,20 +203,20 @@
   .sidebar nav ul {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-half);
+    gap: 2px;
   }
 
   .nav-item {
     inline-size: auto;
-    padding-block: var(--space-1);
-    padding-inline: var(--space-2);
+    padding-block: 4px;
+    padding-inline: 8px;
   }
 
   .sidebar-settings {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--space-1) var(--space-2);
+    gap: 4px 8px;
     margin-block-start: 0;
   }
 }

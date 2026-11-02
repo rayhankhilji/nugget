@@ -3,20 +3,20 @@
 
 .pg-loading {
   display: grid;
-  gap: var(--space-2);
-  margin: var(--space-4) 0;
+  gap: 10px;
+  margin: 16px 0;
 }
 
 .pg-loading-label {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 8px;
   color: var(--muted);
-  font-size: var(--fs-sm);
+  font-size: 13px;
 }
 
 .pg-skeleton {
-  height: var(--size-icon-sm);
+  height: 14px;
   border-radius: var(--radius-small);
   background: linear-gradient(
     90deg,
@@ -25,7 +25,7 @@
     color-mix(in srgb, var(--text) 6%, transparent) 100%
   );
   background-size: 200% 100%;
-  animation: pg-shimmer var(--dur-shimmer) var(--ease-in-out) infinite;
+  animation: pg-shimmer 1.4s ease-in-out infinite;
 }
 
 .pg-skeleton:nth-child(3n + 1) {
@@ -50,10 +50,10 @@
 .pg-empty {
   display: grid;
   justify-items: center;
-  gap: var(--space-1);
-  margin: var(--space-4) 0;
-  padding: var(--space-6) var(--space-4);
-  border: var(--hairline) dashed var(--border);
+  gap: 6px;
+  margin: 16px 0;
+  padding: 32px 16px;
+  border: 1px dashed var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
@@ -62,8 +62,8 @@
 
 .pg-empty-title {
   margin: 0;
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .pg-empty-body {
@@ -73,19 +73,19 @@
 }
 
 .pg-empty-action {
-  margin-top: var(--space-2);
+  margin-top: 8px;
 }
 
 /* Stale data stays on screen while it refreshes; dim it a little so the refresh is visible. */
 .pg-stale {
   opacity: 0.7;
-  transition: opacity var(--dur-1) var(--ease-out);
+  transition: opacity 120ms ease;
 }
 
 .pg-results-heading {
-  margin: var(--space-4) 0 var(--space-1);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
+  margin: 16px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
   color: var(--muted);
 }
 
@@ -94,8 +94,8 @@
 }
 
 .pg-results-heading:focus-visible {
-  outline: var(--focus-ring-width) solid var(--focus);
-  outline-offset: var(--focus-ring-offset);
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

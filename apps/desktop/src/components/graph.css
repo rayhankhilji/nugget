@@ -2,42 +2,42 @@
 
 .graph-legend {
   position: absolute;
-  bottom: var(--space-2);
-  inset-inline-start: var(--space-2);
-  max-width: min(var(--panel-w), calc(100% - var(--space-4)));
-  max-height: calc(100% - var(--space-7) - var(--space-2));
+  bottom: 8px;
+  inset-inline-start: 8px;
+  max-width: min(220px, calc(100% - 16px));
+  max-height: calc(100% - 56px);
   overflow: auto;
-  padding: var(--space-1) var(--space-2);
-  font-size: var(--fs-xs);
+  padding: 4px 8px;
+  font-size: 12px;
   /* Opaque: muted text over a see-through panel drops below 4.5:1 where a label or node is under it. */
   background: var(--surface);
-  border: var(--hairline) solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius-small);
 }
 
 .graph-legend summary {
   cursor: pointer;
   color: var(--muted);
-  font-weight: var(--fw-semibold);
+  font-weight: 600;
 }
 
 .graph-legend ul {
   list-style: none;
-  margin: var(--space-1) 0 var(--space-half);
+  margin: 4px 0 2px;
   padding: 0;
   display: grid;
-  gap: var(--space-half);
+  gap: 2px;
 }
 
 .graph-legend li {
   display: flex;
   align-items: center;
-  gap: var(--space-1);
+  gap: 6px;
 }
 
 .graph-legend-count {
   margin-inline-start: auto;
-  padding-inline-start: var(--space-2);
+  padding-inline-start: 8px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
