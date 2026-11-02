@@ -269,17 +269,40 @@ async fn an_abandoned_sync_request_still_records_its_result() {
         .await;
     }
     call(&h.app, "GET", "/v1/connections", Some(u), None).await;
+    // Slow upstream calls, so the sync is still running when the client goes away.
+    h.composio
+        .delay_ms
+        .store(200, std::sync::atomic::Ordering::SeqCst);
     let req = Request::post("/v1/sync")
         .header("authorization", format!("Bearer tok-{u}"))
         .header("content-type", "application/json")
         .body(Body::from("{}"))
         .unwrap();
-    // The client (or the request deadline) gives up almost at once.
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(5),
-        h.app.clone().oneshot(req),
-    )
-    .await;
+    let request = tokio::spawn(h.app.clone().oneshot(req));
+    // The client gives up once the sync has started (its lease is taken), not after a fixed
+    // delay: on a loaded machine a fixed delay can cancel the request before it gets that far,
+    // and a request that never started a sync has nothing to record.
+    let started = || async {
+        h.pool
+            .query_one(
+                "select count(*) from public.connections where user_id = $1 and syncing_until > now()",
+                &[&u],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0)
+    };
+    let mut seen = false;
+    for _ in 0..600 {
+        if started().await > 0 {
+            seen = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    request.abort();
+    assert!(seen, "the sync never started");
+    let _ = request.await;
     let synced = || async {
         h.pool
             .query_one(
@@ -290,7 +313,7 @@ async fn an_abandoned_sync_request_still_records_its_result() {
             .unwrap()
             .get::<_, i64>(0)
     };
-    for _ in 0..100 {
+    for _ in 0..600 {
         if synced().await == 2 {
             return;
         }
