@@ -11,6 +11,12 @@ use crate::{CloudConfig, CloudError, Result};
 /// Where Supabase sends the browser back (allow-listed in the project's URL configuration).
 pub const REDIRECT_URL: &str = "nugget://auth/callback";
 
+/// Deep-link schemes a callback may arrive on: `heed` (the new name) and `nugget` (until every
+/// installed build and the Supabase allow-list have moved). Any app can claim a scheme on
+/// macOS, Windows and Linux, so the scheme is not a secret: PKCE (the verifier never leaves
+/// this process) is what makes an intercepted or forged code useless.
+pub const CALLBACK_SCHEMES: &[&str] = &["heed", "nugget"];
+
 const MAX_CALLBACK_LEN: usize = 2048;
 const MAX_CODE_LEN: usize = 512;
 const MAX_ERROR_LEN: usize = 500;
@@ -242,7 +248,7 @@ pub fn parse_callback(raw: &str) -> Result<Callback> {
         return Err(bad("too long"));
     }
     let url = reqwest::Url::parse(raw).map_err(|_| bad("not a link"))?;
-    if url.scheme() != "nugget" || url.host_str() != Some("auth") {
+    if !CALLBACK_SCHEMES.contains(&url.scheme()) || url.host_str() != Some("auth") {
         return Err(bad("wrong place"));
     }
     if !url.username().is_empty()
@@ -332,6 +338,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn callbacks_parse_strictly_on_both_schemes() {
+        assert_eq!(
+            parse_callback("heed://auth/callback?code=abc").unwrap(),
+            Callback::Code("abc".into())
+        );
+        assert_eq!(
+            parse_callback("HEED://auth/callback?code=abc").unwrap(),
+            Callback::Code("abc".into()),
+            "schemes are case-insensitive"
+        );
+    }
+
+    #[test]
     fn callbacks_parse_strictly() {
         assert_eq!(
             parse_callback("nugget://auth/callback?code=0b5c-9f1e_A.~").unwrap(),
@@ -367,6 +386,9 @@ pub(crate) mod tests {
             "nugget://u:p@auth/callback?code=a",
             "nugget://auth:1/callback?code=a",
             "https://auth/callback?code=a",
+            "heedx://auth/callback?code=a",
+            "heed://evil/callback?code=a",
+            "heed://auth/callback?code=a&next=/x",
             "nugget://auth/callback?error=%0A",
             "nugget://auth/callback?error=x&error_description=a%07b",
         ] {

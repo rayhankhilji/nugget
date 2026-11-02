@@ -39,6 +39,35 @@ pub fn verify(
     })
 }
 
+/// Remembers webhook ids seen within the timestamp tolerance, so a captured delivery cannot be
+/// replayed while its timestamp is still accepted. Per machine; bounded.
+#[derive(Default)]
+pub struct ReplayGuard {
+    seen: std::sync::Mutex<std::collections::HashMap<String, i64>>,
+}
+
+const MAX_SEEN: usize = 50_000;
+
+impl ReplayGuard {
+    /// True the first time `id` is seen (within `2 × TOLERANCE_SECS`), false for a replay.
+    pub fn first_seen(&self, id: &str, now: i64) -> bool {
+        let mut seen = self.seen.lock().unwrap_or_else(|p| p.into_inner());
+        if seen.len() >= MAX_SEEN {
+            seen.retain(|_, at| now - *at <= 2 * TOLERANCE_SECS);
+            if seen.len() >= MAX_SEEN {
+                seen.clear();
+            }
+        }
+        match seen.get(id) {
+            Some(at) if now - *at <= 2 * TOLERANCE_SECS => false,
+            _ => {
+                seen.insert(id.to_owned(), now);
+                true
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 pub fn sign(secret: &str, id: &str, timestamp: &str, body: &[u8]) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
@@ -88,5 +117,17 @@ mod tests {
         ));
         assert!(!verify("s3cret", "msg_1", "x", body, &sig, 1100));
         assert!(!verify("s3cret", "msg_1", "1000", body, "v1,!!!", 1100));
+    }
+
+    #[test]
+    fn replays_are_detected() {
+        let g = ReplayGuard::default();
+        assert!(g.first_seen("msg_1", 1000));
+        assert!(!g.first_seen("msg_1", 1200));
+        assert!(g.first_seen("msg_2", 1200));
+        assert!(
+            g.first_seen("msg_1", 1000 + 2 * TOLERANCE_SECS + 1),
+            "long expired"
+        );
     }
 }

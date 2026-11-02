@@ -19,6 +19,8 @@ use crate::testkit::{
 
 mod billing;
 
+mod security;
+
 struct Harness {
     app: Router,
     db: crate::db::Db,
@@ -55,6 +57,8 @@ async fn harness(embeddings: bool) -> Option<Harness> {
     state.stripe_webhook_secret = Some("whsec_stripe".into());
     state.public_url = Some("https://api.test".into());
     state.site_origins = vec!["https://heed.test".into()];
+    // Functional tests run without rate limits; tests/security.rs covers them.
+    let state = state.with_limits(crate::ratelimit::Limits::unlimited());
     composio.data.lock().unwrap().insert(
         "GMAIL_FETCH_EMAILS".into(),
         json!({"messages": [
