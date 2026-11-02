@@ -51,7 +51,20 @@ pub(super) async fn plans(State(s): State<Arc<AppState>>) -> Json<Value> {
             })
         })
         .collect();
-    Json(json!({"plans": plans}))
+    Json(json!({"plans": plans, "billing": s.plans.billing_enabled()}))
+}
+
+/// 404 when billing is off (`NUGGET_BILLING=off`): self-hosted servers have no Stripe.
+fn billing_on(s: &AppState) -> ApiResult<()> {
+    if s.plans.billing_enabled() {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "billing_disabled",
+            "billing is off on this server",
+        ))
+    }
 }
 
 fn stripe(s: &AppState) -> ApiResult<&Arc<dyn Stripe>> {
@@ -107,6 +120,7 @@ pub(super) async fn checkout(
     h: HeaderMap,
     Json(b): Json<CheckoutBody>,
 ) -> ApiResult<Json<Value>> {
+    billing_on(&s)?;
     let c = caller(&s, &h).await?;
     if c.subscription.is_some() {
         return Err(ApiError::new(
@@ -162,6 +176,7 @@ pub(super) async fn portal(
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Json<Value>> {
+    billing_on(&s)?;
     let b: PortalBody = if body.iter().all(u8::is_ascii_whitespace) {
         PortalBody::default()
     } else {
@@ -212,6 +227,7 @@ pub(super) async fn stripe_webhook(
     h: HeaderMap,
     body: Bytes,
 ) -> ApiResult<StatusCode> {
+    billing_on(&s)?;
     let Some(secret) = &s.stripe_webhook_secret else {
         return Err(ApiError::new(
             StatusCode::NOT_FOUND,

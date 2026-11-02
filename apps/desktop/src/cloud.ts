@@ -109,6 +109,8 @@ export interface CloudMe {
   email: string | null;
   plan: string | null;
   embeddings: boolean;
+  /** False on a self-hosted server with billing off (everyone is entitled). */
+  billing?: boolean;
   subscription: CloudSubscription | null;
   entitlements: CloudEntitlements | null;
   usage: { month_cost_micros: number; smart_asks_used: number };

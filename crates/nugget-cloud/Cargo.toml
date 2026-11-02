@@ -49,6 +49,8 @@ tower-http = { version = "0.6", default-features = false, features = ["cors"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# The self-hosting smoke example drives the server with the desktop's own client.
+nugget-cloud-client.workspace = true
 wiremock = "0.6"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

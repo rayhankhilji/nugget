@@ -2351,6 +2351,7 @@
   "cloud.ask.untitled": "無題",
   "cloud.ask.open": "開く",
   "cloud.ask.openLabel": "{title} を開く",
+  "cloud.billing.selfHosted": "このサーバーはセルフホストで、課金はオフです。アカウントには {plan} の上限が適用されます。",
   "cloud.billing.title": "プランと請求",
   "cloud.billing.choose": "Heed は有料サービスです。プランを選んで無料トライアルを開始してください。",
   "cloud.billing.prices": "月額 {monthly}、または年額 {annual}",

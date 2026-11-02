@@ -4131,6 +4131,7 @@ dependencies = [
  "hmac 0.12.1",
  "http-body-util",
  "jiff",
+ "nugget-cloud-client",
  "nugget-core",
  "nugget-graph",
  "nugget-infer",
