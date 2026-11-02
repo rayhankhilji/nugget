@@ -11,6 +11,12 @@ use serde_json::{Value, json};
 use crate::session::Session;
 use crate::{CloudError, Result};
 
+mod intel;
+pub use intel::{
+    Brief, Card, CardAction, CardEvidence, Cards, DismissReason, FacetCount, Facets, SearchDates,
+    SearchRequest, SearchResponse, SearchResult, Timeline, TimelineBucket,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Usage {
     pub month_cost_micros: i64,
@@ -232,7 +238,7 @@ fn path_segment(id: &str) -> Result<&str> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::auth::tests::token_body;
     use crate::session::tests::{FakeClock, session};
@@ -240,7 +246,7 @@ mod tests {
     use wiremock::matchers::{body_json, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    async fn signed_in(server: &MockServer) -> Api {
+    pub(super) async fn signed_in(server: &MockServer) -> Api {
         Mock::given(method("POST"))
             .and(path("/auth/v1/token"))
             .respond_with(ResponseTemplate::new(200).set_body_json(token_body("AT", "rt2", 10_000)))

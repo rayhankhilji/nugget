@@ -1,101 +1,16 @@
 //! `nugget-proactive` types to the wire DTOs in `nugget_core::ipc` (`---- Proactive ----`).
 
 use nugget_core::ipc::{
-    BriefCardView, BriefMeetingView, BriefView, CardActionView, CardEvidence, CardExecuteResult,
-    CardFactor, CardLearned, CardPreview, CardView, KindMetricsView, LearnedView, LocalText,
-    PreviewLine, ProactiveMetrics, ResetLearningRequest,
+    CardExecuteResult, CardPreview, KindMetricsView, LearnedView, LocalText, PreviewLine,
+    ProactiveMetrics, ResetLearningRequest,
 };
 use nugget_core::{Error, Result};
 use nugget_proactive::actions::risk_name;
+pub(crate) use nugget_proactive::view::{brief_view as brief, card_view, iso_date};
 use nugget_proactive::{
-    Action, BriefCard, BriefMeeting, CandidateKind, Card, DiffOp, DismissReason, Effect,
-    EvidenceRef, ExecOutcome, Factor, LearnedEntry, Metrics, MorningBrief, PreparedAction,
-    ResetScope, Scope,
+    Action, CandidateKind, DiffOp, DismissReason, ExecOutcome, LearnedEntry, Metrics,
+    PreparedAction, ResetScope, Scope,
 };
-use time::Date;
-
-pub(crate) fn factor(f: &Factor) -> CardFactor {
-    CardFactor {
-        name: f.name.clone(),
-        value: f.value,
-        weight: f.weight,
-        contribution: f.contribution,
-    }
-}
-
-pub(crate) fn evidence(e: &EvidenceRef) -> CardEvidence {
-    CardEvidence {
-        item: e.item.clone(),
-        quote: e.quote.clone(),
-        url: e.url.clone(),
-    }
-}
-
-pub(crate) fn action_view(index: usize, a: &Action, supported: bool) -> CardActionView {
-    CardActionView {
-        index: u32::try_from(index).unwrap_or(u32::MAX),
-        kind: a.name().to_owned(),
-        label: a.preview().summary,
-        label_text: Some(a.summary_text()),
-        risk: risk_name(a.risk()).to_owned(),
-        supported,
-    }
-}
-
-/// `supports` says whether an executor is configured for an action.
-pub(crate) fn card_view(c: &Card, supports: &dyn Fn(&Action) -> bool) -> CardView {
-    CardView {
-        id: c.id.clone(),
-        kind: c.kind.as_str().to_owned(),
-        title: c.title.clone(),
-        detail: c.detail.clone(),
-        title_text: c.title_text.clone(),
-        detail_text: c.detail_text.clone(),
-        // Sensitive cards are never quoted (GG4-7): no evidence quotes, no model summary.
-        summary: c
-            .enrichment
-            .as_ref()
-            .filter(|_| !c.sensitive)
-            .map(|e| e.summary.clone()),
-        people: c.people.clone(),
-        due: c.due,
-        score: c.score,
-        rank: c.rank,
-        factors: c.factors.iter().map(factor).collect(),
-        evidence: c
-            .evidence
-            .iter()
-            .map(|e| CardEvidence {
-                quote: e.quote.clone().filter(|_| !c.sensitive),
-                ..evidence(e)
-            })
-            .collect(),
-        actions: c
-            .actions
-            .iter()
-            .enumerate()
-            .map(|(i, a)| action_view(i, a, supports(a)))
-            .collect(),
-        state: c.state.as_str().to_owned(),
-        sensitive: c.sensitive,
-        created_at: c.created_at,
-        snoozed_until: c.snoozed_until,
-        learned: c.learned.iter().map(learned_effect).collect(),
-    }
-}
-
-/// How feedback changed one card (the "why" line).
-pub(crate) fn learned_effect(e: &Effect) -> CardLearned {
-    CardLearned {
-        scope: e.scope.as_str().to_owned(),
-        key: e.key.clone(),
-        direction: e.direction.as_str().to_owned(),
-        accepted: e.accepted,
-        dismissed: e.dismissed,
-        reason: e.reason.clone(),
-        contribution: e.contribution,
-    }
-}
 
 /// One entry of `proactive.learning`.
 pub(crate) fn learned_view(e: &LearnedEntry) -> LearnedView {
@@ -220,54 +135,6 @@ pub(crate) fn dismiss_reason(reason: Option<&str>, text: Option<&str>) -> Result
         "other" => DismissReason::Other(text.unwrap_or_default().trim().to_owned()),
         r => return Err(Error::Invalid(format!("unknown dismiss reason {r:?}"))),
     })
-}
-
-/// `YYYY-MM-DD`.
-pub(crate) fn iso_date(d: Date) -> String {
-    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
-}
-
-fn brief_card(c: &BriefCard) -> BriefCardView {
-    BriefCardView {
-        card_id: c.card_id.clone(),
-        kind: c.kind.as_str().to_owned(),
-        title: c.title.clone(),
-        summary: c.summary.clone(),
-        title_text: c.title_text.clone(),
-        summary_text: c.summary_text.clone(),
-        due: c.due,
-        rank: c.rank,
-        factors: c.factors.iter().map(factor).collect(),
-        actions: c.actions.clone(),
-    }
-}
-
-fn brief_meeting(m: &BriefMeeting) -> BriefMeetingView {
-    BriefMeetingView {
-        title: m.title.clone(),
-        item: Some(m.item.clone()),
-        url: m.url.clone(),
-        start: m.start,
-        end: m.end,
-        all_day: m.all_day,
-        location: m.location.clone(),
-        attendees: m.attendees.clone(),
-        external: m.external.clone(),
-        prep_card: m.prep_card.clone(),
-        prep: m.prep.iter().map(evidence).collect(),
-    }
-}
-
-pub(crate) fn brief(b: &MorningBrief) -> BriefView {
-    BriefView {
-        date: iso_date(b.date),
-        generated_at: b.generated_at,
-        top: b.top.iter().map(brief_card).collect(),
-        meetings: b.meetings.iter().map(brief_meeting).collect(),
-        overdue: b.overdue.iter().map(brief_card).collect(),
-        renewals: b.renewals.iter().map(brief_card).collect(),
-        open_cards: u32::try_from(b.open_cards).unwrap_or(u32::MAX),
-    }
 }
 
 pub(crate) fn metrics(m: Metrics) -> ProactiveMetrics {

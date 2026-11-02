@@ -5,7 +5,7 @@
  */
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { ApiError, inTauri } from "./api";
+import { ApiError, inTauri, type BriefView, type CardView, type DismissReason } from "./api";
 import { t } from "./i18n";
 
 export interface CloudSession {
@@ -59,6 +59,79 @@ export interface CloudAnswer {
   answer: string;
   citations: CloudCitation[];
   usage: { input_tokens: number; output_tokens: number };
+}
+
+export interface CloudSearchRequest {
+  /** Words; may hold a date phrase ("invoices last week"). Empty browses newest first. */
+  q: string;
+  sources?: string[];
+  /** A name or address: sender, recipients or attendees. */
+  person?: string;
+  /** RFC 3339 bounds; when unset a date phrase in `q` is used. */
+  from?: string;
+  to?: string;
+  /** 1 to 50 (default 20). */
+  limit?: number;
+}
+
+export interface CloudSearchResult {
+  item_id: string;
+  source: string;
+  /** `email`, `event` or `doc`. */
+  kind: string;
+  title: string | null;
+  author: string | null;
+  url: string | null;
+  occurred_at: string | null;
+  /** Untrusted source text: render as plain text. */
+  snippet: string;
+  score: number;
+}
+
+export interface CloudFacetCount {
+  value: string;
+  count: number;
+}
+
+export interface CloudSearchResponse {
+  /** `hybrid`, `text` (no embeddings) or `browse` (no words). */
+  mode: "hybrid" | "text" | "browse";
+  /** The words searched, after any date phrase was taken out. */
+  query: string;
+  dates: { from: string | null; to: string | null; phrase: string | null };
+  results: CloudSearchResult[];
+  /** Items matching the words and filters (facets and the timeline count these). */
+  total: number;
+  facets: { sources: CloudFacetCount[]; people: CloudFacetCount[] };
+  timeline: { bucket: "day" | "month"; points: { start: string; count: number }[] };
+}
+
+/** "Needs you": the daemon's card shape (`CardView`); cloud actions are `supported: false` for now. */
+export interface CloudCards {
+  cards: CardView[];
+  last_refresh: string | null;
+  /** Only from {@link cloudApi.refreshCards}. */
+  report?: unknown;
+}
+
+export interface CloudBrief {
+  /** The user's local date, `YYYY-MM-DD`. */
+  day: string;
+  timezone: string;
+  /** `[n]` markers refer to `citations`; null without a model or AI allowance. */
+  prose: string | null;
+  citations: CloudCitation[];
+  brief: BriefView;
+  created_at: string;
+}
+
+/** This device's IANA zone (e.g. `Europe/London`), sent so "today" is the user's. */
+export function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Sign in with Apple is not in M1 (no Apple Developer account yet). */
@@ -120,6 +193,20 @@ export const cloudApi = {
   sync: () => call<{ synced: CloudSyncResult[] }>("cloud_sync"),
   ask: (question: string, conversationId?: string | null) =>
     call<CloudAnswer>("cloud_ask", conversationId ? { question, conversationId } : { question }),
+  search: (request: CloudSearchRequest) => call<CloudSearchResponse>("cloud_search", { request: { ...request, tz: deviceTimeZone() } }),
+  cards: () => call<CloudCards>("cloud_cards", { tz: deviceTimeZone() }),
+  /** Runs knowledge and cards now (slow: seconds). */
+  refreshCards: () => call<CloudCards>("cloud_cards_refresh", { tz: deviceTimeZone() }),
+  cardsSeen: (ids: string[]) => call<void>("cloud_cards_seen", { ids }),
+  acceptCard: (id: string) => call<CardView | null>("cloud_card_action", { id, action: "accept" }),
+  doneCard: (id: string) => call<CardView | null>("cloud_card_action", { id, action: "done" }),
+  /** `note` is kept for `other`. */
+  dismissCard: (id: string, reason: DismissReason, note?: string) =>
+    call<CardView | null>("cloud_card_action", { id, action: "dismiss", reason, note: note ?? null }),
+  /** `until`: RFC 3339, within the next year. */
+  snoozeCard: (id: string, until: string) => call<CardView | null>("cloud_card_action", { id, action: "snooze", until }),
+  /** Today's brief from 07:00 local (generated once), else the latest earlier one, else null. */
+  brief: () => call<CloudBrief | null>("cloud_brief", { tz: deviceTimeZone() }),
   /** Malformed payloads are dropped. */
   onSession: (h: (e: CloudSessionEvent) => void) =>
     on<unknown>(CLOUD_SESSION_EVENT, (p) => {

@@ -300,6 +300,21 @@ async fn knowledge_cards_brief_and_search() {
         unanswered["title_text"]["key"].is_string(),
         "LocalText for the desktop: {unanswered}"
     );
+    let sensitive: Vec<&Value> = cards.iter().filter(|c| c["sensitive"] == true).collect();
+    assert!(
+        !sensitive.is_empty(),
+        "the clinic mail is a sensitive card: {v}"
+    );
+    for c in sensitive {
+        assert!(
+            c["evidence"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["quote"].is_null()),
+            "sensitive cards are never quoted: {c}"
+        );
+    }
     let projected: i64 = pool
         .query_one(
             "select count(*) from public.cards where user_id = $1",
@@ -375,7 +390,6 @@ async fn knowledge_cards_brief_and_search() {
     .await;
     assert_eq!(s, StatusCode::OK, "{v}");
     assert_eq!(v["card"]["state"], "dismissed");
-    assert_eq!(v["card"]["dismiss_reason"]["reason"], "already_handled");
     let until = rfc(now + Duration::days(2));
     let (s, v) = call(
         &app,

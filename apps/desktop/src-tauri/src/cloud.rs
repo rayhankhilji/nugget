@@ -17,6 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::open;
 
+pub mod intel;
+
 /// `{ signed_in: bool, error: string | null }`: the session changed (signed in from a link,
 /// signed out, or found signed out by the server).
 pub const SESSION_EVENT: &str = "nugget:cloud-session";

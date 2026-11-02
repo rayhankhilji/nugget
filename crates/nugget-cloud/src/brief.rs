@@ -189,7 +189,8 @@ pub async fn generate(
             Err(e) => return Err(e),
         }
     };
-    let data = serde_json::to_value(brief).unwrap_or(Value::Null);
+    let data =
+        serde_json::to_value(nugget_proactive::view::brief_view(brief)).unwrap_or(Value::Null);
     let cites = json!(citations);
     db.scoped(Some(user), async |tx| {
         tx.execute(

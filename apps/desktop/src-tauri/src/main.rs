@@ -259,6 +259,12 @@ fn main() {
             cloud::cloud_disconnect,
             cloud::cloud_sync,
             cloud::cloud_ask,
+            cloud::intel::cloud_search,
+            cloud::intel::cloud_cards,
+            cloud::intel::cloud_cards_refresh,
+            cloud::intel::cloud_cards_seen,
+            cloud::intel::cloud_card_action,
+            cloud::intel::cloud_brief,
             quickask::quickask_prefill_take,
             quickask::quickask_handover_take,
         ])

@@ -314,9 +314,11 @@ pub fn dismiss_reason(reason: &str, note: Option<&str>) -> Option<DismissReason>
     })
 }
 
-/// A card for the wire: the proactive card as is, which the desktop already renders.
+/// A card for the wire: the daemon's `CardView`, which the desktop already renders. Actions are
+/// listed but not executable from the cloud yet (`supported: false`).
 pub fn wire(c: &Card) -> Value {
-    serde_json::to_value(c).unwrap_or_else(|_| json!({"id": c.id}))
+    serde_json::to_value(nugget_proactive::view::card_view(c, &|_| false))
+        .unwrap_or_else(|_| json!({"id": c.id}))
 }
 
 #[cfg(test)]
