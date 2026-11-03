@@ -4,13 +4,13 @@
 ; Tauri's confirm page, then the progress page.
 ;
 ; What Heed keeps, per user (see docs/book/src/reference/data-dir.md and guide/uninstall.md):
-;   %LOCALAPPDATA%\Nugget\Nugget\data     models, the encrypted store, logs (nugget-core paths.rs:
+;   %LOCALAPPDATA%\heed\Heed\data     models, the encrypted store, logs (nugget-core paths.rs:
 ;                                         directories::ProjectDirs("dev", "Nugget", "Nugget"))
-;   %LOCALAPPDATA%\Nugget\Nugget\cache
-;   %APPDATA%\Nugget\Nugget\config        config.toml, sources.toml
-;   %APPDATA%\dev.nugget.desktop          the desktop app's settings, history, window state
-;   %LOCALAPPDATA%\dev.nugget.desktop     the WebView's data (EBWebView)
-;   Credential Manager                    generic credentials "<account>.dev.nugget.Nugget"
+;   %LOCALAPPDATA%\heed\Heed\cache
+;   %APPDATA%\heed\Heed\config        config.toml, sources.toml
+;   %APPDATA%\app.heed.desktop          the desktop app's settings, history, window state
+;   %LOCALAPPDATA%\app.heed.desktop     the WebView's data (EBWebView)
+;   Credential Manager                    generic credentials "<account>.app.heed.Heed"
 ;                                         (keyring-rs names a Windows credential "<user>.<service>")
 ;   %USERPROFILE%\Nugget Vault            the vault: the user's notes, unless [vault] path is set
 ;
@@ -23,7 +23,7 @@
 ; - Updates (/UPDATE) never show the page and never remove anything. Silent (/S) and passive (/P)
 ;   uninstalls keep everything, unless the command line asks with /REMOVEDATA (and /REMOVEVAULT).
 ; - Tauri's own "Delete the application data" box on the next page removes only the
-;   dev.nugget.desktop folders. Removing Heed's data here includes them, so it turns that on too.
+;   app.heed.desktop folders. Removing Heed's data here includes them, so it turns that on too.
 ;
 ; Variables Tauri declares later in the template ($UpdateMode, $PassiveMode,
 ; $DeleteAppDataCheckboxState) are only used from the hook macros in installer-hooks.nsh, which are
@@ -38,7 +38,7 @@
 
 ; This file's directory, captured now: inside a macro, ${__FILEDIR__} would be Tauri's build dir.
 !define NUGGET_WIN_DIR "${__FILEDIR__}"
-!define NUGGET_KEY_SUFFIX ".dev.nugget.Nugget"
+!define NUGGET_KEY_SUFFIX ".app.heed.Heed"
 
 Var NuggetRemoveData   ; 1: remove models, data, config, cache, app window data and saved keys
 Var NuggetRemoveVault  ; 1: also delete $NuggetVaultDir
@@ -134,7 +134,7 @@ Function un.NuggetFindVault
   SetShellVarContext current
   StrCpy $R3 ""  ; current [section]
   ClearErrors
-  FileOpen $R2 "$APPDATA\Nugget\Nugget\config\config.toml" r
+  FileOpen $R2 "$APPDATA\heed\Heed\config\config.toml" r
   ${IfNot} ${Errors}
     ${Do}
       ClearErrors
@@ -282,10 +282,10 @@ Function un.NuggetDataPage
   Call un.NuggetFindVault
 
   ; Nothing to say when Heed never ran.
-  ${IfNot} ${FileExists} "$LOCALAPPDATA\Nugget\Nugget\*.*"
-  ${AndIfNot} ${FileExists} "$APPDATA\Nugget\Nugget\*.*"
-  ${AndIfNot} ${FileExists} "$APPDATA\dev.nugget.desktop\*.*"
-  ${AndIfNot} ${FileExists} "$LOCALAPPDATA\dev.nugget.desktop\*.*"
+  ${IfNot} ${FileExists} "$LOCALAPPDATA\heed\Heed\*.*"
+  ${AndIfNot} ${FileExists} "$APPDATA\heed\Heed\*.*"
+  ${AndIfNot} ${FileExists} "$APPDATA\app.heed.desktop\*.*"
+  ${AndIfNot} ${FileExists} "$LOCALAPPDATA\app.heed.desktop\*.*"
   ${AndIf} $NuggetVaultDir == ""
   ${AndIf} $NuggetVaultCustom == ""
     Abort
@@ -307,15 +307,15 @@ Function un.NuggetDataPage
 
   ; Models first: usually the biggest. The rest of the data folder is the store, index and logs.
   StrCpy $R9 0
-  StrCpy $R0 "$LOCALAPPDATA\Nugget\Nugget\data\models"
+  StrCpy $R0 "$LOCALAPPDATA\heed\Heed\data\models"
   Call un.NuggetSizeKB
   StrCpy $R8 $R1
   ${If} ${FileExists} "$R0\*.*"
     Call un.NuggetFormatKB
     !insertmacro NUGGET_LIST_LINE "Models: $R1"
-    !insertmacro NUGGET_LIST_LINE "      $LOCALAPPDATA\Nugget\Nugget\data\models"
+    !insertmacro NUGGET_LIST_LINE "      $LOCALAPPDATA\heed\Heed\data\models"
   ${EndIf}
-  StrCpy $R0 "$LOCALAPPDATA\Nugget\Nugget\data"
+  StrCpy $R0 "$LOCALAPPDATA\heed\Heed\data"
   ${If} ${FileExists} "$R0\*.*"
     Call un.NuggetSizeKB
     IntOp $R1 $R1 - $R8
@@ -324,12 +324,12 @@ Function un.NuggetDataPage
     ${EndIf}
     Call un.NuggetFormatKB
     !insertmacro NUGGET_LIST_LINE "Search index, encrypted store and logs: $R1"
-    !insertmacro NUGGET_LIST_LINE "      $LOCALAPPDATA\Nugget\Nugget\data"
+    !insertmacro NUGGET_LIST_LINE "      $LOCALAPPDATA\heed\Heed\data"
   ${EndIf}
-  !insertmacro NUGGET_LIST_DIR "Settings" "$APPDATA\Nugget\Nugget\config"
-  !insertmacro NUGGET_LIST_DIR "Cache" "$LOCALAPPDATA\Nugget\Nugget\cache"
-  !insertmacro NUGGET_LIST_DIR "App settings and history" "$APPDATA\dev.nugget.desktop"
-  !insertmacro NUGGET_LIST_DIR "App window data (WebView)" "$LOCALAPPDATA\dev.nugget.desktop"
+  !insertmacro NUGGET_LIST_DIR "Settings" "$APPDATA\heed\Heed\config"
+  !insertmacro NUGGET_LIST_DIR "Cache" "$LOCALAPPDATA\heed\Heed\cache"
+  !insertmacro NUGGET_LIST_DIR "App settings and history" "$APPDATA\app.heed.desktop"
+  !insertmacro NUGGET_LIST_DIR "App window data (WebView)" "$LOCALAPPDATA\app.heed.desktop"
   !insertmacro NUGGET_LIST_LINE "Saved keys in Windows Credential Manager: entries ending in ${NUGGET_KEY_SUFFIX} (the store's key, API keys, account sign-ins)"
   ${If} $NuggetVaultDir != ""
     !insertmacro NUGGET_LIST_DIR "Your Nugget Vault (your notes)" "$NuggetVaultDir"
@@ -455,7 +455,7 @@ Function un.NuggetRemoveKeys
 FunctionEnd
 
 ; Called from NSIS_HOOK_POSTUNINSTALL on a real uninstall when $NuggetRemoveData = 1. Tauri has
-; already removed the app's files and (since the hook turned its box on) the dev.nugget.desktop
+; already removed the app's files and (since the hook turned its box on) the app.heed.desktop
 ; folders; nuggetd was stopped in NSIS_HOOK_PREUNINSTALL, and its model servers die with it (they
 ; run in a kill-on-close job object).
 Function un.NuggetRemoveAll
@@ -477,18 +477,18 @@ Function un.NuggetRemoveAll
   ; Keys first, so a failure to delete files never leaves keys without their data's owner knowing.
   Call un.NuggetRemoveKeys
 
-  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$LOCALAPPDATA\Nugget\Nugget"  ; data (models, store, logs), cache
-  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$APPDATA\Nugget\Nugget"       ; config
+  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$LOCALAPPDATA\heed\Heed"  ; data (models, store, logs), cache
+  !insertmacro NUGGET_RMDIR_KEEP_VAULT "$APPDATA\heed\Heed"       ; config
   ; The data folders keep their pre-rename parent, Nugget (nugget-core paths.rs).
   RMDir "$LOCALAPPDATA\Nugget"  ; only when empty
   RMDir "$APPDATA\Nugget"
   RMDir "$INSTDIR"
   ; Tauri's own removal uses RmDir /r and may fail on a locked WebView file; report it too.
-  ${If} ${FileExists} "$APPDATA\dev.nugget.desktop\*.*"
-    StrCpy $NuggetLeftovers "$NuggetLeftovers$\r$\n$APPDATA\dev.nugget.desktop"
+  ${If} ${FileExists} "$APPDATA\app.heed.desktop\*.*"
+    StrCpy $NuggetLeftovers "$NuggetLeftovers$\r$\n$APPDATA\app.heed.desktop"
   ${EndIf}
-  ${If} ${FileExists} "$LOCALAPPDATA\dev.nugget.desktop\*.*"
-    StrCpy $NuggetLeftovers "$NuggetLeftovers$\r$\n$LOCALAPPDATA\dev.nugget.desktop"
+  ${If} ${FileExists} "$LOCALAPPDATA\app.heed.desktop\*.*"
+    StrCpy $NuggetLeftovers "$NuggetLeftovers$\r$\n$LOCALAPPDATA\app.heed.desktop"
   ${EndIf}
 
   ${If} $NuggetRemoveVault = 1

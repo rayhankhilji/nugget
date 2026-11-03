@@ -16,7 +16,7 @@ What it checks:
      the row can be flipped to `yes`). Notification tables may end with a Daemon column too; there
      only `in progress` is special (the name need not exist yet).
   2. Whole-book scans: backticked IPC method names (including names marked `in progress`) and
-     dotted config keys, `nuggetd` commands and flags in code, `NUGGET_*` variables, ```toml
+     dotted config keys, `nuggetd` commands and flags in code, `HEED_*`/`NUGGET_*` variables, ```toml
      blocks, and relative links with anchors.
 
 The Rust is parsed with regular expressions, so this is tied to the current code layout. If a struct
@@ -309,7 +309,9 @@ def source_env_vars() -> set[str]:
     found = set()
     for base in ("crates", "apps/desktop/src-tauri", "bench"):
         for p in (ROOT / base).rglob("*.rs"):
-            found.update(re.findall(r'"(NUGGET_[A-Z0-9_]+)"', p.read_text(encoding="utf-8")))
+            found.update(re.findall(r'"((?:NUGGET|HEED)_[A-Z0-9_]+)"', p.read_text(encoding="utf-8")))
+    # `HEED_X` is read as `NUGGET_X` (nugget-core env.rs promotes it), so documenting either works.
+    found |= {"HEED_" + v[len("NUGGET_"):] for v in found if v.startswith("NUGGET_")}
     return found
 
 
@@ -464,7 +466,7 @@ def main() -> int:
         ipc_names |= in_progress["ipc.methods"] | in_progress["ipc.notifications"]
         scan_tokens(rel, md, ipc_names, config_paths)
         scan_cli(rel, md, commands, flags)
-        for v in sorted(set(re.findall(r"\bNUGGET_[A-Z0-9_]*[A-Z0-9]\b", md)) - env_in_source):
+        for v in sorted(set(re.findall(r"\b(?:NUGGET|HEED)_[A-Z0-9_]*[A-Z0-9]\b", md)) - env_in_source):
             fail(f"{rel}: `{v}` does not appear in the source")
         for lang, body in fences(md):
             if lang == "toml":

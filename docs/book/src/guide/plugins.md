@@ -19,7 +19,7 @@ install** or **Cancel**, then enable it. Tools are available at once; a connecto
 
 **Available plugins** lists packages in the catalog folders: `plugin-catalog` in the
 [data directory](../reference/data-dir.md), or instead the folders you set in `config.toml`, plus any
-in the daemon's `NUGGET_PLUGIN_CATALOG` variable (separated like `PATH`):
+in the daemon's `HEED_PLUGIN_CATALOG` variable (separated like `PATH`):
 
 ```toml
 [plugins]

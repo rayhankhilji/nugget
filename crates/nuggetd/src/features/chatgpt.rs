@@ -269,6 +269,7 @@ impl Chatgpt {
             egress,
             ep,
             http: reqwest::Client::builder()
+                .user_agent(nugget_core::identity::USER_AGENT)
                 .timeout(Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),

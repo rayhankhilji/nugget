@@ -95,7 +95,7 @@ impl std::fmt::Debug for ModelStore {
 /// network reads as offline (not as a stall) and is reported within seconds.
 pub fn default_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
-        .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
+        .user_agent(nugget_core::identity::USER_AGENT)
         .connect_timeout(Duration::from_secs(8))
         .read_timeout(Duration::from_secs(60))
         .build()

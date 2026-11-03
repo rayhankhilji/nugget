@@ -286,7 +286,7 @@ impl PluginHost {
                     .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(Duration::from_secs(15))
                     .timeout(Duration::from_secs(120))
-                    .user_agent(concat!("nugget-plugin/", env!("CARGO_PKG_VERSION")));
+                    .user_agent(nugget_core::identity::USER_AGENT);
                 if let Some(guard) = &net_guard {
                     builder = builder.dns_resolver(guard.clone());
                 }

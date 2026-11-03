@@ -72,7 +72,7 @@ impl MeteredHttp {
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(120))
-            .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
+            .user_agent(nugget_core::identity::USER_AGENT)
             .build()
             .map_err(|e| Error::Other(format!("http client: {e}")))?;
         Ok(Self::with_client(client, egress, feature))

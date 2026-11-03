@@ -2,13 +2,14 @@
 //! Separate from `login.rs`, which registers the `nuggetd` background service.
 //!
 //! The OS entry is the source of truth, so turning it off in the system's own settings sticks:
-//! - macOS: `~/Library/LaunchAgents/dev.nugget.desktop.autostart.plist` (RunAtLoad).
-//! - Linux: `$XDG_CONFIG_HOME/autostart/dev.nugget.desktop.desktop` (XDG autostart). An AppImage
+//! - macOS: `~/Library/LaunchAgents/app.heed.desktop.autostart.plist` (RunAtLoad).
+//! - Linux: `$XDG_CONFIG_HOME/autostart/app.heed.desktop.desktop` (XDG autostart). An AppImage
 //!   is started through its `$APPIMAGE` file, not the temporary mount.
 //! - Windows: the `NuggetDesktop` value under `HKCU\...\CurrentVersion\Run`, written with `reg.exe`.
 //!
 //! `settings.autostart` mirrors the entry. At launch an enabled entry is rewritten so it follows
-//! the app when it moves or updates, and a removed one turns the setting off.
+//! the app when it moves or updates, and a removed one turns the setting off. An entry made
+//! before the rename (`dev.nugget.desktop.autostart`) is replaced by the new one at launch.
 
 use std::path::{Path, PathBuf};
 
@@ -109,29 +110,60 @@ pub fn launch_agent(label: &str, exe: &Path) -> String {
     )
 }
 
+/// Replaces a pre-rename login entry `old` with the new one (`write` makes it at `new`): the old
+/// file is removed only once the new one exists. False when there was nothing to move.
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+fn move_entry(
+    old: &Path,
+    new: &Path,
+    write: impl FnOnce() -> Result<(), String>,
+) -> Result<bool, String> {
+    if !old.is_file() {
+        return Ok(false);
+    }
+    if !new.is_file() {
+        write()?;
+        if !new.is_file() {
+            return Err(format!("{} was not written", new.display()));
+        }
+    }
+    std::fs::remove_file(old).map_err(|e| format!("couldn't remove {}: {e}", old.display()))?;
+    Ok(true)
+}
+
 /// The entry for platforms that use a file (macOS, Linux).
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod file_entry {
     use super::*;
 
     #[cfg(target_os = "macos")]
-    const LABEL: &str = "dev.nugget.desktop.autostart";
+    const LABEL: &str = "app.heed.desktop.autostart";
 
     fn path() -> Result<PathBuf, String> {
+        path_for(nugget_core::identity::BUNDLE_ID)
+    }
+
+    /// Moves an entry made before the rename to the new name (see [`move_entry`]).
+    pub fn migrate_legacy() -> Result<bool, String> {
+        let old = path_for(nugget_core::identity::LEGACY_BUNDLE_ID)?;
+        move_entry(&old, &path()?, || set(true))
+    }
+
+    fn path_for(bundle_id: &str) -> Result<PathBuf, String> {
         let home = std::env::var_os("HOME")
             .filter(|h| !h.is_empty())
             .map(PathBuf::from);
         #[cfg(target_os = "macos")]
         let p = home.map(|h| {
             h.join("Library/LaunchAgents")
-                .join(format!("{LABEL}.plist"))
+                .join(format!("{bundle_id}.autostart.plist"))
         });
         #[cfg(target_os = "linux")]
         let p = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .or_else(|| home.map(|h| h.join(".config")))
-            .map(|c| c.join("autostart/dev.nugget.desktop.desktop"));
+            .map(|c| c.join(format!("autostart/{bundle_id}.desktop")));
         p.ok_or_else(|| "no home directory".into())
     }
 
@@ -268,6 +300,12 @@ fn remember(app: &AppHandle, enabled: bool) -> Result<(), CmdError> {
 pub fn reconcile(app: &AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        match entry::migrate_legacy() {
+            Ok(true) => tracing::info!("moved the login entry to its new name"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(error = %e, "couldn't move the old login entry"),
+        }
         let wanted = app.state::<Updates>().settings().autostart;
         let present = status().enabled;
         let result = match (wanted, present) {
@@ -304,6 +342,35 @@ pub async fn autostart_set(app: AppHandle, enabled: bool) -> Result<AutostartSta
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_old_login_entry_is_replaced_and_removed_only_after() {
+        let d = std::env::temp_dir().join(format!("heed-autostart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let (old, new) = (
+            d.join("dev.nugget.desktop.autostart.plist"),
+            d.join("app.heed.desktop.autostart.plist"),
+        );
+        // Nothing to move.
+        assert!(!move_entry(&old, &new, || unreachable!()).unwrap());
+        // Writing the new one failed: the old one stays.
+        std::fs::write(&old, "old").unwrap();
+        assert!(move_entry(&old, &new, || Err("disk full".into())).is_err());
+        assert!(old.is_file());
+        // Written: the old one goes.
+        assert!(
+            move_entry(&old, &new, || std::fs::write(&new, "new")
+                .map_err(|e| e.to_string()))
+            .unwrap()
+        );
+        assert!(!old.exists());
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "new");
+        // Both there (an earlier run removed nothing): the new one is kept as it is.
+        std::fs::write(&old, "old").unwrap();
+        assert!(move_entry(&old, &new, || unreachable!()).unwrap());
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "new");
+    }
 
     #[test]
     fn desktop_exec_quotes_and_escapes() {
@@ -348,7 +415,7 @@ mod tests {
     #[test]
     fn launch_agent_escapes_paths() {
         let plist = launch_agent(
-            "dev.nugget.desktop.autostart",
+            "app.heed.desktop.autostart",
             Path::new("/Apps/A&B <x>.app/n"),
         );
         assert!(plist.contains("<string>/Apps/A&amp;B &lt;x&gt;.app/n</string>"));

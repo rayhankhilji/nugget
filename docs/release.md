@@ -136,7 +136,7 @@ Step 5 in the same session.
   gfcombine -o check.key nugget-updater.key.<a> nugget-updater.key.<b> && cmp check.key nugget-updater.key
   gh secret set TAURI_SIGNING_PRIVATE_KEY --env release -R $R < ./nugget-updater.key   # online
   gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --env release -R $R
-  gh variable set NUGGET_UPDATER_PUBKEY -R $R < ./nugget-updater.key.pub
+  gh variable set HEED_UPDATER_PUBKEY -R $R < ./nugget-updater.key.pub
   ```
 
 - [ ] Paste `nugget-updater.key.pub` into [Public keys](#public-keys) in a PR.
@@ -157,11 +157,11 @@ signature a released `nuggetd` offers no model downloads.
   $SM --verify manifests/default.json --pubkey <64-hex-public-key>   # always pass --pubkey here
   grep -c . manifests/default.json.sig               # 2: dev + release signature
   gfsplit -n 2 -m 3 manifest-release.key
-  gh variable set NUGGET_MANIFEST_RELEASE_PUBKEY -R $R --body '<64-hex-public-key>'   # online
+  gh variable set HEED_MANIFEST_RELEASE_PUBKEY -R $R --body '<64-hex-public-key>'   # online
   ```
 
 - [ ] Commit the two-line `.sig` and add the key to [Public keys](#public-keys) in one PR. Check:
-  `cargo run -p nugget-models --example sign-manifest -- --verify manifests/default.json --pubkey "$(gh variable get NUGGET_MANIFEST_RELEASE_PUBKEY -R $R)"`.
+  `cargo run -p nugget-models --example sign-manifest -- --verify manifests/default.json --pubkey "$(gh variable get HEED_MANIFEST_RELEASE_PUBKEY -R $R)"`.
 - [ ] Whenever `default.json` changes, redo both signatures: dev first (it replaces the file),
   then append the release one (two maintainers rebuild the key from shares).
 
@@ -220,7 +220,7 @@ the beta channel receives.
   `packaging/scripts/check_release_keys.py`) and **macOS** (both architectures):
 
   ```sh
-  gh variable get NUGGET_UPDATER_PUBKEY -R $R | base64 -d > updater.pub
+  gh variable get HEED_UPDATER_PUBKEY -R $R | base64 -d > updater.pub
   base64 -d Heed_1.0.0-rc.1_amd64.AppImage.sig > appimage.minisig
   minisign -V -p updater.pub -m Heed_1.0.0-rc.1_amd64.AppImage -x appimage.minisig
   base64 -d latest.json.sig > latest.minisig && minisign -V -p updater.pub -m latest.json -x latest.minisig
@@ -263,11 +263,11 @@ the beta channel receives.
 (scoped per job); dry runs, the rehearsal and the signing proof read none. Missing Apple values:
 ad-hoc signed or not notarized, with a warning. Missing Azure variables: the `.pfx`, else unsigned
 with a warning. Missing `TAURI_SIGNING_PRIVATE_KEY`: no `.sig` files or `latest.json`, so feeds
-don't move (a missing password fails `sign`). Missing `NUGGET_UPDATER_PUBKEY`: the app has no
-updater. `NUGGET_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line of
+don't move (a missing password fails `sign`). Missing `HEED_UPDATER_PUBKEY`: the app has no
+updater. `HEED_MANIFEST_RELEASE_PUBKEY` unset, malformed, or matching no line of
 `manifests/default.json.sig`: a real release fails before building. Set by the workflow:
-`NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_TRUSTED_SIGNING_DLIB`.
-`NUGGET_UPDATER_FEED` overrides the feed URL at build time (rehearsal only).
+`HEED_TRUST_DEV_MANIFEST_KEY=1` (dry runs only), `AZURE_TRUSTED_SIGNING_DLIB`.
+`HEED_UPDATER_FEED` overrides the feed URL at build time (rehearsal only).
 
 ---
 
@@ -309,8 +309,8 @@ pnpm tauri build --bundles appimage,deb,rpm --config src-tauri/tauri.bundle.conf
 ls ../../target/release/bundle/*/
 ```
 
-A local build has no updater and trusts no manifest key unless `NUGGET_TRUST_DEV_MANIFEST_KEY=1`
-is exported for `stage-sidecar.sh`. To test updates, export `NUGGET_UPDATER_PUBKEY` from
+A local build has no updater and trusts no manifest key unless `HEED_TRUST_DEV_MANIFEST_KEY=1`
+is exported for `stage-sidecar.sh`. To test updates, export `HEED_UPDATER_PUBKEY` from
 `pnpm tauri signer generate -w /tmp/test.key` before building, or use the rehearsal.
 
 Sizes from unsigned dry-run bundles (version 0.0.1); each dry run writes the same tables to its
@@ -349,7 +349,7 @@ pinned to commit SHAs.
 
 `gh workflow run release.yml --ref <branch> -f dry_run=true` (the default) builds every target
 from any branch (macOS ad-hoc signed, Windows unsigned), keeps bundles, reports and smoke logs 14
-days, runs the smoke tests, and builds `nuggetd` with `NUGGET_TRUST_DEV_MANIFEST_KEY=1`. It never
+days, runs the smoke tests, and builds `nuggetd` with `HEED_TRUST_DEV_MANIFEST_KEY=1`. It never
 reads a secret, and its apps have no updater. `dry_run: false` works only on a `v*` tag ref.
 Installing one: [install guide](book/src/guide/install.md#dry-run-installers).
 
@@ -357,7 +357,7 @@ Installing one: [install guide](book/src/guide/install.md#dry-run-installers).
 
 `smoke-appimage.sh` (Linux x64, under Xvfb), `smoke-macos.sh` (aarch64 dmg) and
 `smoke-windows.ps1` (NSIS, silent install and uninstall) launch the app with throwaway
-`HOME`/`NUGGET_HOME`, wait for a `Heed` window, `starting nuggetd` and `connected to nuggetd`,
+`HOME`/`HEED_HOME`, wait for a `Heed` window, `starting nuggetd` and `connected to nuggetd`,
 close it as a user would, expect a clean exit, stop the daemon (SIGTERM; `CTRL_BREAK` on Windows)
 and require `stopped`. `package-smoke.yml` and `real-os.yml` run them weekly and on demand
 (`gh workflow run real-os.yml --ref <branch>`).
@@ -403,15 +403,15 @@ approves `release` (self-review blocked), and only published releases move feeds
 only as the CI secret and as 2-of-3 Shamir shares (key and password split separately); never on a
 laptop or in a password manager.
 
-**Rotation.** Ship release N built with the **new** `NUGGET_UPDATER_PUBKEY` but signed with the
+**Rotation.** Ship release N built with the **new** `HEED_UPDATER_PUBKEY` but signed with the
 **old** key; sign later releases with the new key. On compromise: revoke the secret, publish an
 advisory, ship a rotation release at once.
 
 ### Manifest release key
 
 `manifests/default.json` + `.sig` is compiled into `nuggetd` and verified at start. Build-time
-variables: `NUGGET_MANIFEST_RELEASE_PUBKEY` (repo variable, passed to `stage-sidecar.sh`) and
-`NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only). Debug builds always trust the dev key. Key
+variables: `HEED_MANIFEST_RELEASE_PUBKEY` (repo variable, passed to `stage-sidecar.sh`) and
+`HEED_TRUST_DEV_MANIFEST_KEY=1` (dry runs only). Debug builds always trust the dev key. Key
 slots, multi-signature files, rollback protection and the signing commands:
 [security/manifest-trust.md](security/manifest-trust.md). A stale dev signature fails the
 `nugget-models` tests; nothing in CI checks the release signature (Step 8 and the rehearsal do).
@@ -435,15 +435,15 @@ tokens) need a new mode. EV certificates no longer skip SmartScreen reputation.
 
 ### Public keys
 
-- **Updater (minisign, `NUGGET_UPDATER_PUBKEY`):** *not generated yet (Step 4).*
-- **Model manifest release key (ed25519, `NUGGET_MANIFEST_RELEASE_PUBKEY`):** *not generated yet (Step 5).*
+- **Updater (minisign, `HEED_UPDATER_PUBKEY`):** *not generated yet (Step 4).*
+- **Model manifest release key (ed25519, `HEED_MANIFEST_RELEASE_PUBKEY`):** *not generated yet (Step 5).*
 - **Model manifest development key:** `DEV_PUBLIC_KEY_HEX` in `crates/nugget-models/src/manifest.rs`.
 
 ## 5. Signed update feed and updater behaviour
 
 User-facing settings (channel not chosen by default; auto-install off, i.e. notify only) are in
 the [install guide](book/src/guide/install.md#updates). They live in `settings.json` in the app
-config dir (e.g. `~/.config/dev.nugget.desktop/`); while `channel_chosen` is false nothing is
+config dir (e.g. `~/.config/app.heed.desktop/`); while `channel_chosen` is false nothing is
 checked, and builds without an updater key never ask.
 
 - **Feed verification.** The app fetches `<channel>.json` and `.sig` from `updater-feed` and checks

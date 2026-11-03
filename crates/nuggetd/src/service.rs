@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 
 use nugget_core::{Error, Result};
 
-pub const LAUNCHD_LABEL: &str = "dev.nugget.nuggetd";
+pub const LAUNCHD_LABEL: &str = "app.heed.nuggetd";
+/// The label before the rename. A LaunchAgent installed under it keeps working; installing the
+/// service again (or uninstalling it) replaces or removes it.
+pub const LEGACY_LAUNCHD_LABEL: &str = "dev.nugget.nuggetd";
 pub const SYSTEMD_UNIT: &str = "nuggetd.service";
 /// Task Scheduler task name (root folder, which standard users may write).
 pub const WINDOWS_TASK: &str = "Nugget Daemon";
@@ -298,7 +301,7 @@ pub fn managed_by_from(cgroup: Option<&str>, xpc_service: Option<&str>) -> Optio
     if cgroup.is_some_and(|c| c.lines().any(in_unit)) {
         return Some(nugget_core::ipc::SERVICE_SYSTEMD);
     }
-    if xpc_service == Some(LAUNCHD_LABEL) {
+    if xpc_service.is_some_and(|l| l == LAUNCHD_LABEL || l == LEGACY_LAUNCHD_LABEL) {
         return Some(nugget_core::ipc::SERVICE_LAUNCHD);
     }
     None
@@ -371,9 +374,22 @@ mod imp {
     use super::*;
 
     fn plist_path() -> Result<PathBuf> {
+        plist_path_for(LAUNCHD_LABEL)
+    }
+
+    fn plist_path_for(label: &str) -> Result<PathBuf> {
         Ok(home_dir()?
             .join("Library/LaunchAgents")
-            .join(format!("{LAUNCHD_LABEL}.plist")))
+            .join(format!("{label}.plist")))
+    }
+
+    /// Unloads and removes the pre-rename LaunchAgent, if there is one.
+    fn remove_legacy(uid: &str) -> Result<bool> {
+        let _ = run(
+            "launchctl",
+            &["bootout", &format!("gui/{uid}/{LEGACY_LAUNCHD_LABEL}")],
+        );
+        remove_file_if_exists(&plist_path_for(LEGACY_LAUNCHD_LABEL)?)
     }
 
     pub(super) fn install(spec: &ServiceSpec) -> Result<String> {
@@ -391,6 +407,8 @@ mod imp {
             "launchctl",
             &["bootstrap", &format!("gui/{uid}"), &path_str],
         )?;
+        // The new agent is loaded: the one from before the rename can go.
+        remove_legacy(&uid)?;
         Ok(format!(
             "installed LaunchAgent {LAUNCHD_LABEL} ({path_str}); nuggetd now starts at login"
         ))
@@ -403,7 +421,8 @@ mod imp {
             "launchctl",
             &["bootout", &format!("gui/{uid}/{LAUNCHD_LABEL}")],
         );
-        Ok(if remove_file_if_exists(&path)? {
+        let legacy = remove_legacy(&uid)?;
+        Ok(if remove_file_if_exists(&path)? || legacy {
             format!("removed LaunchAgent {LAUNCHD_LABEL} ({})", path.display())
         } else {
             format!("LaunchAgent {LAUNCHD_LABEL} was not installed")
@@ -630,12 +649,17 @@ mod tests {
         let app = "0::/user.slice/user@1000.service/app.slice/app-gnome-nugget-4242.scope\n";
         assert_eq!(managed_by_from(Some(app), None), None);
         assert_eq!(
+            managed_by_from(None, Some("app.heed.nuggetd")),
+            Some("launchd")
+        );
+        // Still installed under the pre-rename label.
+        assert_eq!(
             managed_by_from(None, Some("dev.nugget.nuggetd")),
             Some("launchd")
         );
         // An app launched from the Dock passes its own job name on to its children.
         assert_eq!(
-            managed_by_from(None, Some("application.dev.nugget.desktop.1")),
+            managed_by_from(None, Some("application.app.heed.desktop.1")),
             None
         );
     }

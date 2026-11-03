@@ -29,7 +29,7 @@ use serde_json::Value;
 const MAX_FEED_BYTES: usize = 1 << 20;
 /// A minisign signature, base64-wrapped, is about 450 bytes.
 const MAX_SIG_BYTES: usize = 8 << 10;
-const USER_AGENT: &str = concat!("nugget-desktop/", env!("CARGO_PKG_VERSION"));
+const USER_AGENT: &str = nugget_core::identity::USER_AGENT;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum FeedError {

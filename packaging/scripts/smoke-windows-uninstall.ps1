@@ -19,11 +19,11 @@ $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { Write-Error 'smoke: this test writes to your real Heed folders; CI only'; exit 2 }
 $Installer = (Resolve-Path -LiteralPath $Installer).Path
 
-$data = Join-Path $env:LOCALAPPDATA 'Nugget\Nugget'
-$config = Join-Path $env:APPDATA 'Nugget\Nugget'
+$data = Join-Path $env:LOCALAPPDATA 'heed\Heed'
+$config = Join-Path $env:APPDATA 'heed\Heed'
 $vault = Join-Path $env:USERPROFILE 'Nugget Vault'
 $installDir = Join-Path $env:LOCALAPPDATA 'Heed'
-$key = 'smoke-provider.dev.nugget.Nugget'
+$key = 'smoke-provider.app.heed.Heed'
 
 function Log([string]$m) { Write-Output "uninstall-smoke: $m" }
 function Fail([string]$m) { Write-Output "::error::Windows uninstall smoke: $m"; throw $m }

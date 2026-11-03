@@ -1,15 +1,19 @@
 # Environment variables
 
+Every variable below is named `HEED_*`. The older `NUGGET_*` name of each still works; when both
+are set, `HEED_*` wins. The development, benchmark and signing variables at the end keep their
+`NUGGET_*` names for now.
+
 ## The daemon and the MCP bridge
 <!-- check-refs: env.daemon -->
 | Variable | Meaning |
 |---|---|
-| `NUGGET_HOME` | Keep all data, config and cache under this directory (`data/`, `config/`, `cache/`). The `--home` flag overrides it. Useful for portable installs, tests and running a second, separate daemon |
-| `NUGGET_LOG` | Log filter, in `tracing` `EnvFilter` syntax (`debug`, `info,nugget_ingest=debug`). Default `info`. Falls back to `RUST_LOG` |
-| `NUGGET_KEYCHAIN` | `0`, `off`, `false` or `no` turns the OS keychain off. The store key then lives in a `store.key` file readable only by you, and source passwords and tokens are kept **in memory only**: you must set them again after every restart |
-| `NUGGET_OCR_MODELS` | A directory holding the two `ocrs` models, `text-detection.rten` and `text-recognition.rten`. Image OCR runs only when they are present. Heed never downloads them |
+| `HEED_HOME` | Keep all data, config and cache under this directory (`data/`, `config/`, `cache/`). The `--home` flag overrides it. Useful for portable installs, tests and running a second, separate daemon |
+| `HEED_LOG` | Log filter, in `tracing` `EnvFilter` syntax (`debug`, `info,nugget_ingest=debug`). Default `info`. Falls back to `RUST_LOG` |
+| `HEED_KEYCHAIN` | `0`, `off`, `false` or `no` turns the OS keychain off. The store key then lives in a `store.key` file readable only by you, and source passwords and tokens are kept **in memory only**: you must set them again after every restart |
+| `HEED_OCR_MODELS` | A directory holding the two `ocrs` models, `text-detection.rten` and `text-recognition.rten`. Image OCR runs only when they are present. Heed never downloads them |
 
-| `NUGGET_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
+| `HEED_MCP_TOKEN` | The client token for `nuggetd mcp --client <id>`, set in the AI app's MCP config by `nuggetd mcp install` or the setup snippet. Kept out of the command line so it does not appear in process listings. The bridge refuses to start without it |
 
 `env:VAR` references in `config.toml` are read from the **daemon's** environment; a login service
 does not read your shell profile.
@@ -18,9 +22,9 @@ does not read your shell profile.
 <!-- check-refs: env.desktop -->
 | Variable | Meaning |
 |---|---|
-| `NUGGET_HOTKEY_SESSION` | Linux only: `x11` or `wayland` overrides session detection for the global shortcut (`nugget-hotkey`). |
-| `NUGGET_UPDATER_PUBKEY` | Build time: the minisign public key the updater trusts. Without it the build has no updater |
-| `NUGGET_UPDATER_FEED` | Build time: where the updater manifests live, for forks (default: this repository's `updater-feed` release) |
+| `HEED_HOTKEY_SESSION` | Linux only: `x11` or `wayland` overrides session detection for the global shortcut (`nugget-hotkey`). |
+| `HEED_UPDATER_PUBKEY` | Build time: the minisign public key the updater trusts. Without it the build has no updater |
+| `HEED_UPDATER_FEED` | Build time: where the updater manifests live, for forks (default: this repository's `updater-feed` release) |
 
 ## Development
 <!-- check-refs: env.dev -->

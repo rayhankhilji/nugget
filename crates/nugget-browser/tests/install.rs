@@ -76,7 +76,7 @@ fn golden_per_os() {
 fn manifests_follow_each_browsers_format() {
     let cfg = config(Os::Linux);
     let chrome = install::manifest(Browser::Chrome, &cfg);
-    assert_eq!(chrome["name"], "dev.nugget.browser");
+    assert_eq!(chrome["name"], "app.heed.browser");
     assert_eq!(chrome["type"], "stdio");
     assert_eq!(
         chrome["allowed_origins"],

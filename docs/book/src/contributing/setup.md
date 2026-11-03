@@ -22,7 +22,7 @@ cargo deny check licenses bans sources
 ```
 
 Run a development daemon with `cargo run -p nuggetd -- --home /tmp/nugget-dev` (add `status` to
-query it); `NUGGET_KEYCHAIN=off` keeps it out of your keychain and `NUGGET_LOG=debug` shows what it
+query it); `HEED_KEYCHAIN=off` keeps it out of your keychain and `HEED_LOG=debug` shows what it
 does.
 
 Layout: `crates/` (libraries and `nuggetd`; [crate map](../architecture/crates.md)),

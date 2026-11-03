@@ -12,7 +12,7 @@
 #
 # Each launch runs like packaging/scripts/smoke-windows.ps1 (throwaway NUGGET_HOME and WebView2
 # profile, NUGGET_TRAY=off, closed with WM_CLOSE) with a fresh settings.json in
-# %APPDATA%\dev.nugget.desktop (removed at the end). Every wait is bounded (the app's first
+# %APPDATA%\app.heed.desktop (removed at the end). Every wait is bounded (the app's first
 # update check runs 60 s after launch). Results go to the evidence report, logs of every case to
 # $EVIDENCE\logs\<case>\. Exits 1 if any check failed.
 #
@@ -46,7 +46,7 @@ $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTemp
 $work = Join-Path $tempRoot ('nugget-rehearsal-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $installDir = Join-Path $work 'install'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-$configDir = Join-Path $env:APPDATA 'dev.nugget.desktop'
+$configDir = Join-Path $env:APPDATA 'app.heed.desktop'
 $settingsFile = Join-Path $configDir 'settings.json'
 $python = (Get-Command python -ErrorAction SilentlyContinue)
 if (-not $python) { $python = Get-Command python3 }

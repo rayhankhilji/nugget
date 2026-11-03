@@ -14,8 +14,10 @@
 # is a folder you chose. Data under NUGGET_HOME is not touched either.
 # Refuses to delete anything while nuggetd or the desktop app is running.
 #
-# Paths follow nugget-core paths.rs (directories::ProjectDirs("dev", "Nugget", "Nugget")), the
-# desktop app's identifier dev.nugget.desktop, and nuggetd service.rs; see
+# Paths follow nugget-core paths.rs and identity.rs (directories::ProjectDirs("app", "heed",
+# "Heed"), the desktop app's identifier app.heed.desktop), nuggetd service.rs, and the names
+# from before the rename that a first launch copies from and leaves in place
+# (ProjectDirs("dev", "Nugget", "Nugget"), dev.nugget.desktop); see
 # docs/book/src/reference/data-dir.md.
 set -euo pipefail
 
@@ -34,7 +36,8 @@ if [ "$include_vault" = 1 ] && [ "$yes" = 0 ]; then
 fi
 
 [ -n "${HOME:-}" ] || { echo "remove-nugget-data: HOME is not set" >&2; exit 2; }
-service="dev.nugget.Nugget"
+# Keychain services: Heed's, and the pre-rename ones (the store's and the cloud session's).
+services=("app.heed.Heed" "dev.nugget.Nugget" "nugget")
 os="$(uname -s)"
 
 # Folders: "label|path". The vault is kept apart and never deleted in the same step.
@@ -47,35 +50,50 @@ case "$os" in
     data_home="$(xdg "${XDG_DATA_HOME:-}" "$HOME/.local/share")"
     config_home="$(xdg "${XDG_CONFIG_HOME:-}" "$HOME/.config")"
     cache_home="$(xdg "${XDG_CACHE_HOME:-}" "$HOME/.cache")"
-    data_dir="$data_home/nugget"
-    config_dir="$config_home/nugget"
-    dirs+=("Models|$data_dir/models")
-    dirs+=("Data folder: store, index, logs (and models)|$data_dir")
+    data_dir="$data_home/heed"
+    config_dir="$config_home/heed"
+    legacy_data_dir="$data_home/nugget"
+    for d in "$data_dir" "$legacy_data_dir"; do
+      dirs+=("Models|$d/models")
+      dirs+=("Data folder: store, index, logs (and models)|$d")
+    done
     dirs+=("Settings|$config_dir")
-    dirs+=("Cache|$cache_home/nugget")
-    dirs+=("App settings and history|$config_home/dev.nugget.desktop")
-    dirs+=("App data and WebView storage|$data_home/dev.nugget.desktop")
-    dirs+=("App WebView cache|$cache_home/dev.nugget.desktop")
+    dirs+=("Settings (before the rename)|$config_home/nugget")
+    dirs+=("Cache|$cache_home/heed")
+    dirs+=("Cache (before the rename)|$cache_home/nugget")
+    for id in app.heed.desktop dev.nugget.desktop; do
+      dirs+=("App settings and history|$config_home/$id")
+      dirs+=("App data and WebView storage|$data_home/$id")
+      dirs+=("App WebView cache|$cache_home/$id")
+    done
     login+=("$config_home/systemd/user/nuggetd.service")
+    login+=("$config_home/autostart/app.heed.desktop.desktop")
     login+=("$config_home/autostart/dev.nugget.desktop.desktop")
     sha256() { sha256sum | cut -d' ' -f1; }
     ;;
   Darwin)
     lib="$HOME/Library"
-    data_dir="$lib/Application Support/dev.Nugget.Nugget"
+    data_dir="$lib/Application Support/app.heed.Heed"
     config_dir="$data_dir"
-    dirs+=("Models|$data_dir/models")
-    dirs+=("Data folder: store, index, settings, logs, models|$data_dir")
-    dirs+=("Cache|$lib/Caches/dev.Nugget.Nugget")
-    dirs+=("App settings and history|$lib/Application Support/dev.nugget.desktop")
-    dirs+=("App cache|$lib/Caches/dev.nugget.desktop")
-    dirs+=("App WebView storage|$lib/WebKit/dev.nugget.desktop")
-    dirs+=("App web storage|$lib/HTTPStorages/dev.nugget.desktop")
-    dirs+=("App saved window state|$lib/Saved Application State/dev.nugget.desktop.savedState")
+    legacy_data_dir="$lib/Application Support/dev.Nugget.Nugget"
+    for d in "$data_dir" "$legacy_data_dir"; do
+      dirs+=("Models|$d/models")
+      dirs+=("Data folder: store, index, settings, logs, models|$d")
+    done
+    dirs+=("Cache|$lib/Caches/app.heed.Heed")
+    dirs+=("Cache (before the rename)|$lib/Caches/dev.Nugget.Nugget")
+    for id in app.heed.desktop dev.nugget.desktop; do
+      dirs+=("App settings and history|$lib/Application Support/$id")
+      dirs+=("App cache|$lib/Caches/$id")
+      dirs+=("App WebView storage|$lib/WebKit/$id")
+      dirs+=("App web storage|$lib/HTTPStorages/$id")
+      dirs+=("App saved window state|$lib/Saved Application State/$id.savedState")
+      login+=("$lib/LaunchAgents/$id.autostart.plist")
+      login+=("$lib/Preferences/$id.plist")
+      login+=("$lib/HTTPStorages/$id.binarycookies")
+    done
+    login+=("$lib/LaunchAgents/app.heed.nuggetd.plist")
     login+=("$lib/LaunchAgents/dev.nugget.nuggetd.plist")
-    login+=("$lib/LaunchAgents/dev.nugget.desktop.autostart.plist")
-    login+=("$lib/Preferences/dev.nugget.desktop.plist")
-    login+=("$lib/HTTPStorages/dev.nugget.desktop.binarycookies")
     sha256() { shasum -a 256 | cut -d' ' -f1; }
     ;;
   *)
@@ -86,6 +104,13 @@ esac
 
 # The vault: `[vault] path` in config.toml when set (never deleted here), else ~/Nugget Vault.
 custom_vault=""
+# Settings not moved yet: read the pre-rename copy.
+if [ ! -f "$config_dir/config.toml" ]; then
+  case "$os" in
+    Linux) [ -f "$config_home/nugget/config.toml" ] && config_dir="$config_home/nugget" ;;
+    Darwin) [ -f "$legacy_data_dir/config.toml" ] && config_dir="$legacy_data_dir" ;;
+  esac
+fi
 if [ -f "$config_dir/config.toml" ]; then
   custom_vault="$(awk '
     /^[[:space:]]*\[/ { sect = $0; gsub(/[[:space:]]/, "", sect); next }
@@ -134,17 +159,20 @@ holds_vault() {
 size_of() { du -sh "$1" 2>/dev/null | cut -f1; }
 
 # The store key of the default data folder is "store-key-" + 16 hex digits of the SHA-256 of its
-# path (nugget-store key.rs). Keys of other data folders (NUGGET_HOME, --home) are kept.
+# path (nugget-store key.rs), for the folder now and the one before the rename. Keys of other
+# data folders (HEED_HOME/NUGGET_HOME, --home) are kept.
 own_store_key="store-key-$(printf '%s' "$data_dir" | sha256 | cut -c1-16)"
+legacy_store_key="store-key-$(printf '%s' "$legacy_data_dir" | sha256 | cut -c1-16)"
 want_key() {
   case "$1" in
-    store-key-*) [ "$1" = "$own_store_key" ] ;;
+    store-key-*) [ "$1" = "$own_store_key" ] || [ "$1" = "$legacy_store_key" ] ;;
     *) return 0 ;;
   esac
 }
 
-# Account names of the saved keys under the service, one per line.
+# Account names of the saved keys under service $1, one per line.
 list_keys() {
+  local service="$1"
   case "$os" in
     Linux)
       command -v secret-tool >/dev/null || return 0
@@ -162,7 +190,10 @@ list_keys() {
   esac
 }
 
+# delete_key SERVICE ACCOUNT
 delete_key() {
+  local service="$1"
+  shift
   case "$os" in
     Linux) secret-tool clear service "$service" username "$1" ;;
     Darwin) security delete-generic-password -s "$service" -a "$1" >/dev/null ;;
@@ -188,11 +219,16 @@ for path in "${login[@]}"; do
     found=1
   fi
 done
+# "service|account" pairs.
 keys=()
-while IFS= read -r account; do
-  [ -n "$account" ] && keys+=("$account")
-done < <(list_keys)
-for account in "${keys[@]+"${keys[@]}"}"; do
+for service in "${services[@]}"; do
+  while IFS= read -r account; do
+    [ -n "$account" ] && keys+=("$service|$account")
+  done < <(list_keys "$service")
+done
+for key in "${keys[@]+"${keys[@]}"}"; do
+  service="${key%%|*}"
+  account="${key#*|}"
   if want_key "$account"; then
     printf '  %-48s %6s  %s\n' "Saved key (keychain service $service)" "" "$account"
     found=1
@@ -249,7 +285,7 @@ case "$os" in
     fi
     ;;
   Darwin)
-    for label in dev.nugget.nuggetd dev.nugget.desktop.autostart; do
+    for label in app.heed.nuggetd app.heed.desktop.autostart dev.nugget.nuggetd dev.nugget.desktop.autostart; do
       launchctl bootout "gui/$(id -u)/$label" >/dev/null 2>&1 || true
     done
     ;;
@@ -263,9 +299,11 @@ if [ "$os" = Linux ] && [ -e "$config_home/systemd/user" ]; then
   systemctl --user daemon-reload >/dev/null 2>&1 || true
 fi
 
-for account in "${keys[@]+"${keys[@]}"}"; do
+for key in "${keys[@]+"${keys[@]}"}"; do
+  service="${key%%|*}"
+  account="${key#*|}"
   if want_key "$account"; then
-    if delete_key "$account"; then
+    if delete_key "$service" "$account"; then
       echo "Removed saved key $account"
     else
       echo "Could not remove saved key $account" >&2

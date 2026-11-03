@@ -514,7 +514,7 @@ mod tests {
     fn refused_session_names_the_desktop_file() {
         let msg = unnamed_app_err("An app id is required", "App info not found").to_string();
         for part in [
-            "dev.nugget.Nugget.desktop",
+            "app.heed.Heed.desktop",
             "Exec",
             "AppImage",
             "App info not found",

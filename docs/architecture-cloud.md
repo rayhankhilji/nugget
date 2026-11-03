@@ -107,7 +107,7 @@ Not done yet: the local LLM judge that enriches cards is not used; snapshots are
 ## 2. Composio
 - **Identity.** The Composio `user_id` is the Supabase user UUID. One Composio project serves all users, and the API key lives only in the server environment (`COMPOSIO_API_KEY`). The REST base URL is `https://backend.composio.dev/api/v3.1`, with the header `x-api-key`. `v3` is frozen but still supported.
 - **Auth configs.** These are created once per toolkit in the Composio dashboard, using Composio-managed OAuth for Gmail and Google Calendar. Their ids go in `COMPOSIO_AUTH_CONFIGS`, for example `gmail=ac_…,googlecalendar=ac_…`.
-- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = heed://connections/callback` (`NUGGET_CONNECT_CALLBACK` overrides it; the app also accepts the pre-rename `nugget://connections/callback`) → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
+- **Connecting an account:** `POST /v1/connections {toolkit}` → the service calls Composio to create a connected-account link with `callback_url = heed://connections/callback` (`HEED_CONNECT_CALLBACK` overrides it; the app also accepts the pre-rename `nugget://connections/callback`) → the desktop opens `redirect_url` in the system browser → after consent, Composio redirects to the deep link → the desktop calls `GET /v1/connections`. That call refreshes statuses from Composio and records each ACTIVE account in `connections`, then the first sync runs.
 - **Triggers or polling.** Composio's Gmail and Calendar triggers are themselves polling-based, with a 2–15 minute floor. They cost **$0.003 per event** on the paid tier, ten times the price of a tool call ($0.0003). A user receiving 1,000 emails a month would cost $3 in trigger events alone. **M1 therefore polls with tool calls**, adaptively as described above, which costs about 1,500–3,000 calls per active user per month. `POST /v1/webhooks/composio` is implemented: it verifies the signature, and for an event it only marks that connection due (it does not ingest the payload). This lets us switch triggers on per toolkit later, for example for low-volume apps, without a second ingest path.
 - **Actions** are described under [Actions](#actions) below.
 - **Pricing** (composio.dev/pricing, for signups after 2026-08-15):
@@ -210,7 +210,7 @@ The call has some explicit settings:
 - The digest is SHA-256 over the account, the tool and the canonical arguments. An approval must echo it, or it is refused (`412 digest_mismatch`).
 - `pending` becomes `executing` under a row lock. Approving twice, approving concurrently, or proposing again with the same idempotency key never sends twice. The same key with a different call is a `409`.
 - A failed send is not retried. Actions expire after 24 hours.
-- Proposing and approving need a live subscription (`402`), and share a per-user rate limit (`NUGGET_RATE_ACTION_PER_MIN`, default 10, `429 rate_limited`). Listing, status, preview and cancel stay open.
+- Proposing and approving need a live subscription (`402`), and share a per-user rate limit (`HEED_RATE_ACTION_PER_MIN`, default 10, `429 rate_limited`). Listing, status, preview and cancel stay open.
 - Approval is scoped to the owner: another user gets `404`, even with the digest. Only the stored call runs; fields in the approval body other than `digest` are ignored. A stored call that no longer matches its digest is refused (`412`) and audited.
 - Tool slugs come only from a fixed table (`actions::tool_for`, and each adapter's declared read tools). No tool name or URL is ever taken from synced content, model output or a request.
 - Same-user foreign keys (`20261102120002`): an action can only point at its own user's connection, and an audit entry only at its own user's action.
@@ -256,7 +256,7 @@ All model calls go through `nugget-cloud`'s gateway module. No provider key is e
   - A smart request falls back to the fast model once the smart allowance or the fair-use budget is used up, and the response says `downgraded: true`.
   - Past the hard cap, Ask returns `429 quota_exceeded`.
   - Tool-call costs are ours to absorb and do not count against the cap.
-- **Models.** Prices per million tokens are from the official Anthropic page, 2026-11. Model ids are configuration (`NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`), not code.
+- **Models.** Prices per million tokens are from the official Anthropic page, 2026-11. Model ids are configuration (`HEED_MODEL_FAST`, `HEED_MODEL_SMART`), not code.
   - The fast model is Claude Haiku 5.5, at $0.10 in and $0.50 out. One Ask, at 7.8k tokens in and 520 out (the 4.7+ tokenizer's +30% included), costs $0.00104.
   - The smart model is Claude Sonnet 5.5, at $2 in and $10 out. The same Ask costs $0.0208.
   - Prompts over 100k tokens are billed at 5× on Haiku 5.5. The gateway packs at most 24k tokens of context, so that rate is never reached.
@@ -274,7 +274,7 @@ The desktop's AI features (ghost-text autocomplete, Double Tap, quick ask, chat 
   - **Release and expiry.** A request that fails before any usage, for example when the fallback serves it instead, releases its reservation. A crashed server's reservations expire 5 minutes after the longest request (15 min).
   - **Cost.** Ghost text pays one extra round trip, and its small `max_tokens` keeps the reservation small. Entitlements and the smart-call count are still cached for 15 s.
 - **Rate limit and deadlines.**
-  - **Per-user bucket.** Both `/llm/v1/*` routes share a per-user bucket of `NUGGET_RATE_LLM_PER_MIN`, default 120 a minute with an equal burst. That is two a second sustained, well above a fast typist's debounced ghost text (about one a second), and far below abuse rates. It is separate from the API's `user_per_min`, because ghost text is chatty. Over the limit, the answer is `429` with `Retry-After`, in this endpoint's Anthropic error shape with `code: rate_limited`, so the desktop's Anthropic client reads it.
+  - **Per-user bucket.** Both `/llm/v1/*` routes share a per-user bucket of `HEED_RATE_LLM_PER_MIN`, default 120 a minute with an equal burst. That is two a second sustained, well above a fast typist's debounced ghost text (about one a second), and far below abuse rates. It is separate from the API's `user_per_min`, because ghost text is chatty. Over the limit, the answer is `429` with `Retry-After`, in this endpoint's Anthropic error shape with `code: rate_limited`, so the desktop's Anthropic client reads it.
   - **Deadlines.** `GET /llm/v1/models` gets the API's 30 s deadline, and a non-streaming request gets Ask's 60 s. Streams keep their own limits instead: 60 s to the first byte, 90 s idle, and 15 min in all. An agent's stream may rightly run that long.
 - **Limits:** the body is capped at 8 MB (413), with at most 4,000 messages. `max_tokens` is capped per tier and plan. Only known fields are forwarded: server tools, MCP servers, containers, service tiers and betas are dropped or refused. Timeouts are 60 s to the provider's headers, 90 s of silence mid-stream (the stream then ends with an `error` event) and 15 min overall.
 - **Cancellation:** a client that disconnects drops the provider request at once, so generation stops. What was relayed is metered: output tokens are estimated from the relayed text when the provider never reported them.
@@ -338,7 +338,7 @@ What keeps the warm path short:
 
 ## Security
 - **Isolation:** RLS on every table, with the `nugget_service` role subject to RLS too (see above). `supabase/tests/rls.sql` checks that user A cannot read, write or delete user B's rows, both as `authenticated` and as `nugget_service`.
-- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HEED_MONTHLY`, `STRIPE_PRICE_HEED_ANNUAL`, `STRIPE_PRICE_HEED_MAX_MONTHLY`, `STRIPE_PRICE_HEED_MAX_ANNUAL` and `NUGGET_PUBLIC_URL`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `NUGGET_MODEL_FAST`, `NUGGET_MODEL_SMART`, `NUGGET_PLANS_FILE`, `NUGGET_APP_SCHEME` (`heed` after the rename) and `NUGGET_SITE_ORIGINS`. That last one lists the website origins, comma-separated, for CORS and billing return URLs; when it is unset, CORS is off.
+- **Service environment:** `DATABASE_URL` (the `nugget_service` role through the pooler), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS`, `ANTHROPIC_API_KEY` and/or `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_HEED_MONTHLY`, `STRIPE_PRICE_HEED_ANNUAL`, `STRIPE_PRICE_HEED_MAX_MONTHLY`, `STRIPE_PRICE_HEED_MAX_ANNUAL` and `HEED_PUBLIC_URL`. Optional: `COMPOSIO_WEBHOOK_SECRET`, `DATABASE_CA_CERT`, `HEED_MODEL_FAST`, `HEED_MODEL_SMART`, `HEED_PLANS_FILE`, `HEED_APP_SCHEME` (`heed` after the rename) and `HEED_SITE_ORIGINS`. That last one lists the website origins, comma-separated, for CORS and billing return URLs; when it is unset, CORS is off.
 - **Secrets** live only in the cloud environment's settings (Fly secrets for the service, and Composio's and Supabase's dashboards). They are never committed and never sent to clients. The desktop ships only `SUPABASE_URL`, `SUPABASE_ANON_KEY` (public by design and protected by RLS) and the API base URL. `SUPABASE_SERVICE_ROLE_KEY` is used only by the service, for the admin user deletion call.
 - **Tokens at rest:**
   - Google OAuth tokens are held by Composio, encrypted by them. We never see them.
@@ -356,7 +356,7 @@ What keeps the warm path short:
 ## 6. Plans and billing
 **No free plan.** The service grants an entitlement only while a subscription is `active`, `trialing` or `past_due`. `past_due` keeps access while Stripe retries the payment. `canceled`, `unpaid` and `incomplete` give none. Without an entitlement, a signed-in user gets `402 subscription_required` from connect, sync and Ask, and sync stops.
 
-**Plans live in config.** `crates/nugget-cloud/plans.toml` is embedded at build time, and `NUGGET_PLANS_FILE` can point at an edited copy. The founder changes prices, limits and features there without touching code. The file is validated at startup, so unknown keys, impossible caps and duplicate Stripe prices are refused. Stripe price ids come from the environment.
+**Plans live in config.** `crates/nugget-cloud/plans.toml` is embedded at build time, and `HEED_PLANS_FILE` can point at an edited copy. The founder changes prices, limits and features there without touching code. The file is validated at startup, so unknown keys, impossible caps and duplicate Stripe prices are refused. Stripe price ids come from the environment.
 
 | | **Heed**, £39/mo or £390/yr | **Heed Max**, £99/mo or £990/yr |
 |---|---|---|
@@ -383,8 +383,8 @@ What keeps the warm path short:
   - Stripe's `POST /v1/invoices/create_preview` replaces the removed `invoices/upcoming`. It is called with the subscription's item, the new price, `proration_behavior=create_prorations` (Stripe's and the portal's default) and `proration_date` = now.
   - The response is `{plan, interval, amount_due (minor units), currency, proration_date (RFC 3339)}`.
   - It is read only: nothing changes in Stripe.
-  - Errors: `409 no_subscription`, `400 unknown_plan` or `bad_interval`, and `404 billing_disabled` when `NUGGET_BILLING=off`, like the other billing routes.
-- Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`. The website can instead pass `return_url`, which must be on an origin in `NUGGET_SITE_ORIGINS`; anything else gets `400 bad_return_url`, so the endpoints cannot be used as an open redirect. The API sends CORS headers for those origins only, and allows no credentials, since auth is a bearer token.
+  - Errors: `409 no_subscription`, `400 unknown_plan` or `bad_interval`, and `404 billing_disabled` when `HEED_BILLING=off`, like the other billing routes.
+- Both send the browser back to `GET /billing/done`, which hands over to `nugget://billing/done`. The website can instead pass `return_url`, which must be on an origin in `HEED_SITE_ORIGINS`; anything else gets `400 bad_return_url`, so the endpoints cannot be used as an open redirect. The API sends CORS headers for those origins only, and allows no credentials, since auth is a bearer token.
 - `POST /v1/webhooks/stripe`:
   - Verification: `Stripe-Signature` must be HMAC-SHA256 over `t.body`, within 5 minutes.
   - Events handled: `checkout.session.completed`, `customer.subscription.created`, `.updated` and `.deleted`, and `invoice.payment_failed` and `invoice.paid`.
@@ -420,15 +420,15 @@ The hard caps bound the worst case. That is £10.45 for Heed (67%) and £24.12 f
 ## 7. Waitlist
 `POST /v1/waitlist {email, source?}` takes sign-ups from the website while Heed Cloud is not open.
 
-- **No account, no auth.** The route is limited to `NUGGET_SITE_ORIGINS` by CORS, capped at 1 KiB
-  of body, and rate-limited to `NUGGET_RATE_WAITLIST_PER_HOUR` (default 5) per client IP.
+- **No account, no auth.** The route is limited to `HEED_SITE_ORIGINS` by CORS, capped at 1 KiB
+  of body, and rate-limited to `HEED_RATE_WAITLIST_PER_HOUR` (default 5) per client IP.
 - **Nothing to enumerate.** Every well-formed JSON body gets the same empty `202`, whether the
   address is new, already listed or invalid. Invalid addresses are not stored. Only malformed JSON
   gets `400`.
 - **Validation.** Addresses are trimmed and lowercased. Each must be at most 254 characters, with
   one `@`, a dot in the domain, and no spaces or control characters.
 - **Storage.** Rows go into `public.waitlist (email citext primary key, created_at, source,
-  ip_hash)`. `ip_hash` is a SHA-256 of the IP salted with `NUGGET_WAITLIST_SALT`, a per-deploy
+  ip_hash)`. `ip_hash` is a SHA-256 of the IP salted with `HEED_WAITLIST_SALT`, a per-deploy
   secret. Without a salt, no IP is kept.
 - **Privacy.** RLS is on. `anon` and `authenticated` have no access at all, and `nugget_service`
   may only insert.

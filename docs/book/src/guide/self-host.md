@@ -90,7 +90,9 @@ Never publish the database port. Only the gateway faces the internet.
 
 ## Settings (`.env`)
 
-`selfhost/.env.example` lists every setting, with comments. The ones you must set:
+`selfhost/.env.example` lists every setting, with comments. Heed's own settings are named
+`HEED_*`; an `.env` from before the rename with `NUGGET_*` names still works (when both are set,
+`HEED_*` wins). The ones you must set:
 
 | Setting | What |
 |---|---|
@@ -101,19 +103,19 @@ Never publish the database port. Only the gateway faces the internet.
 | `SUPABASE_SERVICE_ROLE_KEY` | Lets the server delete accounts in GoTrue (from `gen-keys.sh`). Secret |
 | `COMPOSIO_API_KEY`, `COMPOSIO_AUTH_CONFIGS` | See [Composio](#composio) |
 | `ANTHROPIC_API_KEY` | See [Models](#models) |
-| `NUGGET_BILLING` | `off` for self-hosting (the example's value); see [Billing](#billing) |
+| `HEED_BILLING` | `off` for self-hosting (the example's value); see [Billing](#billing) |
 
 Optional settings:
 - `OPENAI_API_KEY`
-- `NUGGET_MODEL_FAST` and `NUGGET_MODEL_SMART`
-- `NUGGET_SELFHOST_PLAN`
-- `NUGGET_PLANS_FILE`
-- `NUGGET_SITE_ORIGINS`
-- `NUGGET_LOG_FORMAT`
-- `NUGGET_APP_SCHEME`
-- `NUGGET_CLIENT_IP_HEADER`: leave it unset unless a trusted proxy in front of Caddy sets it.
-- `NUGGET_RATE_LLM_PER_MIN`: model-endpoint calls (ghost text, chat, the agent) per minute per user. The default is 120.
-- `NUGGET_WAITLIST_SALT` and `NUGGET_RATE_WAITLIST_PER_HOUR`: for the website's waitlist route. A
+- `HEED_MODEL_FAST` and `HEED_MODEL_SMART`
+- `HEED_SELFHOST_PLAN`
+- `HEED_PLANS_FILE`
+- `HEED_SITE_ORIGINS`
+- `HEED_LOG_FORMAT`
+- `HEED_APP_SCHEME`
+- `HEED_CLIENT_IP_HEADER`: leave it unset unless a trusted proxy in front of Caddy sets it.
+- `HEED_RATE_LLM_PER_MIN`: model-endpoint calls (ghost text, chat, the agent) per minute per user. The default is 120.
+- `HEED_WAITLIST_SALT` and `HEED_RATE_WAITLIST_PER_HOUR`: for the website's waitlist route. A
   self-hosted server can ignore both: nothing reads the list.
 - `COMPOSIO_WEBHOOK_SECRET`
 
@@ -141,15 +143,15 @@ Composio bills you directly. Its free tier covers a handful of users at Heed's s
 - `OPENAI_API_KEY` is optional. It adds embeddings (`text-embedding-3-small`) for semantic search,
   and is the chat fallback when no Anthropic key is set. Without it, search is full-text only, which
   still finds most things.
-- `NUGGET_MODEL_FAST` and `NUGGET_MODEL_SMART` override the model ids.
+- `HEED_MODEL_FAST` and `HEED_MODEL_SMART` override the model ids.
 
 You pay the providers directly. The usage ledger (`usage_events`) records the cost of every call,
 per user.
 
 ## Billing
 
-With **`NUGGET_BILLING=off`**, Stripe is never contacted:
-- Every signed-in user gets the limits of `NUGGET_SELFHOST_PLAN` (default `heed_max`).
+With **`HEED_BILLING=off`**, Stripe is never contacted:
+- Every signed-in user gets the limits of `HEED_SELFHOST_PLAN` (default `heed_max`).
 - The checkout, portal and Stripe-webhook routes answer `404 billing_disabled`.
 - The desktop app hides its plans and billing buttons.
 
@@ -163,7 +165,7 @@ The limits come from `crates/nugget-cloud/plans.toml`:
 - history
 - devices
 
-To change them, copy the file, edit it, mount it into `cloud`, and set `NUGGET_PLANS_FILE` to its
+To change them, copy the file, edit it, mount it into `cloud`, and set `HEED_PLANS_FILE` to its
 path. The file is checked at start-up.
 
 ## The database: `nugget_service` and row-level security
@@ -189,16 +191,16 @@ The desktop app reads three settings when it starts, and falls back to values bu
 
 | Variable | Value |
 |---|---|
-| `NUGGET_CLOUD_URL` | Your `PUBLIC_URL` |
-| `NUGGET_SUPABASE_URL` | Your `PUBLIC_URL` too: the gateway serves Auth under `/auth/v1` |
-| `NUGGET_SUPABASE_ANON_KEY` | `SUPABASE_ANON_KEY` from `.env` |
+| `HEED_CLOUD_URL` | Your `PUBLIC_URL` |
+| `HEED_SUPABASE_URL` | Your `PUBLIC_URL` too: the gateway serves Auth under `/auth/v1` |
+| `HEED_SUPABASE_ANON_KEY` | `SUPABASE_ANON_KEY` from `.env` |
 
 The app accepts only `https://` addresses, except `http://localhost` for testing. There is no
 in-app setting yet, so set the variables where the app is launched:
 
-- **macOS:** `open -a Heed --env NUGGET_CLOUD_URL=https://heed.example.com --env NUGGET_SUPABASE_URL=https://heed.example.com --env NUGGET_SUPABASE_ANON_KEY=…`
-- **Windows:** set them as user environment variables (`setx NUGGET_CLOUD_URL https://heed.example.com`, and so on), then start Heed.
-- **Linux:** export them in the environment that starts Heed, or in its `.desktop` file's `Exec=env NUGGET_CLOUD_URL=… heed` line.
+- **macOS:** `open -a Heed --env HEED_CLOUD_URL=https://heed.example.com --env HEED_SUPABASE_URL=https://heed.example.com --env HEED_SUPABASE_ANON_KEY=…`
+- **Windows:** set them as user environment variables (`setx HEED_CLOUD_URL https://heed.example.com`, and so on), then start Heed.
+- **Linux:** export them in the environment that starts Heed, or in its `.desktop` file's `Exec=env HEED_CLOUD_URL=… heed` line.
 - **Builds from source:** set the same three variables when building the app, and they become its defaults.
 
 Then open **Cloud** in the app, sign in with a magic link (or Google), and connect your apps.
@@ -252,7 +254,7 @@ E2E_CLOUD_KEEP=1 selfhost/e2e.sh     # leave the stack up afterwards
 
 It builds the server, nuggetd and the app's cloud client, starts the stack and runs the `cloud`
 scenario of the desktop's e2e test (`apps/desktop/e2e/README.md`) twice: once with Stripe billing,
-once with `NUGGET_BILLING=off`. The scenario signs in with a magic link from Mailpit, connects Gmail
+once with `HEED_BILLING=off`. The scenario signs in with a magic link from Mailpit, connects Gmail
 and Calendar, checks the brief, the cards and an action proposed from one (edited, approved after
 the Undo hold, sent exactly once; a stale approval refused), snoozes and rejects others, asks
 through the model endpoint, checks the plan, trial and usage (or the self-hosted plan), and deletes
@@ -322,6 +324,6 @@ self-hosted stack:
 3. **Auth settings:** in Auth → URL Configuration, allow `heed://auth/callback` and
    `nugget://auth/callback`.
 4. **The server:** run `cloud` alone, with `SUPABASE_URL=https://<ref>.supabase.co`, the project's
-   anon and service-role keys, and `NUGGET_BILLING=off`.
-5. **The desktop app:** `NUGGET_SUPABASE_URL` is the Supabase URL and `NUGGET_CLOUD_URL` is your
+   anon and service-role keys, and `HEED_BILLING=off`.
+5. **The desktop app:** `HEED_SUPABASE_URL` is the Supabase URL and `HEED_CLOUD_URL` is your
    server.

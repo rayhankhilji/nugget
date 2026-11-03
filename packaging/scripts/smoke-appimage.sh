@@ -48,8 +48,8 @@ mkdir -p "$NUGGET_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$
   "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 # Answer "When you quit Heed" up front, so quitting doesn't stop to ask (platform.rs).
-mkdir -p "$XDG_CONFIG_HOME/dev.nugget.desktop"
-printf '{"quit_daemon":"%s"}\n' "$quit_mode" > "$XDG_CONFIG_HOME/dev.nugget.desktop/platform.json"
+mkdir -p "$XDG_CONFIG_HOME/app.heed.desktop"
+printf '{"quit_daemon":"%s"}\n' "$quit_mode" > "$XDG_CONFIG_HOME/app.heed.desktop/platform.json"
 unset WAYLAND_DISPLAY DBUS_SESSION_BUS_ADDRESS
 
 export NUGGET_TRAY=off # without a tray, closing the main window quits the app

@@ -47,7 +47,7 @@ export HOME="$work/home"
 mkdir -p "$NUGGET_HOME" "$HOME"
 unset XDG_RUNTIME_DIR
 # Answer "When you quit Heed" up front, so quitting doesn't stop to ask (platform.rs).
-app_config="$HOME/Library/Application Support/dev.nugget.desktop"
+app_config="$HOME/Library/Application Support/app.heed.desktop"
 mkdir -p "$app_config"
 printf '{"quit_daemon":"%s"}\n' "$quit_mode" > "$app_config/platform.json"
 

@@ -21,7 +21,7 @@ Sentient OS is AGPL-licensed. To keep Heed cleanly Apache-2.0:
 ## Tests and code
 
 - Every public behaviour has a test, on Linux, macOS and Windows (gate OS code with `cfg`, keep a
-  fallback). No real network, credentials, keychain or home: use `wiremock`, fixtures, `NUGGET_HOME`.
+  fallback). No real network, credentials, keychain or home: use `wiremock`, fixtures, `HEED_HOME`.
 - Parsers cap sizes, time out and return errors. Claims of "faster" or "better" come with a
   `nugget-bench` metric.
 - `unsafe` only in minimal, commented FFI. Route models by tier; record every egress; never log

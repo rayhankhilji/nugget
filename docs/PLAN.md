@@ -113,28 +113,39 @@ cloud service and the docs. `heed://` is the deep-link scheme (`heed://auth/call
 `heed://connections/callback`); `nugget://` stays registered and accepted as an alias so links
 already shared keep working. These internal names still say nugget, each for a reason:
 
-- **Bundle identifier `dev.nugget.desktop`** (and the Wayland app id and desktop file
-  `dev.nugget.Nugget`, the plugin type `dev.nugget.plugin`). macOS ties privacy permissions
-  (Accessibility, Input Monitoring, Full Disk Access) and the keychain to the identifier, and the
-  desktop app's own settings, history and WebView data live in folders named after it. A new id
-  orphans all of that and needs a domain we own. Migration: pick the id once a Heed domain is
-  registered, move the app folders on first launch, and walk users through granting permissions
-  again.
-- **Data and config directories** (`ProjectDirs("dev", "Nugget", "Nugget")`, `~/Nugget Vault`,
-  keychain service `dev.nugget.Nugget`, the "Nugget Daemon" task, the launchd and systemd service
-  names, the `NuggetDesktop` Run value). Renaming loses the store, its key, the vault and the
-  login service. Migration: on first start look in the old places, move with a crash-safe copy
-  (the backup code already does this), move keychain entries, re-register the service under the
-  new name and remove the old one, and only then switch the default paths.
+- **Done: the identity freeze.** The bundle ID is `app.heed.desktop` (Tauri identifier, the
+  launchd labels `app.heed.desktop.autostart` and `app.heed.nuggetd`, the `tccutil` resets), the
+  Linux app ID and desktop file `app.heed.Heed`, the keychain service `app.heed.Heed`, the
+  browser host `app.heed.browser`, the data folders `ProjectDirs("app", "heed", "Heed")`, and the
+  user agent `Heed/<version>` (`nugget-core` `identity.rs`). The first launch moves the old ones
+  (`nugget-core` `migrate.rs`, `paths.rs`; the desktop's `rename.rs` and `autostart.rs`): folders
+  are copied, checked, marked and never deleted; keychain entries move on first read; the open-at-
+  login entry is rewritten. `HEED_*` variables are read first, `NUGGET_*` still work (`env.rs`).
+  See [Data directory](book/src/reference/data-dir.md#moving-from-the-names-before-the-rename).
+- **Still to rename, each with its own migration:**
+  - First-party plugin IDs (`dev.nugget.rss`, `dev.nugget.read-later`, `dev.nugget.obsidian`,
+    the SDK examples `dev.nugget.example.*`, test fixtures `dev.nugget.test.*`) and the plugin
+    file type `dev.nugget.plugin`: installed plugins and their stored data are keyed by ID.
+  - The vault folder `~/Nugget Vault` (user-visible, often opened in Obsidian; moving it needs
+    the user's say), the store file `nugget.db`, `store.key` labels such as
+    `nugget-backup-key-id-v1` (part of backups' format).
+  - Windows: the task "Nugget Daemon", the `NuggetDesktop` Run value, the native-messaging
+    folder `%LOCALAPPDATA%\Nugget\NativeMessagingHosts`. The NSIS uninstaller removes the new
+    folders only; the pre-rename ones stay until `remove-nugget-keys.ps1` or a manual delete.
+  - An existing `dev.nugget.nuggetd` LaunchAgent keeps working until `nuggetd install-service`
+    (or the app's "Start Heed at login") replaces it; a Linux `dev.nugget.Nugget.desktop` an
+    AppImage wrote stays beside the new one; global shortcuts on Wayland need approving again
+    under the new app ID.
+  - Development, benchmark, signing and test variables (`NUGGET_BENCH_*`, `NUGGET_SIGN*`,
+    `NUGGET_*_SIGNING_KEY*`, `NUGGET_CUA_*`, `NUGGET_PLUGIN_REQUIRE_GUESTS`, `NUGGET_HOTKEY_IT`,
+    `NUGGET_REAL_PLATFORM`, the e2e harness's `NUGGET_FAKE_LLAMA_SERVER`): read by tools that do
+    not promote `HEED_*`. Log and error messages still name `NUGGET_*` variables.
 - **Binary names `nuggetd`, `nugget-desktop`, `nugget-browser-host`.** Scripts, service
   definitions, MCP client configs (`nuggetd mcp`) and docs call them by name; the `nugget` MCP
   server key and `serverInfo.name` (shown as "Heed" through its title) and the `nugget://entity/`
   and `nugget://item/` resource URIs stay for the same reason. Migration: ship `heedd`/`heed` with
   the old names as shims for a release, rewrite the MCP entries `nuggetd install` made, then drop
   the shims.
-- **`NUGGET_*` environment variables** (`NUGGET_HOME`, `NUGGET_*_KEY`, the cloud service's
-  `NUGGET_CONNECT_CALLBACK`, ...). Users and deployments set them. Migration: read `HEED_*` first
-  and fall back to `NUGGET_*` with a deprecation warning, for at least one release.
 - **Crate names (`nugget-*`, `nuggetd`) and the repository name `rayhankhilji/nugget`.** Purely
   internal, but renaming touches every import, the release workflows, attestation (`gh attestation
   verify -R`), the updater feed URLs and links in shipped docs. Migration: rename the repository

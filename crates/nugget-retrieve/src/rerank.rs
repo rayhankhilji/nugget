@@ -169,7 +169,7 @@ impl HttpReranker {
         url.set_path(&joined);
 
         let mut builder = reqwest::Client::builder()
-            .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
+            .user_agent(nugget_core::identity::USER_AGENT)
             .timeout(Duration::from_millis(config.timeout_ms.max(1)))
             .connect_timeout(Duration::from_millis(config.connect_timeout_ms.max(1)))
             // A redirect would carry the passages to a host the locality check never saw.

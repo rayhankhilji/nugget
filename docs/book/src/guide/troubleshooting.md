@@ -8,15 +8,15 @@
 
    | System | Log folder |
    |---|---|
-   | Linux | `~/.local/share/nugget/logs` |
-   | macOS | `~/Library/Application Support/dev.Nugget.Nugget/logs` |
-   | Windows | `%LOCALAPPDATA%\Nugget\Nugget\data\logs` |
-   | With `NUGGET_HOME=DIR` | `DIR/data/logs` |
+   | Linux | `~/.local/share/heed/logs` |
+   | macOS | `~/Library/Application Support/app.heed.Heed/logs` |
+   | Windows | `%LOCALAPPDATA%\heed\Heed\data\logs` |
+   | With `HEED_HOME=DIR` | `DIR/data/logs` |
 
    `nuggetd.<date>.log` is the daemon, `nugget-desktop.<date>.log` the app, `llama-server-*.log`
    the local model servers. Logs at `info` and above never contain secrets or item content.
-3. For more detail, start with `NUGGET_LOG=debug nuggetd` (or `nugget-desktop`); it takes `tracing`
-   filters such as `NUGGET_LOG=info,nugget_ingest=debug`.
+3. For more detail, start with `HEED_LOG=debug nuggetd` (or `nugget-desktop`); it takes `tracing`
+   filters such as `HEED_LOG=info,nugget_ingest=debug`.
 
 ## The app says "Start Heed" or "Not running"
 
@@ -30,7 +30,7 @@
 Quitting follows your answer to "also stop background indexing and the local AI?" (change it under
 **Status → Updates → Desktop app**). A login service or a `nuggetd` you started yourself is never
 stopped by the app. Stop it with `systemctl --user stop nuggetd` (Linux),
-`launchctl bootout gui/$(id -u)/dev.nugget.nuggetd` (macOS) or `schtasks /End /TN "Nugget Daemon"`
+`launchctl bootout gui/$(id -u)/app.heed.nuggetd` (macOS) or `schtasks /End /TN "Nugget Daemon"`
 (Windows), or turn off the login option.
 
 ## The Status page says the background service is another version

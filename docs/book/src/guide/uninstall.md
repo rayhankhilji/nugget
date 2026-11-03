@@ -32,14 +32,18 @@ The `setup.exe` uninstaller does this for you. If the app is already gone, see
 App data and your vault are removed separately: the vault is your notes. Deleting the store and its
 key can't be undone (a backup can still be restored with its passphrase). A vault you placed with
 `[vault] path` ([config.toml](../reference/config.md#vault)) is never deleted here. With
-`NUGGET_HOME` or `--home`, data is in that directory (see [Data directory](../reference/data-dir.md)).
+`HEED_HOME` or `--home`, data is in that directory (see [Data directory](../reference/data-dir.md)).
+
+Folder and key names from before the rename (Nugget) are listed too: the first launch of this
+version copies them to the new names and leaves the originals (see
+[Data directory](../reference/data-dir.md#moving-from-the-names-before-the-rename)).
 
 ### Windows
 
-Data, models, cache and settings are in `%LOCALAPPDATA%\Nugget\Nugget` and
-`%APPDATA%\Nugget\Nugget` (see [Data directory](../reference/data-dir.md)); the app's own state is in
-the two `dev.nugget.desktop` folders; saved keys are Credential Manager generic credentials ending in
-`.dev.nugget.Nugget`; the vault is `%USERPROFILE%\Nugget Vault`.
+Data, models, cache and settings are in `%LOCALAPPDATA%\heed\Heed` and
+`%APPDATA%\heed\Heed` (see [Data directory](../reference/data-dir.md)); the app's own state is in
+the two `app.heed.desktop` folders; saved keys are Credential Manager generic credentials ending in
+`.app.heed.Heed`; the vault is `%USERPROFILE%\Nugget Vault`.
 
 The `setup.exe` uninstaller shows a **Your Heed data** page with two unticked boxes:
 **Remove models and Heed's data** (everything above except the vault, including saved keys) and,
@@ -51,6 +55,11 @@ After an `.msi` uninstall, or to do it by hand, quit Heed and in PowerShell remo
 models:
 
 ```powershell
+cmd /c rmdir /s /q "%LOCALAPPDATA%\heed\Heed"
+cmd /c rmdir /s /q "%APPDATA%\heed\Heed"
+cmd /c rmdir /s /q "%APPDATA%\app.heed.desktop"
+cmd /c rmdir /s /q "%LOCALAPPDATA%\app.heed.desktop"
+rem Left by a version from before the rename (Nugget):
 cmd /c rmdir /s /q "%LOCALAPPDATA%\Nugget\Nugget"
 cmd /c rmdir /s /q "%APPDATA%\Nugget\Nugget"
 cmd /c rmdir /s /q "%APPDATA%\dev.nugget.desktop"
@@ -60,7 +69,7 @@ cmd /c rmdir /s /q "%LOCALAPPDATA%\dev.nugget.desktop"
 Saved keys (or remove them in **Credential Manager → Windows Credentials**):
 
 ```powershell
-cmdkey /list | Select-String 'target=(.+\.dev\.nugget\.Heed)\s*$' |
+cmdkey /list | Select-String 'target=(.+\.(app\.heed\.Heed|dev\.nugget\.Nugget|nugget))\s*$' |
   ForEach-Object { cmdkey "/delete:$($_.Matches[0].Groups[1].Value)" }
 ```
 
@@ -70,41 +79,47 @@ not followed; delete it yourself.
 
 ### macOS
 
-Data, models and settings are in `~/Library/Application Support/dev.Nugget.Nugget`, the app's own
-state and web data under `dev.nugget.desktop` names in `~/Library`, saved keys in your login keychain
-(service `dev.nugget.Nugget`), and the vault in `~/Nugget Vault`.
+Data, models and settings are in `~/Library/Application Support/app.heed.Heed`, the app's own
+state and web data under `app.heed.desktop` names in `~/Library`, saved keys in your login keychain
+(service `app.heed.Heed`), and the vault in `~/Nugget Vault`.
 
 App data and models:
 
 ```sh
-rm -rf ~/Library/Application\ Support/dev.Nugget.Nugget ~/Library/Caches/dev.Nugget.Nugget \
-  ~/Library/Application\ Support/dev.nugget.desktop ~/Library/Caches/dev.nugget.desktop \
-  ~/Library/WebKit/dev.nugget.desktop ~/Library/HTTPStorages/dev.nugget.desktop \
-  ~/Library/HTTPStorages/dev.nugget.desktop.binarycookies \
-  ~/Library/Saved\ Application\ State/dev.nugget.desktop.savedState \
-  ~/Library/Preferences/dev.nugget.desktop.plist
+rm -rf ~/Library/Application\ Support/app.heed.Heed ~/Library/Caches/app.heed.Heed \
+  ~/Library/Application\ Support/dev.Nugget.Nugget ~/Library/Caches/dev.Nugget.Nugget \
+  ~/Library/Application\ Support/dev.nugget.desktop ~/Library/WebKit/dev.nugget.desktop \
+  ~/Library/Application\ Support/app.heed.desktop ~/Library/Caches/app.heed.desktop \
+  ~/Library/WebKit/app.heed.desktop ~/Library/HTTPStorages/app.heed.desktop \
+  ~/Library/HTTPStorages/app.heed.desktop.binarycookies \
+  ~/Library/Saved\ Application\ State/app.heed.desktop.savedState \
+  ~/Library/Preferences/app.heed.desktop.plist
 ```
 
-Saved keys (or delete `dev.nugget.Nugget` items in **Keychain Access**):
+Saved keys (or delete `app.heed.Heed` items in **Keychain Access**):
 
 ```sh
-while security delete-generic-password -s dev.nugget.Nugget >/dev/null 2>&1; do :; done
+for s in app.heed.Heed dev.nugget.Nugget nugget; do
+  while security delete-generic-password -s "$s" >/dev/null 2>&1; do :; done
+done
 ```
 
 Your vault, only if you no longer want your notes: `rm -rf ~/Nugget\ Vault`.
 
 ### Linux (`.deb`, `.rpm`, AppImage)
 
-Data and models are in `~/.local/share/nugget`, settings in `~/.config/nugget`, cache in
-`~/.cache/nugget`, the app's own state in `dev.nugget.desktop` folders, saved keys in the Secret
-Service (attribute `service` = `dev.nugget.Nugget`; without one, the key is
-`~/.local/share/nugget/store.key`), and the vault in `~/Nugget Vault`. `$XDG_*_HOME` variables
+Data and models are in `~/.local/share/heed`, settings in `~/.config/heed`, cache in
+`~/.cache/heed`, the app's own state in `app.heed.desktop` folders, saved keys in the Secret
+Service (attribute `service` = `app.heed.Heed`; without one, the key is
+`~/.local/share/heed/store.key`), and the vault in `~/Nugget Vault`. `$XDG_*_HOME` variables
 replace these base folders when set.
 
 App data and models:
 
 ```sh
-rm -rf ~/.local/share/nugget ~/.config/nugget ~/.cache/nugget \
+rm -rf ~/.local/share/heed ~/.config/heed ~/.cache/heed \
+  ~/.config/app.heed.desktop ~/.local/share/app.heed.desktop ~/.cache/app.heed.desktop \
+  ~/.local/share/nugget ~/.config/nugget ~/.cache/nugget \
   ~/.config/dev.nugget.desktop ~/.local/share/dev.nugget.desktop ~/.cache/dev.nugget.desktop
 ```
 
@@ -112,8 +127,8 @@ Saved keys (`secret-tool` is in `libsecret-tools` on Debian/Ubuntu, `libsecret` 
 Seahorse or KWalletManager):
 
 ```sh
-secret-tool clear service dev.nugget.Nugget
-secret-tool search --all service dev.nugget.Nugget    # prints nothing when all are gone; else clear again
+for s in app.heed.Heed dev.nugget.Nugget nugget; do secret-tool clear service "$s"; done
+secret-tool search --all service app.heed.Heed    # prints nothing when all are gone; else clear again
 ```
 
 Your vault, only if you no longer want your notes: `rm -rf ~/Nugget\ Vault`.
@@ -126,17 +141,17 @@ Linux:
 
 ```sh
 systemctl --user disable --now nuggetd.service
-rm -f ~/.config/systemd/user/nuggetd.service ~/.config/autostart/dev.nugget.desktop.desktop
+rm -f ~/.config/systemd/user/nuggetd.service ~/.config/autostart/app.heed.desktop.desktop
 systemctl --user daemon-reload
 ```
 
 macOS:
 
 ```sh
-launchctl bootout gui/$(id -u)/dev.nugget.nuggetd
-launchctl bootout gui/$(id -u)/dev.nugget.desktop.autostart
-rm -f ~/Library/LaunchAgents/dev.nugget.nuggetd.plist \
-  ~/Library/LaunchAgents/dev.nugget.desktop.autostart.plist
+launchctl bootout gui/$(id -u)/app.heed.nuggetd
+launchctl bootout gui/$(id -u)/app.heed.desktop.autostart
+rm -f ~/Library/LaunchAgents/app.heed.nuggetd.plist \
+  ~/Library/LaunchAgents/app.heed.desktop.autostart.plist
 ```
 
 Windows (after an `.msi` uninstall; `setup.exe` removes both):
@@ -159,5 +174,5 @@ bash remove-nugget-data.sh --yes --include-vault   # also the vault; asks you to
 ```
 
 It refuses to run while Heed is running, never deletes a vault you placed with `[vault] path`,
-and leaves `NUGGET_HOME` alone. (The manual commands above remove every key under
-`dev.nugget.Nugget`, including other data directories' store keys; the script keeps those.)
+and leaves `HEED_HOME` alone. (The manual commands above remove every key under
+`app.heed.Heed`, including other data directories' store keys; the script keeps those.)

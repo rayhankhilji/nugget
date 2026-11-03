@@ -193,7 +193,7 @@ impl Http {
             default_headers.insert(name.clone(), value);
         }
         let mut builder = reqwest::Client::builder()
-            .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
+            .user_agent(nugget_core::identity::USER_AGENT)
             .default_headers(default_headers)
             .connect_timeout(settings.connect_timeout)
             .read_timeout(settings.idle_timeout)

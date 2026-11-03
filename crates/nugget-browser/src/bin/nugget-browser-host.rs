@@ -22,6 +22,8 @@ use nugget_browser::install::{self, Browser, InstallConfig};
 use nugget_core::paths::Paths;
 
 fn main() -> ExitCode {
+    // `HEED_*` over `NUGGET_*`, before any other thread starts.
+    nugget_core::env::promote();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("install") => cli(&args[1..], Mode::Install),

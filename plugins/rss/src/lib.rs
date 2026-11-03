@@ -38,7 +38,7 @@ pub const MAX_ENTRIES: usize = 500;
 /// Key-value prefix of per-feed state.
 const STATE_PREFIX: &str = "feed:";
 const ACCEPT: &str = "application/rss+xml, application/atom+xml, application/rdf+xml;q=0.9, application/xml;q=0.8, text/xml;q=0.8, */*;q=0.5";
-const USER_AGENT: &str = "Nugget-RSS/0.1 (+https://github.com/rayhankhilji/nugget)";
+const USER_AGENT: &str = "Heed-RSS/0.1";
 
 pub struct Feeds;
 

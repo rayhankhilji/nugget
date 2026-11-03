@@ -4,7 +4,7 @@
 //! |---------|---------------------------------------------------|---------------------------------------------|
 //! | macOS   | `~/Library/Application Support/<vendor>/NativeMessagingHosts/` | `~/Library/Application Support/Mozilla/NativeMessagingHosts/` |
 //! | Linux   | `~/.config/<vendor>/NativeMessagingHosts/`        | `~/.mozilla/native-messaging-hosts/`        |
-//! | Windows | manifest under `%LOCALAPPDATA%\Nugget\NativeMessagingHosts\<browser>\`, plus `HKCU\Software\<vendor>\NativeMessagingHosts\dev.nugget.browser` pointing at it |
+//! | Windows | manifest under `%LOCALAPPDATA%\Nugget\NativeMessagingHosts\<browser>\`, plus `HKCU\Software\<vendor>\NativeMessagingHosts\app.heed.browser` pointing at it |
 //!
 //! [`plan`] is pure (golden-tested for every browser and OS); [`apply`] performs a plan, or with
 //! `dry_run` only reports it. Registry steps run `reg.exe` and exist only on Windows.
@@ -17,7 +17,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 /// Native-messaging host name (the extension calls `connectNative` with it).
-pub const HOST_NAME: &str = "dev.nugget.browser";
+pub const HOST_NAME: &str = "app.heed.browser";
+/// The host's name before the rename: installing removes its manifests, uninstalling too.
+pub const LEGACY_HOST_NAME: &str = "dev.nugget.browser";
 /// Extension id of the unpacked development build (pinned by the public `key` in
 /// `extensions/browser/static/manifest.base.json`). Store builds pass their own id.
 pub const CHROMIUM_DEV_EXTENSION_ID: &str = "gljflghdpajgdddaibpdgjibnkeggchn";
@@ -172,7 +174,15 @@ pub fn manifest(browser: Browser, cfg: &InstallConfig) -> Value {
 
 /// Where the manifest goes.
 pub fn manifest_path(browser: Browser, cfg: &InstallConfig) -> Result<String, InstallError> {
-    let file = format!("{HOST_NAME}.json");
+    manifest_path_for(browser, cfg, HOST_NAME)
+}
+
+fn manifest_path_for(
+    browser: Browser,
+    cfg: &InstallConfig,
+    host: &str,
+) -> Result<String, InstallError> {
+    let file = format!("{host}.json");
     Ok(match cfg.os {
         Os::MacOs => {
             let vendor = match browser {
@@ -217,13 +227,17 @@ pub fn manifest_path(browser: Browser, cfg: &InstallConfig) -> Result<String, In
 
 /// The per-user registry key (Windows only).
 pub fn registry_key(browser: Browser) -> String {
+    registry_key_for(browser, HOST_NAME)
+}
+
+fn registry_key_for(browser: Browser, host: &str) -> String {
     let vendor = match browser {
         Browser::Chrome => r"Google\Chrome",
         Browser::Chromium => "Chromium",
         Browser::Edge => r"Microsoft\Edge",
         Browser::Firefox => "Mozilla",
     };
-    format!(r"HKCU\Software\{vendor}\NativeMessagingHosts\{HOST_NAME}")
+    format!(r"HKCU\Software\{vendor}\NativeMessagingHosts\{host}")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -364,8 +378,27 @@ pub fn plan(browsers: &[Browser], cfg: &InstallConfig) -> Result<Vec<Step>, Inst
                 value: path,
             });
         }
+        // The registration from before the rename, now that the new one is in place.
+        remove_host(&mut steps, b, cfg, LEGACY_HOST_NAME)?;
     }
     Ok(steps)
+}
+
+fn remove_host(
+    steps: &mut Vec<Step>,
+    b: Browser,
+    cfg: &InstallConfig,
+    host: &str,
+) -> Result<(), InstallError> {
+    if cfg.os == Os::Windows {
+        steps.push(Step::DeleteRegistryKey {
+            key: registry_key_for(b, host),
+        });
+    }
+    steps.push(Step::RemoveFile {
+        path: manifest_path_for(b, cfg, host)?,
+    });
+    Ok(())
 }
 
 /// Steps to unregister the host from `browsers`.
@@ -375,14 +408,9 @@ pub fn uninstall_plan(
 ) -> Result<Vec<Step>, InstallError> {
     let mut steps = Vec::new();
     for &b in browsers {
-        if cfg.os == Os::Windows {
-            steps.push(Step::DeleteRegistryKey {
-                key: registry_key(b),
-            });
+        for host in [HOST_NAME, LEGACY_HOST_NAME] {
+            remove_host(&mut steps, b, cfg, host)?;
         }
-        steps.push(Step::RemoveFile {
-            path: manifest_path(b, cfg)?,
-        });
     }
     Ok(steps)
 }

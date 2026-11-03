@@ -177,22 +177,22 @@ needed) and tells you where it is. Paste each block into Terminal as it is.
    Heed and turn them on again:
 
    ```sh
-   tccutil reset Accessibility dev.nugget.desktop
-   tccutil reset ListenEvent dev.nugget.desktop
-   tccutil reset SystemPolicyAllFiles dev.nugget.desktop
+   tccutil reset Accessibility app.heed.desktop
+   tccutil reset ListenEvent app.heed.desktop
+   tccutil reset SystemPolicyAllFiles app.heed.desktop
    ```
 
 ### Build and run
 
 ```sh
 git clone https://github.com/rayhankhilji/nugget && cd nugget
-export NUGGET_TRUST_DEV_MANIFEST_KEY=1
+export HEED_TRUST_DEV_MANIFEST_KEY=1
 cargo build --release -p nuggetd
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
 cargo build --release -p nugget-desktop --features tauri/custom-protocol
 ```
 
-`NUGGET_TRUST_DEV_MANIFEST_KEY=1` is optional (see below); the last two lines build the desktop app
+`HEED_TRUST_DEV_MANIFEST_KEY=1` is optional (see below); the last two lines build the desktop app
 and can be skipped. `--features tauri/custom-protocol` embeds the interface; without it the window
 would stay blank, so a release build without it stops with an error instead.
 
@@ -201,7 +201,7 @@ Both binaries land in `target/release/`; the app finds `nuggetd` next to itself 
 foreground and check it with `./target/release/nuggetd status`.
 
 Managed model downloads need a manifest signed with a key the build trusts. Release builds trust only
-the release key, so without `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (which trusts the repository's
+the release key, so without `HEED_TRUST_DEV_MANIFEST_KEY=1` (which trusts the repository's
 development key; debug builds always do) your build offers no model downloads. Ollama, LM Studio and
 cloud keys work either way.
 

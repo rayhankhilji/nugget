@@ -31,7 +31,7 @@ are re-extracted; facts that relied only on a deleted item are retracted.
 
 The graph is rendered as Markdown pages (`<Kind>/<Name> (<short id>).md`, plus a `README.md` index)
 you can read in any editor, including Obsidian. The folder is `~/Nugget Vault` (or `vault` in the data
-directory with `--home` or `NUGGET_HOME`); `path` under `[vault]` moves it. Pages re-render after each
+directory with `--home` or `HEED_HOME`); `path` under `[vault]` moves it. Pages re-render after each
 extraction run, and the folder is watched for your edits. A page, without the invisible HTML comments
 that mark Heed's regions (leave those in place):
 

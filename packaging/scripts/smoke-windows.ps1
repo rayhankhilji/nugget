@@ -48,8 +48,8 @@ $env:NO_COLOR = '1'
 # Keep WebView2's profile in the throwaway directory too (Tauri may set its own folder instead).
 $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $work 'webview2'
 # Answer "When you quit Heed" up front, so quitting doesn't stop to ask (platform.rs). The app's
-# config dir is %APPDATA%\dev.nugget.desktop; an existing platform.json is kept and put back.
-$appConfig = Join-Path $env:APPDATA 'dev.nugget.desktop'
+# config dir is %APPDATA%\app.heed.desktop; an existing platform.json is kept and put back.
+$appConfig = Join-Path $env:APPDATA 'app.heed.desktop'
 $platformJson = Join-Path $appConfig 'platform.json'
 $platformBackup = "$platformJson.smoke-backup"
 New-Item -ItemType Directory -Force -Path $appConfig | Out-Null

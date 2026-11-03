@@ -8,7 +8,7 @@ with `nuggetd mcp install` ([Command line](cli.md#nuggetd-mcp)) or the `mcp.clie
 
 | Transport | How a client connects | Credential |
 |---|---|---|
-| stdio | The app launches `nuggetd mcp --client <id>`, which pipes MCP to the running daemon over the local IPC socket | `NUGGET_MCP_TOKEN` in the launched process's environment |
+| stdio | The app launches `nuggetd mcp --client <id>`, which pipes MCP to the running daemon over the local IPC socket | `HEED_MCP_TOKEN` in the launched process's environment |
 | Streamable HTTP | `http://127.0.0.1:7319/mcp` when `[mcp] http` is on (the default). The port is `[mcp] port`; `0` picks a free one | `Authorization: Bearer ngt_…` on every request |
 
 There is no remote transport. HTTP requests must come from loopback, use path `/mcp` with no query

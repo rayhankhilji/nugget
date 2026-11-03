@@ -12,7 +12,7 @@
 //!
 //! What runs depends on the portal the session offers:
 //! - **GlobalShortcuts available** (kwin: xdg-desktop-portal-kde, Plasma 6; gnome:
-//!   xdg-desktop-portal-gnome, GNOME 48+): nugget-hotkey registers the app id `dev.nugget.Nugget`
+//!   xdg-desktop-portal-gnome, GNOME 48+): nugget-hotkey registers the app id `app.heed.Heed`
 //!   (the session provides its desktop file, or the installed package does), the portal session
 //!   is created and the shortcut bound. A new shortcut makes the desktop ask in a dialog, which
 //!   the test accepts over AT-SPI (`accept-shortcut-dialog.py`), as a user would. The bound

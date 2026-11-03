@@ -3,7 +3,7 @@
 The `settings` object of each source kind (`sources.add`, `sources.update`, `SourceInfo`). Unknown
 keys are rejected. Gmail and Outlook poll every 60 s, most other cloud kinds every 5–10 minutes;
 folders and chat exports are watched. Secrets never go in settings: use `sources.secret.set` (OS keychain, service
-`dev.nugget.Nugget`; deleted with the source). `.gitignore` and `.nuggetignore` are honoured by
+`app.heed.Heed`; deleted with the source). `.gitignore` and `.nuggetignore` are honoured by
 folder kinds.
 
 <!-- check-refs: connector.kinds -->

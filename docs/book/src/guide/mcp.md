@@ -27,7 +27,7 @@ daemon is stopped and another program takes the port, the app would send it the 
 
 In the snippets, replace `mcp_YOUR_CLIENT_ID` and `ngt_YOUR_TOKEN` (the desktop app fills them in).
 If `nuggetd` is not on the app's `PATH`, use its full path. If the daemon runs with `--home` or
-`NUGGET_HOME`, add `NUGGET_HOME` to `env` too.
+`HEED_HOME`, add `HEED_HOME` to `env` too.
 
 ## Claude Desktop
 
@@ -56,7 +56,7 @@ name. Restart Claude Desktop afterwards. By hand, add this to the config file:
       ],
       "command": "nuggetd",
       "env": {
-        "NUGGET_MCP_TOKEN": "ngt_YOUR_TOKEN"
+        "HEED_MCP_TOKEN": "ngt_YOUR_TOKEN"
       }
     }
   }
@@ -73,7 +73,7 @@ This creates the client and prints the command to run yourself (it contains the 
 your shell history):
 
 ```sh
-claude mcp add --transport stdio --scope user --env NUGGET_MCP_TOKEN=ngt_YOUR_TOKEN nugget -- nuggetd mcp --client mcp_YOUR_CLIENT_ID
+claude mcp add --transport stdio --scope user --env HEED_MCP_TOKEN=ngt_YOUR_TOKEN nugget -- nuggetd mcp --client mcp_YOUR_CLIENT_ID
 ```
 
 `--scope user` makes Heed available in every project; check with `claude mcp list`. Over HTTP:
@@ -119,7 +119,7 @@ secret storage:
       "type": "stdio",
       "command": "nuggetd",
       "args": ["mcp", "--client", "mcp_YOUR_CLIENT_ID"],
-      "env": { "NUGGET_MCP_TOKEN": "${input:nugget-token}" }
+      "env": { "HEED_MCP_TOKEN": "${input:nugget-token}" }
     }
   }
 }
@@ -154,7 +154,7 @@ server from the Agent panel's settings with the same command, arguments and envi
       "source": "custom",
       "command": "nuggetd",
       "args": ["mcp", "--client", "mcp_YOUR_CLIENT_ID"],
-      "env": { "NUGGET_MCP_TOKEN": "ngt_YOUR_TOKEN" }
+      "env": { "HEED_MCP_TOKEN": "ngt_YOUR_TOKEN" }
     }
   }
 }
@@ -166,7 +166,7 @@ Stdio:
 
 ```text
 command: nuggetd mcp --client mcp_YOUR_CLIENT_ID
-env: NUGGET_MCP_TOKEN=ngt_YOUR_TOKEN
+env: HEED_MCP_TOKEN=ngt_YOUR_TOKEN
 ```
 
 Streamable HTTP:

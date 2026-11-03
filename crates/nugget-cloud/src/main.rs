@@ -32,13 +32,22 @@ fn init_logs(format: &str) {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // `HEED_*` over `NUGGET_*`, before the runtime starts any thread.
+    nugget_core::env::promote();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(serve())
+}
+
+async fn serve() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Config::from_env()?;
     init_logs(&cfg.log_format);
     ops::install_panic_hook();
     tracing::info!(?cfg, "starting");
     let http = reqwest::Client::builder()
+        .user_agent(nugget_core::identity::USER_AGENT)
         .timeout(Duration::from_secs(60))
         .connect_timeout(Duration::from_secs(10))
         .build()?;

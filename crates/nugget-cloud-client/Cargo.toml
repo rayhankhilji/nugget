@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Desktop client for Nugget Cloud: Supabase sign-in (PKCE + deep link), keychain session, typed /v1 API."
 
 [dependencies]
+nugget-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

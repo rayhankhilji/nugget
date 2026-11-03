@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Heed",
   "version": "0.0.1",
-  "identifier": "dev.nugget.desktop",
+  "identifier": "app.heed.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://127.0.0.1:5173",
@@ -76,13 +76,13 @@
         "section": "utils",
         "depends": [],
         "files": {
-          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
+          "/usr/share/applications/app.heed.Heed.desktop": "../../../packaging/linux/app.heed.Heed.desktop"
         }
       },
       "rpm": {
         "release": "1",
         "files": {
-          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
+          "/usr/share/applications/app.heed.Heed.desktop": "../../../packaging/linux/app.heed.Heed.desktop"
         }
       },
       "appimage": {

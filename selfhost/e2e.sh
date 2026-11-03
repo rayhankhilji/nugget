@@ -2,7 +2,7 @@
 # One command for the desktop's `cloud` end-to-end scenario: builds the server, the desktop's
 # cloud shell and nuggetd, starts this stack (project "heed-e2e", its own volumes and ports) with
 # fake Composio, Anthropic, OpenAI and Stripe, and drives the real desktop app against it: once
-# with billing on (fake Stripe) and once with NUGGET_BILLING=off. Tears the stack down at the end.
+# with billing on (fake Stripe) and once with HEED_BILLING=off. Tears the stack down at the end.
 #
 #   selfhost/e2e.sh                      # both runs
 #   E2E_CLOUD_RUNS=3 selfhost/e2e.sh     # repeat both runs three times
@@ -63,19 +63,19 @@ COMPOSIO_AUTH_CONFIGS=gmail=ac_gmail,googlecalendar=ac_cal
 ANTHROPIC_API_KEY=fake
 OPENAI_API_KEY=fake
 COMPOSIO_BASE_URL=http://host.docker.internal:$fake_port
-NUGGET_ANTHROPIC_BASE_URL=http://host.docker.internal:$fake_port
-NUGGET_OPENAI_BASE_URL=http://host.docker.internal:$fake_port
-NUGGET_STRIPE_BASE_URL=http://host.docker.internal:$fake_port
+HEED_ANTHROPIC_BASE_URL=http://host.docker.internal:$fake_port
+HEED_OPENAI_BASE_URL=http://host.docker.internal:$fake_port
+HEED_STRIPE_BASE_URL=http://host.docker.internal:$fake_port
 STRIPE_SECRET_KEY=sk_test_fake
 STRIPE_WEBHOOK_SECRET=$webhook_secret
 STRIPE_PRICE_HEED_MONTHLY=price_heedmonthly
 STRIPE_PRICE_HEED_ANNUAL=price_heedannual
 STRIPE_PRICE_HEED_MAX_MONTHLY=price_maxmonthly
 STRIPE_PRICE_HEED_MAX_ANNUAL=price_maxannual
-NUGGET_PUBLIC_URL=http://localhost:$port
-NUGGET_WAITLIST_SALT=e2e
-NUGGET_APP_SCHEME=nugget
-NUGGET_BILLING=on
+HEED_PUBLIC_URL=http://localhost:$port
+HEED_WAITLIST_SALT=e2e
+HEED_APP_SCHEME=nugget
+HEED_BILLING=on
 EOF
 } >"$env_file"
 set -a
@@ -113,7 +113,7 @@ export E2E_FAKE_URL="http://127.0.0.1:$fake_port"
 export E2E_CLOUD_PSQL="docker compose -p heed-e2e --env-file $env_file -f $here/docker-compose.yml -f $override exec -T db psql -U postgres -tAX -v ON_ERROR_STOP=1"
 
 billing() {
-  sed -i "s/^NUGGET_BILLING=.*/NUGGET_BILLING=$1/" "$env_file"
+  sed -i "s/^HEED_BILLING=.*/HEED_BILLING=$1/" "$env_file"
   "${compose[@]}" up -d --wait --no-build cloud >/dev/null
   wait_up
 }

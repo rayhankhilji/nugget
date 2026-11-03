@@ -96,7 +96,7 @@ services:
       DATABASE_URL: postgres://nugget_service:${SERVICE_DB_PASSWORD}@db:5432/postgres?sslmode=disable
       # The server checks tokens and deletes accounts through the gateway, like a client would.
       SUPABASE_URL: http://gateway:8001
-      NUGGET_CLOUD_BIND: 0.0.0.0:8080
+      HEED_CLOUD_BIND: 0.0.0.0:8080
     extra_hosts:
       - host.docker.internal:host-gateway
 

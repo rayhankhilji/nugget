@@ -144,10 +144,10 @@ new_case() { # name
   chmod 700 "$XDG_RUNTIME_DIR"
   # Beta channel (where a prerelease is published) with auto-install: download and verify in
   # the background, install at quit.
-  mkdir -p "$XDG_CONFIG_HOME/dev.nugget.desktop"
-  printf '{"channel":"beta","auto_install":true}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/settings.json"
+  mkdir -p "$XDG_CONFIG_HOME/app.heed.desktop"
+  printf '{"channel":"beta","auto_install":true}\n' >"$XDG_CONFIG_HOME/app.heed.desktop/settings.json"
   # Quitting stops the daemon the app started, without asking first (platform.json).
-  printf '{"quit_daemon":"stop"}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/platform.json"
+  printf '{"quit_daemon":"stop"}\n' >"$XDG_CONFIG_HOME/app.heed.desktop/platform.json"
   # Any temp files (the updater's backup of the running AppImage) stay in the case directory.
   export TMPDIR="$w/tmp"
   mkdir -p "$TMPDIR"

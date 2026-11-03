@@ -15,7 +15,7 @@ items are kept until it comes back.
 - **Mail and calendar files**: `.eml`, `.ics`
 - **Source code** in about 50 languages
 - **Images** (PNG, JPEG, WebP) via OCR, only when OCR models are installed
-  (see [`NUGGET_OCR_MODELS`](../reference/environment.md))
+  (see [`HEED_OCR_MODELS`](../reference/environment.md))
 
 Always skipped: version-control metadata, dependency and build output (`node_modules`, `target`,
 `.venv`, ...), caches and trash, OS junk and editor temporaries. Also skipped unless you change the

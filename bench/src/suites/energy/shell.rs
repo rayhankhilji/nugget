@@ -33,7 +33,7 @@ pub const FAKE_SERVER_ENV: &str = "NUGGET_BENCH_FAKE_LLAMA_SERVER";
 /// Environment variable naming the Python with GTK 3 for the Linux text windows.
 pub const PYTHON_ENV: &str = "NUGGET_BENCH_PYTHON";
 /// The shell's bundle identifier (`tauri.conf.json`), the last part of its config directory.
-const APP_ID: &str = "dev.nugget.desktop";
+const APP_ID: &str = "app.heed.desktop";
 /// The provider id the fake server is configured under.
 const PROVIDER: &str = "bench-local";
 /// How long to wait for the shell's probe line (and the settle period of a release build).

@@ -114,6 +114,7 @@ fn guarded_client(allow_private: bool) -> Option<reqwest::Client> {
         attempt.follow()
     });
     let mut b = reqwest::Client::builder()
+        .user_agent(nugget_core::identity::USER_AGENT)
         .redirect(redirects)
         .timeout(FETCH_TIMEOUT)
         .connect_timeout(FETCH_TIMEOUT)

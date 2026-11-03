@@ -191,13 +191,13 @@ pub trait Listener: Send {
 }
 
 /// The app id Heed registers with the XDG desktop portal on Wayland. The portal (1.19+) accepts
-/// it only when a desktop file named `dev.nugget.Nugget.desktop`, whose `Exec` program exists, is
+/// it only when a desktop file named `app.heed.Heed.desktop`, whose `Exec` program exists, is
 /// installed in its `XDG_DATA_DIRS`; desktops key the shortcut's consent and settings by it.
 ///
-/// Not the Tauri `identifier` (`dev.nugget.desktop`): KDE's kglobalaccel treats a component name
+/// Not the Tauri `identifier` (`app.heed.desktop`): KDE's kglobalaccel treats a component name
 /// ending in `.desktop` as a desktop-file service whose shortcuts launch that file, so a portal
 /// shortcut under that id is never registered and never reaches the app.
-pub const APP_ID: &str = "dev.nugget.Nugget";
+pub const APP_ID: &str = "app.heed.Heed";
 
 /// The portal shortcut ids, stable across runs so a desktop that remembers a consent (GNOME,
 /// Plasma 6) binds a returning shortcut without asking again.

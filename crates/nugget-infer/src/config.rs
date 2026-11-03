@@ -145,15 +145,53 @@ impl SecretResolver for SystemSecrets {
     target_os = "openbsd"
 ))]
 fn read_keychain(name: &str) -> Result<Secret> {
+    use nugget_core::secrets::LEGACY_KEYCHAIN_SERVICE;
+    /// The OS keychain, read-only here; reading moves a pre-rename entry (see
+    /// `nugget_core::migrate`).
+    struct Os;
+    impl nugget_core::migrate::Keychain for Os {
+        fn get(&self, service: &str, account: &str) -> std::result::Result<Option<String>, String> {
+            match keyring::Entry::new(service, account)
+                .map_err(|e| e.to_string())?
+                .get_password()
+            {
+                Ok(v) => Ok(Some(v)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        fn set(
+            &self,
+            service: &str,
+            account: &str,
+            value: &str,
+        ) -> std::result::Result<(), String> {
+            keyring::Entry::new(service, account)
+                .and_then(|e| e.set_password(value))
+                .map_err(|e| e.to_string())
+        }
+        fn delete(&self, service: &str, account: &str) -> std::result::Result<(), String> {
+            match keyring::Entry::new(service, account)
+                .map_err(|e| e.to_string())?
+                .delete_credential()
+            {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+    }
     let account = provider_account(name);
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &account)
-        .map_err(|e| Error::Other(format!("keychain {KEYCHAIN_SERVICE}/{account}: {e}")))?;
-    match entry.get_password() {
-        Ok(v) if !v.trim().is_empty() => Ok(Secret(v.trim().to_string())),
-        Ok(_) => Err(Error::NotFound(format!(
+    match nugget_core::migrate::keychain_get(
+        &Os,
+        KEYCHAIN_SERVICE,
+        LEGACY_KEYCHAIN_SERVICE,
+        &account,
+    ) {
+        Ok(Some(v)) if !v.trim().is_empty() => Ok(Secret(v.trim().to_string())),
+        Ok(Some(_)) => Err(Error::NotFound(format!(
             "keychain entry {KEYCHAIN_SERVICE}/{account} is empty"
         ))),
-        Err(keyring::Error::NoEntry) => Err(Error::NotFound(format!(
+        Ok(None) => Err(Error::NotFound(format!(
             "keychain entry {KEYCHAIN_SERVICE}/{account} not found"
         ))),
         Err(e) => Err(Error::Other(format!(

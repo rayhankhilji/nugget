@@ -75,7 +75,7 @@ code (GitHub), **Set password** (IMAP, CalDAV) or **Set token**.
 Open an issue with what you did and saw, the source's state and health line, `nuggetd status --json`,
 its `sync:<kind>` rows from the [egress ledger](privacy.md#the-egress-ledger), and matching lines from
 `logs/nuggetd.<date>.log` in the [data directory](../reference/data-dir.md) (restart with
-`NUGGET_LOG=debug nuggetd` for more; `debug` lines can name files and subjects, so read them first).
+`HEED_LOG=debug nuggetd` for more; `debug` lines can name files and subjects, so read them first).
 See [Troubleshooting](troubleshooting.md#reporting-a-bug).
 
 ## Removing a source

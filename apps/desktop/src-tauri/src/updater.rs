@@ -31,13 +31,20 @@ use time::OffsetDateTime;
 use crate::daemon::{CmdError, Daemon};
 use crate::settings::{self, Channel, Settings};
 
-/// minisign public key (the base64 text `tauri signer generate` prints), baked in at build time.
-const PUBKEY: Option<&str> = option_env!("NUGGET_UPDATER_PUBKEY");
+/// minisign public key (the base64 text `tauri signer generate` prints), baked in at build time
+/// (`HEED_UPDATER_PUBKEY`, or `NUGGET_UPDATER_PUBKEY`).
+const PUBKEY: Option<&str> = match option_env!("HEED_UPDATER_PUBKEY") {
+    Some(v) => Some(v),
+    None => option_env!("NUGGET_UPDATER_PUBKEY"),
+};
 /// Where the per-channel manifests live: the release workflow keeps `stable.json` and
 /// `beta.json` on a rolling `updater-feed` release and moves them only when a maintainer
 /// publishes a release. Forks override this at build time.
 const DEFAULT_FEED: &str = "https://github.com/rayhankhilji/nugget/releases/download/updater-feed";
-const FEED: Option<&str> = option_env!("NUGGET_UPDATER_FEED");
+const FEED: Option<&str> = match option_env!("HEED_UPDATER_FEED") {
+    Some(v) => Some(v),
+    None => option_env!("NUGGET_UPDATER_FEED"),
+};
 
 /// First background check shortly after launch (not at launch: startup stays offline-fast),
 /// then once a day.

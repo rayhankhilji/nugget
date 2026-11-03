@@ -6,10 +6,13 @@
 pub mod capability;
 pub mod clock;
 pub mod egress;
+pub mod env;
 pub mod error;
+pub mod identity;
 pub mod ids;
 pub mod ipc;
 pub mod lang;
+pub mod migrate;
 pub mod paths;
 pub mod secrets;
 

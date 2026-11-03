@@ -18,6 +18,7 @@ mod notify;
 mod open;
 mod platform;
 mod quickask;
+mod rename;
 mod settings;
 mod tray;
 mod updater;
@@ -70,8 +71,26 @@ fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 fn main() {
+    // `HEED_*` over `NUGGET_*`, before any other thread starts.
+    nugget_core::env::promote();
+    // Before the webview and the log open their folders under the bundle ID.
+    let moved = rename::migrate();
     // Kept until the process ends, so the last lines reach the log file.
     let _log_guard = logs::init();
+    for (m, r) in &moved {
+        match r {
+            Ok(nugget_core::migrate::Outcome::Migrated { files, bytes }) => {
+                tracing::info!(from = %m.from.display(), to = %m.to.display(), files, bytes, "moved a folder to the new app ID")
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(from = %m.from.display(), error = %e, "couldn't move a folder to the new app ID; the old one stays as it was")
+            }
+        }
+    }
+    if let Some(r) = nugget_core::paths::Paths::migration_report() {
+        tracing::info!(report = ?r, "data folders");
+    }
 
     let builder = tauri::Builder::default();
     #[cfg(target_os = "macos")]

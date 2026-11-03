@@ -206,10 +206,12 @@ pub fn default_manifest() -> Result<Manifest> {
     )
 }
 
-/// Hex release public key baked in at build time from `NUGGET_MANIFEST_RELEASE_PUBKEY`, if set
+/// Hex release public key baked in at build time from `HEED_MANIFEST_RELEASE_PUBKEY` (or
+/// `NUGGET_MANIFEST_RELEASE_PUBKEY`), if set
 /// (an empty value counts as unset).
 pub fn release_public_key_hex() -> Option<&'static str> {
-    option_env!("NUGGET_MANIFEST_RELEASE_PUBKEY")
+    option_env!("HEED_MANIFEST_RELEASE_PUBKEY")
+        .or(option_env!("NUGGET_MANIFEST_RELEASE_PUBKEY"))
         .map(str::trim)
         .filter(|s| !s.is_empty())
 }
@@ -219,7 +221,9 @@ pub fn release_public_key_hex() -> Option<&'static str> {
 pub fn dev_key_trusted() -> bool {
     cfg!(debug_assertions)
         || matches!(
-            option_env!("NUGGET_TRUST_DEV_MANIFEST_KEY").map(str::trim),
+            option_env!("HEED_TRUST_DEV_MANIFEST_KEY")
+                .or(option_env!("NUGGET_TRUST_DEV_MANIFEST_KEY"))
+                .map(str::trim),
             Some("1" | "true" | "yes")
         )
 }

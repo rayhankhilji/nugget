@@ -11,8 +11,8 @@ use nugget_core::{Error, Result};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-/// Keychain service name (matches the app's `ProjectDirs` qualifier).
-const KEYCHAIN_SERVICE: &str = "dev.nugget.Nugget";
+/// Keychain service name, shared with every Heed secret.
+const KEYCHAIN_SERVICE: &str = nugget_core::secrets::KEYCHAIN_SERVICE;
 /// Key file name under `Paths::data` when no keychain is usable.
 const KEY_FILE_NAME: &str = "store.key";
 /// Label of [`StoreKey::key_id`]: `HMAC-SHA256(store_key, label)`.
@@ -171,6 +171,17 @@ fn keychain_account(data_dir: &Path) -> String {
     let abs = std::path::absolute(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
     let digest = Sha256::digest(abs.to_string_lossy().as_bytes());
     format!("store-key-{}", &hex::encode(digest)[..16])
+}
+
+/// Accounts the store key may still sit under in the pre-rename keychain service: this
+/// directory's own, and that of the directory it was migrated from (the account is derived from
+/// the path).
+fn legacy_accounts(data_dir: &Path) -> Vec<String> {
+    let mut out = vec![keychain_account(data_dir)];
+    if let Some(from) = nugget_core::migrate::migrated_from(data_dir) {
+        out.push(keychain_account(&from));
+    }
+    out
 }
 
 pub(crate) fn load_or_create_with(
@@ -581,39 +592,74 @@ fn tighten_permissions(_path: &Path) -> Result<()> {
 ))]
 mod os {
     use super::{KEYCHAIN_SERVICE, SecretBackend, keychain_account};
+    use nugget_core::secrets::LEGACY_KEYCHAIN_SERVICE;
     use std::path::Path;
     use zeroize::Zeroizing;
 
     pub(super) struct OsKeychain {
         account: String,
+        /// Where the key may still be from before the rename: the old service, under this
+        /// directory's account or under the account of the directory it was migrated from.
+        legacy: Vec<String>,
     }
 
     pub(super) fn keychain_for(data_dir: &Path) -> Option<OsKeychain> {
-        keychain_account_entry(keychain_account(data_dir))
+        Some(OsKeychain {
+            account: keychain_account(data_dir),
+            legacy: super::legacy_accounts(data_dir),
+        })
     }
 
     pub(super) fn keychain_account_entry(account: String) -> Option<OsKeychain> {
-        Some(OsKeychain { account })
+        Some(OsKeychain {
+            legacy: vec![account.clone()],
+            account,
+        })
     }
 
-    impl OsKeychain {
-        fn entry(&self) -> Result<keyring::Entry, String> {
-            keyring::Entry::new(KEYCHAIN_SERVICE, &self.account).map_err(|e| e.to_string())
+    struct Os;
+
+    impl nugget_core::migrate::Keychain for Os {
+        fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+            match keyring::Entry::new(service, account)
+                .map_err(|e| e.to_string())?
+                .get_password()
+            {
+                Ok(v) => Ok(Some(v)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+        fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
+            keyring::Entry::new(service, account)
+                .and_then(|e| e.set_password(value))
+                .map_err(|e| e.to_string())
+        }
+        fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+            match keyring::Entry::new(service, account)
+                .map_err(|e| e.to_string())?
+                .delete_credential()
+            {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(e.to_string()),
+            }
         }
     }
 
     impl SecretBackend for OsKeychain {
         fn get(&self) -> Result<Option<Zeroizing<String>>, String> {
-            match self.entry()?.get_password() {
-                Ok(secret) => Ok(Some(Zeroizing::new(secret))),
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(e.to_string()),
-            }
+            let legacy: Vec<(&str, &str)> = self
+                .legacy
+                .iter()
+                .map(|a| (LEGACY_KEYCHAIN_SERVICE, a.as_str()))
+                .collect();
+            nugget_core::migrate::keychain_get_from(&Os, KEYCHAIN_SERVICE, &self.account, &legacy)
+                .map(|v| v.map(Zeroizing::new))
         }
 
         fn set(&self, secret: &str) -> Result<(), String> {
-            self.entry()?
-                .set_password(secret)
+            keyring::Entry::new(KEYCHAIN_SERVICE, &self.account)
+                .and_then(|e| e.set_password(secret))
                 .map_err(|e| e.to_string())
         }
     }
@@ -779,6 +825,25 @@ mod tests {
         assert_eq!(k1.as_bytes(), k2.as_bytes());
         let mode = fs::metadata(key_file(&paths)).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn a_migrated_data_dir_finds_the_key_under_its_old_account() {
+        let root = tempfile::tempdir().unwrap();
+        let (old, new) = (root.path().join("old"), root.path().join("new"));
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("nugget.db"), b"x").unwrap();
+        let m = nugget_core::migrate::Move {
+            from: old.clone(),
+            to: new.clone(),
+        };
+        nugget_core::migrate::migrate_dir(&m, &nugget_core::migrate::Rules::default()).unwrap();
+        assert_eq!(
+            legacy_accounts(&new),
+            vec![keychain_account(&new), keychain_account(&old)]
+        );
+        // Not migrated (a HEED_HOME root, or a fresh install): only its own account.
+        assert_eq!(legacy_accounts(&old), vec![keychain_account(&old)]);
     }
 
     #[test]

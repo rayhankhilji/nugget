@@ -22,8 +22,8 @@ The menu shows Heed's status, then:
 With a tray icon, closing the window only hides it; use **Quit Heed** to quit.
 
 **Linux:** GNOME needs the *AppIndicator and KStatusNotifierItem Support* extension; KDE Plasma,
-Xfce, Cinnamon, MATE, Budgie and sway with waybar work as is. `NUGGET_TRAY=on` forces the icon (for
-XEmbed-only trays); `NUGGET_TRAY=off` turns it off.
+Xfce, Cinnamon, MATE, Budgie and sway with waybar work as is. `HEED_TRAY=on` forces the icon (for
+XEmbed-only trays); `HEED_TRAY=off` turns it off.
 
 **Without a tray icon**, closing the window quits Heed (following your
 [quit choice](#quitting-sleep-and-a-second-launch)), and launching it again brings the window back.
@@ -37,9 +37,9 @@ Updates → Desktop app**. Heed then starts hidden in the tray. The login entry 
 
 | System | Login entry |
 |---|---|
-| macOS | `~/Library/LaunchAgents/dev.nugget.desktop.autostart.plist` |
+| macOS | `~/Library/LaunchAgents/app.heed.desktop.autostart.plist` |
 | Windows | The `NuggetDesktop` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
-| Linux | `~/.config/autostart/dev.nugget.desktop.desktop` (XDG autostart) |
+| Linux | `~/.config/autostart/app.heed.desktop.desktop` (XDG autostart) |
 
 This is separate from the background service's own "start at login", which keeps indexing while
 the app is closed.

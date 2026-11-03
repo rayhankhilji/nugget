@@ -107,6 +107,8 @@ enum McpAction {
 }
 
 fn main() -> ExitCode {
+    // `HEED_*` over `NUGGET_*`, before the runtime starts any thread.
+    nugget_core::env::promote();
     let args = Args::parse();
     let paths = match cli::resolve_paths(args.home.clone()) {
         Ok(p) => p,
@@ -224,6 +226,14 @@ async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
             None
         }
     };
+    match Paths::migration_report() {
+        Some(nugget_core::paths::MigrationReport::Deferred) => tracing::warn!(
+            "the pre-rename daemon is running on the old data folder: using it until it stops; \
+             the folder moves on a later start"
+        ),
+        Some(r) => tracing::info!(report = ?r, "data folders"),
+        None => {}
+    }
     // Register stop signals first: without a listener the OS default kills the process uncleanly.
     let shutdown = shutdown_signal();
     let mut opts = DaemonOptions::new(paths);

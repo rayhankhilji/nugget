@@ -2,7 +2,7 @@
 
 The first time `nuggetd` starts, it does the following, all locally:
 
-1. **Finds its directories**: the OS per-user defaults, or `NUGGET_HOME` / `--home DIR` (see
+1. **Finds its directories**: the OS per-user defaults, or `HEED_HOME` / `--home DIR` (see
    [Data directory](../reference/data-dir.md)).
 2. **Writes a default `config.toml`** if there is none. The only provider is an Ollama server on
    `127.0.0.1`; no cloud provider is enabled. See [`config.toml`](../reference/config.md).
@@ -20,7 +20,7 @@ Nothing leaves your machine. Check with `nuggetd status`:
 ```text
 $ nuggetd status
 nuggetd 0.0.1 running (protocol 1), up 12s
-socket:    /home/you/.local/share/nugget/ipc/nuggetd.sock
+socket:    /home/you/.local/share/heed/ipc/nuggetd.sock
 store:     0 items, 0 chunks
 audit:     chain verified
 providers:

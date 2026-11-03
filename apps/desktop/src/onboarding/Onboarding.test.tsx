@@ -269,7 +269,7 @@ describe("Onboarding", () => {
     expect(key[0]!.autocomplete).toBe("off");
     expect(container.querySelector("textarea")).toBeNull();
     expect(container.textContent).toContain('api_key = "keychain:anthropic"');
-    expect(container.textContent).toContain("dev.nugget.Nugget");
+    expect(container.textContent).toContain("app.heed.Heed");
   });
 });
 

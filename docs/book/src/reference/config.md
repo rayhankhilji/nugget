@@ -4,7 +4,7 @@
 startup; restart after editing. If it is missing, a commented local-first default is written.
 
 - **No secrets here.** API keys and credential headers must be `env:VAR` or `keychain:NAME` (service
-  `dev.nugget.Nugget`, account `provider:NAME`); a plaintext key is rejected.
+  `app.heed.Heed`, account `provider:NAME`); a plaintext key is rejected.
 - **Validation.** Unknown keys in `[models]`, `[models.selected]`, `[runtime]`, `[mcp]` and
   `[[providers]]` are errors, as are out-of-range values and duplicate provider ids. Unknown keys in
   `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are **ignored**, so check spelling.
@@ -70,7 +70,7 @@ Installed models run in a pinned `llama-server` on `127.0.0.1` as providers `loc
 | `extract_timeout_ms` | integer | `30000` | Per-item extraction timeout. On timeout the item is indexed by title only |
 | `max_input_bytes` | integer | `67108864` | Inputs larger than this (64 MiB) are not extracted; the item is indexed by title only |
 | `max_text_chars` | integer | `2000000` | Extracted text is cut after this many characters |
-| `ocr` | bool | `true` | Run OCR on images, when the OCR models are present (see `NUGGET_OCR_MODELS`) |
+| `ocr` | bool | `true` | Run OCR on images, when the OCR models are present (see `HEED_OCR_MODELS`) |
 | `chunk_target_tokens` | integer | `400` | Chunker target size, in estimated tokens |
 | `chunk_max_tokens` | integer | `512` | Chunker hard maximum, in estimated tokens |
 | `chunk_overlap_tokens` | integer | `48` | Overlap between chunks, in estimated tokens |
@@ -233,7 +233,7 @@ One Markdown page per entity; your edits merge back as facts you asserted. See
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `true` | Render and watch the vault |
-| `path` | path | `~/Nugget Vault` | Vault directory, absolute or starting with `~`. With `--home` or `NUGGET_HOME` the default is `<data>/vault` |
+| `path` | path | `~/Nugget Vault` | Vault directory, absolute or starting with `~`. With `--home` or `HEED_HOME` the default is `<data>/vault` |
 | `include_identifiers` | bool | `false` | Put identifiers (mail addresses, phone numbers) in page frontmatter. Off because the vault is plain text that may be synced elsewhere |
 | `max_name_chars` | integer | `80` | Longest entity-name part of a file name, in characters |
 | `debounce` | integer, milliseconds | `750` | How long the watcher waits for a burst of edits to settle |
@@ -304,7 +304,7 @@ start (the error is logged); the rest of the daemon runs. Main keys:
 | `agent` | `enabled`, `computer_use`, `max_steps`, `deadline_secs`, `max_tokens`, `confirm_timeout_secs`, `max_concurrent`, `triage` (harm triage, default `false`), `triage_override` (default `true`: a refusal asks "Do it anyway") |
 | `policy` | `enabled`; rules are edited on the Safety page (`policy.set`) |
 | `browser` | `enabled` |
-| `plugins` | `enabled`, `trusted_keys`, `dev_mode` (allow unsigned plugins), `catalog_dirs` (default `<data>/plugin-catalog`, plus `NUGGET_PLUGIN_CATALOG`) |
+| `plugins` | `enabled`, `trusted_keys`, `dev_mode` (allow unsigned plugins), `catalog_dirs` (default `<data>/plugin-catalog`, plus `HEED_PLUGIN_CATALOG`) |
 
 ### `[proactive]`
 

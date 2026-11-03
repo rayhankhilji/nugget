@@ -5,13 +5,15 @@ use std::sync::{Arc, Mutex};
 
 use nugget_connector::{CancellationToken, SecretStore};
 use nugget_core::ids::SourceId;
-use nugget_core::secrets::KEYCHAIN_SERVICE;
+use nugget_core::secrets::{KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_SERVICE};
 use nugget_core::{Error, Result};
 
-/// Secrets in the OS keychain under service [`KEYCHAIN_SERVICE`].
+/// Secrets in the OS keychain under service [`KEYCHAIN_SERVICE`]. Entries still under the
+/// pre-rename service move on first read ([`nugget_core::migrate::keychain_get`]).
 #[derive(Debug, Clone)]
 pub struct KeyringSecrets {
     service: String,
+    legacy: String,
 }
 
 impl Default for KeyringSecrets {
@@ -24,13 +26,16 @@ impl KeyringSecrets {
     pub fn new() -> Self {
         Self {
             service: KEYCHAIN_SERVICE.to_owned(),
+            legacy: LEGACY_KEYCHAIN_SERVICE.to_owned(),
         }
     }
 
     /// A different service name (tests against a real keychain).
     pub fn with_service(service: impl Into<String>) -> Self {
+        let service = service.into();
         Self {
-            service: service.into(),
+            legacy: format!("{service}.legacy"),
+            service,
         }
     }
 }
@@ -54,13 +59,45 @@ mod os {
         Error::Storage(format!("keychain: {e}"))
     }
 
-    impl SecretStore for KeyringSecrets {
-        fn get(&self, account: &str) -> Result<Option<String>> {
-            match entry(&self.service, account)?.get_password() {
+    /// The OS keychain for [`nugget_core::migrate`].
+    struct Os;
+
+    impl nugget_core::migrate::Keychain for Os {
+        fn get(&self, service: &str, account: &str) -> std::result::Result<Option<String>, String> {
+            match entry(service, account)
+                .map_err(|e| e.to_string())?
+                .get_password()
+            {
                 Ok(v) => Ok(Some(v)),
                 Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(map_err(e)),
+                Err(e) => Err(map_err(e).to_string()),
             }
+        }
+        fn set(
+            &self,
+            service: &str,
+            account: &str,
+            value: &str,
+        ) -> std::result::Result<(), String> {
+            entry(service, account)
+                .and_then(|e| e.set_password(value).map_err(map_err))
+                .map_err(|e| e.to_string())
+        }
+        fn delete(&self, service: &str, account: &str) -> std::result::Result<(), String> {
+            match entry(service, account)
+                .map_err(|e| e.to_string())?
+                .delete_credential()
+            {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(map_err(e).to_string()),
+            }
+        }
+    }
+
+    impl SecretStore for KeyringSecrets {
+        fn get(&self, account: &str) -> Result<Option<String>> {
+            nugget_core::migrate::keychain_get(&Os, &self.service, &self.legacy, account)
+                .map_err(Error::Storage)
         }
 
         fn set(&self, account: &str, value: &str) -> Result<()> {
@@ -70,10 +107,8 @@ mod os {
         }
 
         fn delete(&self, account: &str) -> Result<()> {
-            match entry(&self.service, account)?.delete_credential() {
-                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-                Err(e) => Err(map_err(e)),
-            }
+            nugget_core::migrate::keychain_delete(&Os, &self.service, &self.legacy, account)
+                .map_err(Error::Storage)
         }
     }
 }

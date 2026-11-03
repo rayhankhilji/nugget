@@ -5,7 +5,7 @@
 export const PROTOCOL_VERSION = 1;
 
 /** Native-messaging host name registered by `nugget-browser-host install`. */
-export const HOST_NAME = "dev.nugget.browser";
+export const HOST_NAME = "app.heed.browser";
 
 /** Chrome refuses host-to-extension messages over 1 MiB; we hold ourselves to the same. */
 export const MAX_FROM_HOST_BYTES = 1024 * 1024;

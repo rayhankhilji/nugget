@@ -15,7 +15,9 @@ pub const PENDING_TTL_SECS: i64 = 10 * 60;
 /// The access token is refreshed this long before it expires.
 pub const REFRESH_MARGIN_SECS: i64 = 60;
 
-const KEYCHAIN_SERVICE: &str = "nugget";
+use nugget_core::migrate::{Keychain, keychain_delete, keychain_get};
+use nugget_core::secrets::{KEYCHAIN_SERVICE, LEGACY_CLOUD_KEYCHAIN_SERVICE};
+
 const KEYCHAIN_ENTRY: &str = "cloud-session";
 const KEYCHAIN_DEVICE_ENTRY: &str = "cloud-device";
 
@@ -50,59 +52,92 @@ pub trait SessionStore: Send + Sync {
     }
 }
 
-/// The OS keychain: service `nugget`, entries `cloud-session` and `cloud-device`.
+/// The OS keychain: service [`KEYCHAIN_SERVICE`], entries `cloud-session` and `cloud-device`.
+/// Entries still under the pre-rename service `nugget` move there on first read.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeychainStore;
 
-impl KeychainStore {
-    fn entry() -> Result<keyring::Entry> {
-        Self::named(KEYCHAIN_ENTRY)
-    }
+/// The OS keychain for [`nugget_core::migrate`].
+struct Os;
 
-    fn named(name: &str) -> Result<keyring::Entry> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, name).map_err(|e| CloudError::Keychain(e.to_string()))
+impl Keychain for Os {
+    fn get(&self, service: &str, account: &str) -> std::result::Result<Option<String>, String> {
+        match keyring::Entry::new(service, account)
+            .map_err(|e| e.to_string())?
+            .get_password()
+        {
+            Ok(v) => Ok(Some(v)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    fn set(&self, service: &str, account: &str, value: &str) -> std::result::Result<(), String> {
+        keyring::Entry::new(service, account)
+            .and_then(|e| e.set_password(value))
+            .map_err(|e| e.to_string())
+    }
+    fn delete(&self, service: &str, account: &str) -> std::result::Result<(), String> {
+        match keyring::Entry::new(service, account)
+            .map_err(|e| e.to_string())?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
 impl SessionStore for KeychainStore {
     fn load(&self) -> Result<Option<StoredSession>> {
-        match Self::entry()?.get_password() {
-            Ok(json) => serde_json::from_str(&json)
-                .map(Some)
-                .map_err(|_| CloudError::Keychain("the saved session is unreadable".into())),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(CloudError::Keychain(e.to_string())),
-        }
+        load_session(&Os)
     }
-
     fn save(&self, session: &StoredSession) -> Result<()> {
-        let json =
-            serde_json::to_string(session).map_err(|e| CloudError::Keychain(e.to_string()))?;
-        Self::entry()?
-            .set_password(&json)
-            .map_err(|e| CloudError::Keychain(e.to_string()))
+        save_session(&Os, session)
     }
-
     fn clear(&self) -> Result<()> {
-        match Self::entry()?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(CloudError::Keychain(e.to_string())),
-        }
+        keychain_delete(
+            &Os,
+            KEYCHAIN_SERVICE,
+            LEGACY_CLOUD_KEYCHAIN_SERVICE,
+            KEYCHAIN_ENTRY,
+        )
+        .map_err(CloudError::Keychain)
     }
-
     fn load_device_id(&self) -> Result<Option<String>> {
-        match Self::named(KEYCHAIN_DEVICE_ENTRY)?.get_password() {
-            Ok(id) => Ok(Some(id)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(CloudError::Keychain(e.to_string())),
-        }
+        keychain_get(
+            &Os,
+            KEYCHAIN_SERVICE,
+            LEGACY_CLOUD_KEYCHAIN_SERVICE,
+            KEYCHAIN_DEVICE_ENTRY,
+        )
+        .map_err(CloudError::Keychain)
     }
-
     fn save_device_id(&self, id: &str) -> Result<()> {
-        Self::named(KEYCHAIN_DEVICE_ENTRY)?
-            .set_password(id)
-            .map_err(|e| CloudError::Keychain(e.to_string()))
+        Os.set(KEYCHAIN_SERVICE, KEYCHAIN_DEVICE_ENTRY, id)
+            .map_err(CloudError::Keychain)
     }
+}
+
+fn load_session(k: &dyn Keychain) -> Result<Option<StoredSession>> {
+    match keychain_get(
+        k,
+        KEYCHAIN_SERVICE,
+        LEGACY_CLOUD_KEYCHAIN_SERVICE,
+        KEYCHAIN_ENTRY,
+    )
+    .map_err(CloudError::Keychain)?
+    {
+        Some(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|_| CloudError::Keychain("the saved session is unreadable".into())),
+        None => Ok(None),
+    }
+}
+
+fn save_session(k: &dyn Keychain, session: &StoredSession) -> Result<()> {
+    let json = serde_json::to_string(session).map_err(|e| CloudError::Keychain(e.to_string()))?;
+    k.set(KEYCHAIN_SERVICE, KEYCHAIN_ENTRY, &json)
+        .map_err(CloudError::Keychain)
 }
 
 /// In memory, for tests.
@@ -518,6 +553,36 @@ pub(crate) mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
     use wiremock::matchers::{body_json, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn a_session_saved_before_the_rename_is_still_signed_in() {
+        let k = nugget_core::migrate::MemoryKeychain::default();
+        let old = StoredSession {
+            refresh_token: "rt-old".into(),
+            email: Some("me@example.com".into()),
+        };
+        k.set(
+            LEGACY_CLOUD_KEYCHAIN_SERVICE,
+            KEYCHAIN_ENTRY,
+            &serde_json::to_string(&old).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(load_session(&k).unwrap(), Some(old.clone()));
+        // Moved under the new service; the old entry is left as it was.
+        assert!(k.get(KEYCHAIN_SERVICE, KEYCHAIN_ENTRY).unwrap().is_some());
+        assert!(
+            k.get(LEGACY_CLOUD_KEYCHAIN_SERVICE, KEYCHAIN_ENTRY)
+                .unwrap()
+                .is_some()
+        );
+        // A newer session saved by Heed wins over the old copy.
+        let new = StoredSession {
+            refresh_token: "rt-new".into(),
+            email: None,
+        };
+        save_session(&k, &new).unwrap();
+        assert_eq!(load_session(&k).unwrap(), Some(new));
+    }
 
     #[derive(Default)]
     pub struct FakeClock(pub AtomicI64);

@@ -24,7 +24,7 @@ the data directory, it says so and exits 0.
 <!-- check-refs: cli.flags -->
 | Option | Applies to | Meaning |
 |---|---|---|
-| `--home DIR` | every command | Keep all data, config and cache under `DIR` (as `DIR/data`, `DIR/config`, `DIR/cache`). Overrides `NUGGET_HOME`. A relative path is made absolute |
+| `--home DIR` | every command | Keep all data, config and cache under `DIR` (as `DIR/data`, `DIR/config`, `DIR/cache`). Overrides `HEED_HOME`. A relative path is made absolute |
 | `--json` | `status` | Print the raw status object (the [`status`](ipc.md#status-providers-and-models) IPC result) instead of the summary |
 | `--client ID` or `--client APP` | `mcp`, `mcp install` | For the bridge, the MCP client id to serve. For `mcp install`, the app to set up: `claude-desktop`, `claude-code` or `cursor` |
 | `--name NAME` | `mcp install` | Name of the new client in Heed (default: the app's name) |
@@ -32,7 +32,7 @@ the data directory, it says so and exits 0.
 | `--yes`, `-y` | `mcp install` | Do not ask for confirmation. Required when standard input is not a terminal |
 | `--to DIR` | `backup`, `export` | Where to write: for `backup`, instead of the configured folder; for `export`, required |
 | `--from DIR` | `restore` | The backup directory (`nugget-backup-<date and time>`) |
-| `--passphrase-file FILE` | `restore`, `backup set-passphrase` | Read the backup passphrase from `FILE` (else the `NUGGET_BACKUP_PASSPHRASE` environment variable, else a prompt) |
+| `--passphrase-file FILE` | `restore`, `backup set-passphrase` | Read the backup passphrase from `FILE` (else the `HEED_BACKUP_PASSPHRASE` environment variable, else a prompt) |
 | `--version` | none | Print the version |
 | `--help` | every command | Print help |
 
@@ -41,14 +41,14 @@ Exit status is `0` on success and `1` on any error. `nuggetd status` also report
 
 ## `nuggetd install-service`
 
-Installs a launchd agent `dev.nugget.nuggetd` (`~/Library/LaunchAgents/`) on macOS, a
+Installs a launchd agent `app.heed.nuggetd` (`~/Library/LaunchAgents/`) on macOS, a
 `systemd --user` unit `nuggetd.service` on Linux, or a least-privilege Task Scheduler logon task
-`Nugget Daemon` on Windows. It runs the binary you ran it from, with any `--home` or `NUGGET_HOME`
+`Nugget Daemon` on Windows. It runs the binary you ran it from, with any `--home` or `HEED_HOME`
 baked in, and refuses to run as root.
 
 ## `nuggetd mcp`
 
-`nuggetd mcp --client <id>` is the stdio bridge an AI app launches (token in `NUGGET_MCP_TOKEN`; logs
+`nuggetd mcp --client <id>` is the stdio bridge an AI app launches (token in `HEED_MCP_TOKEN`; logs
 on stderr); see [MCP transports](mcp.md#transports).
 
 **`nuggetd mcp install`** creates a client in the running daemon (all sources, all read-only tools, no

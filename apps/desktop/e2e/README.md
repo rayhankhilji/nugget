@@ -71,7 +71,7 @@ only (the bridge speaks to the daemon's Unix socket).
 | `E2E_CLOUD_SHELL` | unset | The built `e2e_shell` example of nugget-cloud-client. |
 | `E2E_MAILPIT_URL`, `E2E_FAKE_URL` | `:8025`, `127.0.0.1:9100` | Mailpit, and the fake providers (`fake_providers` example). |
 | `E2E_CLOUD_PSQL` | unset | A command that runs SQL from stdin as postgres in the stack's database. |
-| `E2E_CLOUD_BILLING` | `on` | `off` when the server runs with `NUGGET_BILLING=off`. |
+| `E2E_CLOUD_BILLING` | `on` | `off` when the server runs with `HEED_BILLING=off`. |
 
 ## Layout
 
@@ -89,5 +89,5 @@ only (the bridge speaks to the daemon's Unix socket).
 
 To add a check, put it in the scenario that already has the state it needs, look strings up with
 `t()` rather than hard-coding English, and wait with `until()`. To poke at the app by hand: `E2E_KEEP=1
-pnpm run e2e`, restart the kept home with `NUGGET_KEYCHAIN=off nuggetd --home <home>`, and run
+pnpm run e2e`, restart the kept home with `HEED_KEYCHAIN=off nuggetd --home <home>`, and run
 `node e2e/bridge.mjs <socket> 8765`.

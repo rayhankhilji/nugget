@@ -126,7 +126,7 @@ a Messages source).
 Each build is signed afresh, so after a rebuild macOS may show Heed as on but not let it in.
 Reset its permissions, open Heed again and turn them back on:
 
-  tccutil reset Accessibility dev.nugget.desktop
-  tccutil reset ListenEvent dev.nugget.desktop
-  tccutil reset SystemPolicyAllFiles dev.nugget.desktop
+  tccutil reset Accessibility app.heed.desktop
+  tccutil reset ListenEvent app.heed.desktop
+  tccutil reset SystemPolicyAllFiles app.heed.desktop
 EOF

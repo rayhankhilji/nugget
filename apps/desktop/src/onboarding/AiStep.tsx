@@ -500,23 +500,23 @@ tiers = ["light", "synthesis"]
 export function configPath(os: Os): string {
   switch (os) {
     case "macos":
-      return "~/Library/Application Support/dev.Nugget.Nugget/config.toml";
+      return "~/Library/Application Support/app.heed.Heed/config.toml";
     case "windows":
-      return "%APPDATA%\\Nugget\\Nugget\\config\\config.toml";
+      return "%APPDATA%\\heed\\Heed\\config\\config.toml";
     default:
-      return "~/.config/nugget/config.toml";
+      return "~/.config/heed/config.toml";
   }
 }
 
-/** Store a key in the OS keychain under service `dev.nugget.Nugget`, account `provider:NAME`. */
+/** Store a key in the OS keychain under service `app.heed.Heed`, account `provider:NAME`. */
 export function keychainCommand(os: Os, name: string): string {
   switch (os) {
     case "macos":
-      return `security add-generic-password -s dev.nugget.Nugget -a provider:${name} -w`;
+      return `security add-generic-password -s app.heed.Heed -a provider:${name} -w`;
     case "windows":
-      return `cmdkey /generic:provider:${name}.dev.nugget.Nugget /user:provider:${name} /pass`;
+      return `cmdkey /generic:provider:${name}.app.heed.Heed /user:provider:${name} /pass`;
     default:
-      return `secret-tool store --label="Nugget ${name}" service dev.nugget.Nugget username provider:${name}`;
+      return `secret-tool store --label="Nugget ${name}" service app.heed.Heed username provider:${name}`;
   }
 }
 

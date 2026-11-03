@@ -46,7 +46,7 @@
   ${ElseIf} $NuggetPageShown <> 1
     Call un.NuggetReadFlags
   ${EndIf}
-  ; Removing Heed's data includes the app's own dev.nugget.desktop folders, which is what
+  ; Removing Heed's data includes the app's own app.heed.desktop folders, which is what
   ; Tauri's "Delete the application data" box removes; turn it on so both agree.
   ${If} $NuggetRemoveData = 1
     StrCpy $DeleteAppDataCheckboxState 1
@@ -54,7 +54,7 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
-  ; Runs after Tauri removed the app (and, when asked, the dev.nugget.desktop folders).
+  ; Runs after Tauri removed the app (and, when asked, the app.heed.desktop folders).
   ${If} $UpdateMode <> 1
   ${AndIf} $NuggetRemoveData = 1
     Call un.NuggetRemoveAll

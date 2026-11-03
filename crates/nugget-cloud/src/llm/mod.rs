@@ -214,6 +214,7 @@ impl LlmConfig {
 /// timeout (streams are bounded by [`Limits`] instead), no redirects.
 pub fn upstream_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
+        .user_agent(nugget_core::identity::USER_AGENT)
         .connect_timeout(Duration::from_secs(10))
         .pool_idle_timeout(Duration::from_secs(120))
         .tcp_nodelay(true)

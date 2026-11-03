@@ -151,9 +151,11 @@ impl CloudConfig {
 
 fn built_in(name: &str) -> Option<String> {
     let v = match name {
-        ENV_SUPABASE_URL => option_env!("NUGGET_SUPABASE_URL"),
-        ENV_SUPABASE_ANON_KEY => option_env!("NUGGET_SUPABASE_ANON_KEY"),
-        ENV_CLOUD_URL => option_env!("NUGGET_CLOUD_URL"),
+        ENV_SUPABASE_URL => option_env!("HEED_SUPABASE_URL").or(option_env!("NUGGET_SUPABASE_URL")),
+        ENV_SUPABASE_ANON_KEY => {
+            option_env!("HEED_SUPABASE_ANON_KEY").or(option_env!("NUGGET_SUPABASE_ANON_KEY"))
+        }
+        ENV_CLOUD_URL => option_env!("HEED_CLOUD_URL").or(option_env!("NUGGET_CLOUD_URL")),
         _ => None,
     };
     v.map(str::to_owned).filter(|v| !v.trim().is_empty())
@@ -181,6 +183,7 @@ fn base_url(name: &str, raw: &str) -> Result<String> {
 /// provider, so the caller must install one first (the desktop installs `ring`).
 pub fn http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
+        .user_agent(nugget_core::identity::USER_AGENT)
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(120))
         .build()

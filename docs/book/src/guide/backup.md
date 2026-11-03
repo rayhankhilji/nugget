@@ -35,7 +35,7 @@ nuggetd restore --from "/Volumes/Backup/nugget-backup-20261030T091500Z"
 ```
 
 You are asked for the passphrase when the key isn't in this computer's keychain; for scripts (and
-always on Windows) use `--passphrase-file` or `NUGGET_BACKUP_PASSPHRASE`. `nuggetd backup
+always on Windows) use `--passphrase-file` or `HEED_BACKUP_PASSPHRASE`. `nuggetd backup
 set-passphrase` sets the passphrase and `nuggetd backup --to DIR` makes a one-off backup elsewhere.
 
 - The backup is fully verified first; a backup that fails any check is not restored.

@@ -77,7 +77,7 @@ default for on-device servers). See [`[[providers]]`](../reference/config.md#pro
 ## Option 3: bring your own key (cloud)
 
 Add a provider for Anthropic, OpenAI or any OpenAI-compatible cloud API. Keys are referenced as
-`env:VAR` or `keychain:NAME` (service `dev.nugget.Nugget`, account `provider:NAME`); a plain key in
+`env:VAR` or `keychain:NAME` (service `app.heed.Heed`, account `provider:NAME`); a plain key in
 `config.toml` is rejected.
 
 ```toml
