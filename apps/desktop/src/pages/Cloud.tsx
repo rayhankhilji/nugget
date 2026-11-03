@@ -7,6 +7,7 @@ import { requestPage } from "../hooks.nav";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatDate, formatNumber, useT, type TFunction } from "../i18n";
 import { SignIn } from "./SignIn";
+import { useSyncRequested } from "../cloudSync";
 
 /**
  * Heed cloud: Sign-in when signed out, else connected accounts, available apps, sync and a
@@ -105,14 +106,15 @@ function Connections() {
       list.reload();
     });
 
-  // While the cloud imports in the background, refresh the list every few seconds.
+  // While the cloud imports in the background (or a "Sync now" runs), refresh the list.
   const importing = data?.connections.some((c) => c.syncing) ?? false;
+  const requested = useSyncRequested();
   const reload = list.reload;
   useEffect(() => {
-    if (!importing) return;
-    const timer = setInterval(reload, 3000);
+    if (!importing && !requested) return;
+    const timer = setInterval(reload, requested ? 1000 : 3000);
     return () => clearInterval(timer);
-  }, [importing, reload]);
+  }, [importing, requested, reload]);
 
   const connected = new Set(data?.connections.filter((c) => isActive(c.status)).map((c) => c.toolkit) ?? []);
 

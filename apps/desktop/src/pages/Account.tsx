@@ -50,6 +50,8 @@ export function AccountPage() {
 function SignedInAccount({ email, onChanged }: { email: string | null; onChanged: () => void }) {
   const t = useT();
   const me = useAsync(cloudApi.me);
+  // Checkout or the portal changed the plan: the device allowance comes with it.
+  useEvent(cloudApi.onBillingChanged, me.reload);
   const [busy, setBusy] = useState<"signout" | "delete" | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);

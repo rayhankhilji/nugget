@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
+import { emit } from "@tauri-apps/api/event";
 import type { BriefView, CardView } from "../api";
 import type { CloudAction, CloudBrief, CloudSearchResponse, CloudSession } from "../cloud";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
@@ -208,6 +209,37 @@ describe("signed in to Heed Cloud", () => {
     expect(container.querySelector(".cloud-apps")?.textContent).not.toContain("Notion");
   });
 
+  it("Sync now: the sync pill and Connections show the import while it runs", async () => {
+    let importing = false;
+    let finish: (v: unknown) => void = () => {};
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_connections_list: () => ({
+        connections: [{ id: "c1", toolkit: "gmail", status: "ACTIVE", last_synced_at: null, last_error: null, syncing: importing, items_synced: 3 }],
+        available: [{ slug: "gmail", name: "Gmail", logo: null, connectable: true }],
+      }),
+      cloud_sync: () => {
+        importing = true;
+        return new Promise((r) => (finish = r));
+      },
+    });
+    const { container } = await render(
+      <>
+        <CloudPage />
+        <SyncPill />
+      </>,
+    );
+    await flush(5);
+    expect(container.querySelector(".sync-pill")).toBeNull();
+    await click(byText(container, "button", "Sync now"));
+    await flush(5);
+    expect(container.querySelector(".sync-pill")?.textContent).toContain("Importing Gmail");
+    importing = false;
+    await act(async () => finish({ synced: [{ toolkit: "gmail", added: 3, updated: 0, error: null }], running: false }));
+    await flush(5);
+    expect(container.querySelector(".sync-pill")).toBeNull();
+  });
+
   it("E edits only the editable fields and sends just what changed; H snoozes before expiry", async () => {
     const updates: unknown[] = [];
     const snoozes: unknown[] = [];
@@ -302,6 +334,29 @@ describe("signed in to Heed Cloud", () => {
     const { container } = await render(<AccountPage />);
     await flush(6);
     expect(container.querySelector(".upgrade-preview")?.textContent).toBe("£60.00 today, then £99 a month");
+  });
+
+  it("Account's devices line follows a plan bought in the browser", async () => {
+    const ent = { plan: "heed", name: "Heed", max_connections: 10, sync_interval_minutes: 5, history_days: null, smart_asks_per_month: 300, default_model: "smart", devices: 3, ghost_text: true, needs_you_inbox: true, daily_brief: true, actions_with_approval: true, agent_tasks: false, computer_use: false, priority_support: false };
+    let paid = false;
+    mockDaemon({
+      cloud_session: signedIn,
+      cloud_me: () => ({
+        user_id: "u1", email: "me@example.com", plan: paid ? "heed" : null, embeddings: true,
+        subscription: paid ? { plan: "heed", status: "trialing", interval: "month", trial_end: "2026-11-16T00:00:00Z", current_period_end: "2026-11-16T00:00:00Z", cancel_at_period_end: false } : null,
+        entitlements: paid ? ent : null, usage: { month_cost_micros: 0, smart_asks_used: 0 },
+      }),
+      cloud_billing_plans: { plans: [] },
+      cloud_billing_preview: null,
+    });
+    const { container } = await render(<AccountPage />);
+    await flush(6);
+    const devices = () => container.querySelector('section[aria-labelledby="account-devices"] p')?.textContent;
+    expect(devices()).toBe("Pick a plan to use Heed on your devices.");
+    paid = true;
+    await act(async () => emit("nugget:cloud-billing", null));
+    await flush(6);
+    expect(devices()).toContain("Your plan includes 3 devices.");
   });
 
   it("Account deletes the account only after confirming", async () => {

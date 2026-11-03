@@ -6,6 +6,7 @@
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { ApiError, inTauri, type BriefView, type CardView, type DismissReason } from "./api";
+import { trackSync } from "./cloudSync";
 import { t } from "./i18n";
 
 export interface CloudSession {
@@ -399,7 +400,8 @@ export const cloudApi = {
   /** Opens the app's consent page in the browser. */
   connect: (toolkit: string) => call<void>("cloud_connect", { toolkit }),
   disconnect: (id: string) => call<void>("cloud_disconnect", { id }),
-  sync: () => call<{ synced: CloudSyncResult[]; running?: boolean }>("cloud_sync"),
+  /** Syncs every connection now; the sync pill and Connections watch the import meanwhile. */
+  sync: () => trackSync(() => call<{ synced: CloudSyncResult[]; running?: boolean }>("cloud_sync")),
   ask: (question: string, conversationId?: string | null, model?: CloudModelTier) =>
     call<CloudAnswer>("cloud_ask", { question, ...(conversationId ? { conversationId } : {}), ...(model ? { model } : {}) }),
   me: () => call<CloudMe>("cloud_me"),
