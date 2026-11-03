@@ -21,9 +21,9 @@ time.workspace = true
 # a second provider (aws-lc-rs) to that binary. Not the workspace entry, which pulls aws-lc-rs.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy", "json"] }
 # PKCE: verifier from the OS CSPRNG, S256 challenge, base64url without padding.
-getrandom = "0.3"
-sha2 = "0.10"
-base64 = "0.22"
+getrandom = "0.4"
+sha2 = "0.11"
+base64 = "0.23"
 
 # OS keychain for the refresh token: the same backends as nugget-store (see the root Cargo.toml).
 [target.'cfg(target_os = "macos")'.dependencies]

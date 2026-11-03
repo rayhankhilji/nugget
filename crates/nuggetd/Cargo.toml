@@ -85,7 +85,7 @@ tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
 getrandom = "0.4"
 # Backup manifests (SHA-256 of each file; same versions as nugget-store).
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 # Backup file names compared as case-insensitive file systems do; passphrases wiped after use.
 unicode-normalization = "0.1"
@@ -96,7 +96,7 @@ tokio = { workspace = true, features = ["test-util"] }
 # Signs the fake authorization server's ID tokens in tests/chatgpt.rs.
 aws-lc-rs = "1"
 nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }
-base64 = "0.22"
+base64 = "0.23"
 tempfile = "3"
 wiremock = "0.6"
 # The MCP SDK's own client, to talk to the daemon's MCP server over HTTP and the stdio bridge.

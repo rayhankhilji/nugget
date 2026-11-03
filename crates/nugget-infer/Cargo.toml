@@ -23,7 +23,7 @@ async-trait.workspace = true
 futures.workspace = true
 time.workspace = true
 async-stream = "0.3"
-base64 = "0.22"
+base64 = "0.23"
 # RS256 ID-token checks, PKCE and random state for Sign in with ChatGPT: the workspace provider.
 aws-lc-rs = { version = "1", optional = true }
 bytes = "1"
