@@ -189,8 +189,13 @@ async fn an_earlier_report_does_not_hide_a_running_pass() {
     st.script(vec![Step::Hang]);
     h.ingest.sync_now(Some(&id())).unwrap();
     h.wait_state("fake-1", SourceState::Syncing).await;
-    let info = h.ingest.get(&id()).await.unwrap();
-    assert_eq!(info.health.unwrap().code, "syncing");
+    // Health is derived alongside the state, not in the same step, so give it the same
+    // deadline: the old "nothing found" report must give way to "syncing" while the pass runs.
+    eventually_async("health shows the running pass", || async {
+        let info = h.ingest.get(&id()).await.unwrap();
+        info.state == SourceState::Syncing && info.health.is_some_and(|h| h.code == "syncing")
+    })
+    .await;
     h.ingest.shutdown().await;
 }
 
