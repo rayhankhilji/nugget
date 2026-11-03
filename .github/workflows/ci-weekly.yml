@@ -47,7 +47,7 @@ jobs:
         -p nugget-models -p nugget-hotkey -p nugget-a11y -p nuggetd -p nugget-vault
         -p nugget-voice -p nugget-ingest -p nugget-connector-files
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       # `cargo +1.88` overrides the stable channel pinned in rust-toolchain.toml. Keep the version
@@ -111,7 +111,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -156,7 +156,7 @@ jobs:
         run: pipx run check-jsonschema --schemafile bench/schema/report.schema.json "$RUNNER_TEMP"/bench-results/*.json
 
       - name: Upload bench reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-smoke-${{ matrix.os }}
           path: ${{ runner.temp }}/bench-results/
@@ -172,7 +172,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -194,11 +194,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/claude/inspiring-wozniak-z3gg3n' || github.ref == 'refs/heads/main' }}
 
       # The pnpm version comes from `packageManager` in apps/desktop/package.json.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: apps/desktop/package.json
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: pnpm

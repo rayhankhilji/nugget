@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           # The DCO step walks the pushed or pull-request commits.
           fetch-depth: 0
@@ -129,11 +129,11 @@ jobs:
           save-if: ${{ github.event_name == 'push' }}
 
       # The pnpm version comes from `packageManager` in apps/desktop/package.json.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: apps/desktop/package.json
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: pnpm
