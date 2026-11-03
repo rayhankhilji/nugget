@@ -86,14 +86,39 @@ fn evidence(m: &MailMessage, quote: Option<String>) -> EvidenceRef {
     }
 }
 
-/// The first substantive line of the user-written part of a body.
+/// The first substantive line of the user-written part of a body, without its greeting
+/// ("Hi Sam, could you…" quotes "could you…").
 fn lead(body: &str) -> Option<String> {
     let own = own_text(body);
-    let s = sentences(&own).into_iter().find(|s| {
-        let l = s.to_lowercase();
-        s.len() > 3 && !l.starts_with("hi") && !l.starts_with("hello") && !l.starts_with("dear")
-    })?;
+    let s = sentences(&own)
+        .into_iter()
+        .map(|s| without_greeting(&s).to_owned())
+        .find(|s| s.len() > 3)?;
     Some(truncate(&s, QUOTE_CHARS))
+}
+
+/// `s` after an opening "Hi …," / "Hello," / "Dear …," / "Hey …!"; empty when the sentence is
+/// only a greeting.
+fn without_greeting(s: &str) -> &str {
+    let greeted = ["hi", "hello", "dear", "hey"].iter().any(|g| {
+        s.get(..g.len()).is_some_and(|p| p.eq_ignore_ascii_case(g))
+            && s[g.len()..]
+                .chars()
+                .next()
+                .is_none_or(|c| !c.is_alphanumeric())
+    });
+    if !greeted {
+        return s;
+    }
+    // The greeting runs to its comma or "!" (a name may sit in between); none: only a greeting.
+    match s
+        .char_indices()
+        .take(40)
+        .find(|(_, c)| matches!(c, ',' | '!'))
+    {
+        Some((i, c)) => s[i + c.len_utf8()..].trim_start(),
+        None => "",
+    }
 }
 
 /// Whole days from `now` to `due`, by the user's calendar (0 = due today, negative = overdue).
@@ -1497,5 +1522,29 @@ fn todo_candidate(
             }),
         ],
         sensitive: n.sensitive,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{lead, without_greeting};
+
+    #[test]
+    fn lead_keeps_an_ask_that_follows_a_greeting() {
+        assert_eq!(
+            lead("Hello, can you send me the quarterly numbers before our call?").as_deref(),
+            Some("can you send me the quarterly numbers before our call?")
+        );
+        assert_eq!(
+            lead("Hi Sam, could you confirm the venue?").as_deref(),
+            Some("could you confirm the venue?")
+        );
+        assert_eq!(
+            lead("Dear Ms Ruiz,\n\nThe invoice is attached.").as_deref(),
+            Some("The invoice is attached.")
+        );
+        assert_eq!(without_greeting("Hi Dana"), "");
+        assert_eq!(without_greeting("History is long."), "History is long.");
+        assert_eq!(without_greeting("Hey! Any news?"), "Any news?");
     }
 }
