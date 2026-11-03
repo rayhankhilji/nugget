@@ -25,7 +25,7 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 flate2 = "1"
 # Native file watching for export folders (same as nugget-connector-files).
 notify-debouncer-full = "0.7"
-sha2 = "0.10"
+sha2 = "0.11"
 url = "2.5"
 # Private temp dirs for the copied chat.db / address book, removed on drop.
 tempfile = "3"

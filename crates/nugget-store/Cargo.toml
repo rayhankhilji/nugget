@@ -18,22 +18,22 @@ tracing.workspace = true
 # encrypted engine. The bundled build enables FTS5; `functions` registers `fts_segment`.
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl", "functions", "hooks"] }
 sqlite-vec = "0.1.6"
-sha2 = "0.10"
-hmac = "0.12"
+sha2 = "0.11"
+hmac = "0.13"
 hex = "0.4"
-getrandom = "0.3"
+getrandom = "0.4"
 # Liveness locks of egress ledger owners (same crate as the daemon lock in nugget-ipc).
 fs4 = "1"
 zeroize = "1"
 # Backup key envelope: passphrase KDF and AEAD.
-argon2 = { version = "0.5", features = ["zeroize"] }
+argon2 = { version = "0.6", features = ["zeroize"] }
 # NFC for backup passphrases and backup file paths; NFKC in the FTS index form (`fts::fold`).
 # Pinned exactly: `chunks_fts` is an external-content table whose 'delete' must reproduce the
 # indexed tokens, so a release that changed NFKC output would make deletes miss (EM-2). Update
 # only with a migration that rebuilds the FTS tables; `fts::tests::index_form_is_stable` fails
 # when the output changes.
 unicode-normalization = "=0.1.26"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 
 # OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.
 # The backend set must match nugget-infer's exactly; see the `keyring` entry in the root Cargo.toml.

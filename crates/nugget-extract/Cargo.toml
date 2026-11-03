@@ -23,9 +23,9 @@ encoding_rs = "0.8"
 # Markdown structure with source offsets.
 pulldown-cmark = { version = "0.13", default-features = false }
 # YAML frontmatter (event API only, so alias expansion stays bounded).
-yaml-rust2 = { version = "0.10", default-features = false }
+yaml-rust2 = { version = "0.13", default-features = false }
 # HTML tokenizer (streaming; no DOM, no recursion).
-html5ever = "0.38"
+html5ever = "0.40"
 # PDF text (re-exports `lopdf`).
 pdf-extract = "0.12"
 # DOCX / XLSX containers.
@@ -34,8 +34,8 @@ quick-xml = "0.42"
 csv = "1"
 mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
 # OCR (optional).
-ocrs = { version = "0.10", optional = true }
-rten = { version = "0.21", optional = true }
+ocrs = { version = "0.13", optional = true }
+rten = { version = "0.26", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
 
 # `O_NOFOLLOW`, `O_NONBLOCK` and `O_NOCTTY` for `OpenOptionsExt::custom_flags` (constants only).
