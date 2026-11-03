@@ -846,3 +846,56 @@ async fn awaiting_reply_card_proposes_previews_and_sends_only_on_approval() {
     assert!(!llm.saw("therapy"));
     assert_eq!(llm.count("You draft a short email reply"), 1);
 }
+
+/// Home opened before the first import must not leave an empty brief for the rest of the day,
+/// and the desktop client decodes the brief the server sends.
+#[tokio::test]
+async fn brief_read_before_the_first_import_is_written_again_after_it() {
+    let Some((db, pool)) = test_db().await else {
+        return;
+    };
+    let (auth, _composio, _) = fakes();
+    let llm = Arc::new(ScriptLlm::default());
+    let gateway = Gateway::new(
+        Some(llm.clone() as Arc<dyn Llm>),
+        Some(Arc::new(FakeEmbedder::default()) as Arc<dyn Embedder>),
+        "claude-haiku-5-5".into(),
+        "claude-sonnet-5-5".into(),
+    );
+    let app = router(Arc::new(AppState::new(
+        db.clone(),
+        auth,
+        gateway,
+        catalog(),
+    )));
+    let a = subscriber(&pool, "heed").await;
+    let now = OffsetDateTime::now_utc();
+    let tz = zone_after_seven(now);
+
+    let (s, v) = call(&app, "GET", &format!("/v1/brief?tz={tz}"), a, None).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    assert!(v["brief"]["prose"].is_null(), "nothing imported yet: {v}");
+    let client: nugget_cloud_client::Brief = serde_json::from_value(v["brief"].clone()).unwrap();
+    assert_eq!(client.day.len(), 10, "an ISO date: {}", client.day);
+    assert!(
+        time::Date::parse(
+            &client.day,
+            &time::format_description::well_known::Iso8601::DATE
+        )
+        .is_ok()
+    );
+
+    seed(&db, a, now).await;
+    let (s, v) = call(&app, "POST", "/v1/cards/refresh", a, Some(json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{v}");
+    let (_, v) = call(&app, "GET", &format!("/v1/brief?tz={tz}"), a, None).await;
+    assert!(
+        v["brief"]["prose"].as_str().unwrap_or("").contains("[1]"),
+        "rewritten after the import: {v}"
+    );
+    assert_eq!(llm.count("morning brief"), 1);
+    // Once it has prose it stays the day's brief.
+    let (_, again) = call(&app, "GET", &format!("/v1/brief?tz={tz}"), a, None).await;
+    assert_eq!(again["brief"]["created_at"], v["brief"]["created_at"]);
+    assert_eq!(llm.count("morning brief"), 1);
+}

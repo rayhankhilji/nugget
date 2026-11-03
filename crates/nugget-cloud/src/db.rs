@@ -190,6 +190,24 @@ impl Default for PoolOptions {
 }
 
 impl DbError {
+    /// What to log: Postgres's SQLSTATE, message and constraint, which `Display` ("db error")
+    /// leaves out. Never the error's DETAIL, which can quote row values.
+    pub fn log_detail(&self) -> String {
+        match self {
+            Self::Pg(e) => match e.as_db_error() {
+                Some(d) => {
+                    let mut out = format!("{} {}", d.code().code(), d.message());
+                    if let Some(c) = d.constraint() {
+                        out.push_str(&format!(" (constraint {c})"));
+                    }
+                    out
+                }
+                None => e.to_string(),
+            },
+            other => other.to_string(),
+        }
+    }
+
     /// The pool had no connection to give in time (overload, or the database is down).
     pub fn is_unavailable(&self) -> bool {
         matches!(
@@ -1263,6 +1281,26 @@ impl Db {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn log_detail_names_the_sqlstate_and_constraint() {
+        let Some((db, pool)) = crate::testkit::test_db().await else {
+            return;
+        };
+        let (a, b) = (
+            crate::testkit::add_user(&pool).await,
+            crate::testkit::add_user(&pool).await,
+        );
+        db.set_customer(a, "cus_shared").await.unwrap();
+        let e = db.set_customer(b, "cus_shared").await.unwrap_err();
+        let d = e.log_detail();
+        assert!(d.starts_with("23505 "), "{d}");
+        assert!(
+            d.contains("billing_customers_stripe_customer_id_key"),
+            "{d}"
+        );
+        assert!(!d.contains("cus_shared"), "no row values: {d}");
+    }
+
     use super::*;
 
     #[test]

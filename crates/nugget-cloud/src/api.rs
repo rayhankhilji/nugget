@@ -244,7 +244,7 @@ impl From<DbError> for ApiError {
                 "the service is busy; try again shortly",
             );
         }
-        tracing::error!(%e, "database error");
+        tracing::error!(e = %e.log_detail(), "database error");
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
