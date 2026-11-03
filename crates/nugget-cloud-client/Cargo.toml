@@ -13,6 +13,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true }
 tracing.workspace = true
+# RFC 3339 checks in `shell` (snooze times).
+time.workspace = true
 # reqwest on rustls WITHOUT a built-in crypto provider: the caller installs the process default.
 # The desktop shell uses `ring` (as its updater already does), so linking this crate does not add
 # a second provider (aws-lc-rs) to that binary. Not the workspace entry, which pulls aws-lc-rs.

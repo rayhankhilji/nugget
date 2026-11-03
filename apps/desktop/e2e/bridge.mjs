@@ -17,6 +17,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
+import { CloudShell } from "./cloud-shell.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DIST = path.resolve(here, "..", "dist");
@@ -354,8 +355,10 @@ class DaemonConn {
  * The result has `notifications` (every daemon notification seen: `{ method, params, at }`) and
  * `deliverEvents(page)`, which forwards them to a Playwright page as Tauri events, in order.
  */
-export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [], startDaemon = null }) {
+export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [], startDaemon = null, cloud = null }) {
   const calls = [];
+  /** Pages the cloud shell would have opened in the browser (sign-in, consent, Checkout, portal). */
+  const opened = [];
   const notifications = [];
   const sinks = new Set();
   const setSocket = (next) => {
@@ -385,7 +388,43 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
     return () => sinks.delete(sink);
   }
 
+  /** With `cloud`, the shell's cloud commands run in the real client (see cloud-shell.mjs). */
+  const cloudShell = cloud ? new CloudShell(cloud.bin, cloud.env) : null;
+  const emit = (event, payload) => {
+    for (const sink of sinks) sink([{ event, payload }]);
+  };
+  /** The shell's `model_handoff_once`: nuggetd gets the access token, or loses it signed out. */
+  async function handoff() {
+    const h = await cloudShell.call("handoff");
+    const params = h.ok ? { api_base: h.ok.api_base, access_token: h.ok.access_token, expires_at: h.ok.expires_at } : {};
+    const r = await daemon.call("cloud.llm.session", params).catch((e) => ({ error: { message: e.message } }));
+    return r.error ? { ok: false, message: r.error.message } : { ok: true, signed_in: Boolean(h.ok) };
+  }
+  async function applyEffects(effects = []) {
+    for (const e of effects) {
+      if (e.open_web) {
+        opened.push(e.open_web);
+        cloud?.onOpenWeb?.(e.open_web);
+      } else if (e.session) {
+        emit("nugget:cloud-session", e.session);
+      } else if (e.handoff) {
+        await handoff();
+      }
+    }
+  }
+  async function cloudInvoke(cmd, args) {
+    if (cmd === "cloud_model_status") {
+      const m = await daemon.call("cloud.llm.status", {}).catch((e) => ({ error: { message: e.message } }));
+      return m.error ? { err: { kind: "rpc", code: m.error.code, message: m.error.message } } : { ok: m.result };
+    }
+    const r = await cloudShell.call(cmd, args ?? {});
+    await applyEffects(r.effects);
+    calls.push(r.err ? { cmd, via: "cloud", ok: false, message: r.err.message, cloud: r.err.cloud } : { cmd, via: "cloud", ok: true });
+    return r.err ? { err: r.err } : { ok: r.ok ?? null };
+  }
+
   async function invoke(cmd, args) {
+    if (cloudShell && cmd.startsWith("cloud_")) return cloudInvoke(cmd, args);
     if (Object.hasOwn(shell, cmd)) {
       let v;
       try {
@@ -451,8 +490,21 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
         setSocket,
         /** Make a link wait for the page, which takes it on its next `nugget:deeplink` event. */
         queueDeepLink: (l) => (link.waiting = l),
+        opened,
+        /** Calls a shell command as the page would (`{ ok }` or `{ err }`), for checks. */
+        invoke,
+        /** A `nugget://auth/callback?…` link, as the shell's deeplink.rs hands it to the cloud. */
+        cloudDeepLink: async (url) => {
+          const r = await cloudShell.call("deeplink", { url });
+          await applyEffects(r.effects);
+          return r;
+        },
+        /** Composio or Stripe sent the browser back: the shell emits the page's reload event. */
+        cloudEvent: (event) => emit(event, null),
+        cloudHandoff: () => handoff(),
         close: async () => {
           sinks.clear();
+          cloudShell?.close();
           await daemon.close();
           await new Promise((r) => server.close(() => r()));
         },

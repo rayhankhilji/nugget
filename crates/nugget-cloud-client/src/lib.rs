@@ -15,6 +15,7 @@ pub mod api;
 pub mod auth;
 pub mod pkce;
 pub mod session;
+pub mod shell;
 
 pub use api::{
     Action, ActionInput, ActionKind, ActionPreview, ActionStatus, Answer, Api, AppInfo, AskRequest,

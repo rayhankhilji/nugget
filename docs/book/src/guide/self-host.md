@@ -237,6 +237,28 @@ It goes through these steps:
 
 It ends with `selfhost smoke: OK`. Undo step 2 before real use.
 
+### The desktop app, end to end
+
+`selfhost/e2e.sh` drives the real desktop app against a throwaway copy of this stack, with fake
+Composio, Anthropic, OpenAI and Stripe. It needs Docker, `cargo`, `node` and `pnpm`, and leaves your
+own stack and its data alone: it runs as the Compose project `heed-e2e`, with its own volumes and
+generated secrets, on ports 8010 (the gateway), 8035 (Mailpit) and 9100 (the fakes).
+
+```sh
+selfhost/e2e.sh                      # billing on (fake Stripe), then billing off
+E2E_CLOUD_RUNS=3 selfhost/e2e.sh     # three times over
+E2E_CLOUD_KEEP=1 selfhost/e2e.sh     # leave the stack up afterwards
+```
+
+It builds the server, nuggetd and the app's cloud client, starts the stack and runs the `cloud`
+scenario of the desktop's e2e test (`apps/desktop/e2e/README.md`) twice: once with Stripe billing,
+once with `NUGGET_BILLING=off`. The scenario signs in with a magic link from Mailpit, connects Gmail
+and Calendar, checks the brief, the cards and an action proposed from one (edited, approved after
+the Undo hold, sent exactly once; a stale approval refused), snoozes and rejects others, asks
+through the model endpoint, checks the plan, trial and usage (or the self-hosted plan), and deletes
+the account, then checks that none of the user's rows are left in Postgres. Screenshots and logs
+land in `apps/desktop/e2e/artifacts/cloud-on` and `cloud-off`.
+
 ## Backups
 
 Everything is in the `db` volume: Heed's data, and GoTrue's users and sessions (the `auth`

@@ -27,6 +27,22 @@ a mock OpenAI-compatible server: errors, secret store only, replace and remove; 
 **backup** (back up, export, wipe, restore with the passphrase), **messaging** (WhatsApp export
 folder, watched) and **sources-setup** (onboarding regressions GG6-2/12/13/14/16/21/31).
 
+Opt-in (not in the default run): **cloud**, Heed Cloud end to end against a running self-hosted
+stack with fake Composio, Anthropic, OpenAI and Stripe. The cloud commands run in the real shell
+client (`cloud-shell.mjs` spawns `crates/nugget-cloud-client/examples/e2e_shell.rs`, which shares
+its command code and validators with `src-tauri`), nuggetd gets the session's model token as the
+shell hands it over, and the scenario plays the browser (Mailpit's magic link, the consent and
+Checkout pages). Covered: magic-link sign-in, connecting Gmail and Calendar with the sync pill and
+progress, the brief's author citation chips and cards, actions proposed from cards (edit with E,
+approve with the Undo hold, exactly one Composio execute with the edited body, a stale digest
+refused, snooze with H, reject with Backspace), a cited quick ask and ghost text through `/llm/v1`,
+plan/trial/usage with the Checkout and portal URLs (or the self-hosted plan with billing off), and
+deleting the account by typing the email, after which none of the user's rows are left in Postgres
+(every RLS table with a `user_id`, and the waitlist). Run it with one command, which starts all of
+that: `selfhost/e2e.sh` (see the self-host guide). Against a stack you started yourself, set the
+`E2E_CLOUD_*` variables below and run `E2E_SCENARIOS=cloud node e2e/run.mjs`; without
+`E2E_CLOUD_URL` it skips itself.
+
 ## Running
 
 ```sh
@@ -51,6 +67,11 @@ only (the bridge speaks to the daemon's Unix socket).
 | `E2E_INDEX_TIMEOUT_MS`, `E2E_STEP_TIMEOUT_MS` | 180000, 15000 | Indexing and per-step waits. |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n locales. |
 | `E2E_CHROMIUM` | Playwright's | A Chromium binary to launch instead. |
+| `E2E_CLOUD_URL`, `E2E_CLOUD_ANON_KEY` | unset (cloud skips) | The stack's gateway and its anon key. |
+| `E2E_CLOUD_SHELL` | unset | The built `e2e_shell` example of nugget-cloud-client. |
+| `E2E_MAILPIT_URL`, `E2E_FAKE_URL` | `:8025`, `127.0.0.1:9100` | Mailpit, and the fake providers (`fake_providers` example). |
+| `E2E_CLOUD_PSQL` | unset | A command that runs SQL from stdin as postgres in the stack's database. |
+| `E2E_CLOUD_BILLING` | `on` | `off` when the server runs with `NUGGET_BILLING=off`. |
 
 ## Layout
 
@@ -62,6 +83,7 @@ only (the bridge speaks to the daemon's Unix socket).
 - `bridge.mjs`: serves `dist/`, forwards `POST /invoke` to the daemon like `src-tauri/src/commands.rs`,
   stubs shell-only commands, and with `deliverEvents(page)` turns daemon notifications into the
   shell's Tauri events. `tauri-shim.js` is the page side.
+- `cloud.mjs`, `cloud-shell.mjs`: the cloud scenario and the shell's cloud half (above).
 - `screenshots.mjs` (`pnpm run screenshots`): refreshes `docs/book/src/images/screenshots/`; it
   checks nothing.
 

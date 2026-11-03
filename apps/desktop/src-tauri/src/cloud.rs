@@ -10,14 +10,20 @@
 use std::sync::Arc;
 
 use nugget_cloud_client::{
-    Action, ActionKind, ActionStatus, Answer, Api, AppInfo, AskRequest, BillingPreview, Callback,
-    CloudConfig, CloudError, Connections, Interval, KeychainStore, Me, ModelTier, Plans,
-    ProposeAction, Provider, Session, SyncReport, SystemClock,
+    Action, ActionStatus, Answer, Api, AppInfo, AskRequest, BillingPreview, Callback, CloudConfig,
+    CloudError, Connections, Interval, KeychainStore, Me, Plans, ProposeAction, Provider, Session,
+    SyncReport, SystemClock,
 };
 use serde::{Serialize, Serializer};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::open;
+// The input checks are shared with the e2e shell (`nugget_cloud_client::shell`).
+use nugget_cloud_client::shell::{
+    check_action_edit, check_action_id, check_action_input, check_action_kind, check_action_status,
+    check_connection_id, check_conversation, check_digest, check_idempotency_key, check_model,
+    check_question, check_snooze_until, check_toolkit,
+};
 
 pub mod intel;
 
@@ -29,14 +35,6 @@ pub const CONNECTIONS_EVENT: &str = "nugget:cloud-connections";
 /// No payload: Stripe Checkout sent the browser back (`nugget://billing/done`); the page reloads
 /// the account and the plans.
 pub const BILLING_EVENT: &str = "nugget:cloud-billing";
-
-const MAX_QUESTION_LEN: usize = 4_000;
-const MAX_ID_LEN: usize = 128;
-const MAX_IDEMPOTENCY_KEY_LEN: usize = 128;
-/// Serialized size of an action's input.
-const MAX_ACTION_INPUT_BYTES: usize = 256 * 1024;
-/// An RFC 3339 time is about 30 characters; this leaves room and stops abuse.
-const MAX_TIME_LEN: usize = 64;
 
 /// The cloud client, or why there is none (this build has no cloud configuration).
 pub enum Cloud {
@@ -227,22 +225,6 @@ pub async fn cloud_connections_list(
     checked(&app, api.connections().await)
 }
 
-/// A Composio toolkit slug (`gmail`, `googlecalendar`).
-fn check_toolkit(toolkit: &str) -> Result<()> {
-    let ok = !toolkit.is_empty()
-        && toolkit.len() <= 64
-        && toolkit
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
-    if ok {
-        Ok(())
-    } else {
-        Err(CloudError::Invalid("not a known app".into()).into())
-    }
-}
-
-/// Start connecting an app: opens Composio's consent page in the browser. Composio sends the
-/// browser back to `nugget://connections/callback` (see [`CONNECTIONS_EVENT`]).
 #[tauri::command]
 pub async fn cloud_connect(app: AppHandle, cloud: State<'_, Cloud>, toolkit: String) -> Result<()> {
     check_toolkit(&toolkit)?;
@@ -253,9 +235,7 @@ pub async fn cloud_connect(app: AppHandle, cloud: State<'_, Cloud>, toolkit: Str
 
 #[tauri::command]
 pub async fn cloud_disconnect(app: AppHandle, cloud: State<'_, Cloud>, id: String) -> Result<()> {
-    if id.is_empty() || id.len() > MAX_ID_LEN {
-        return Err(CloudError::Invalid("not a valid connection".into()).into());
-    }
+    check_connection_id(&id)?;
     let api = cloud.api()?;
     checked(&app, api.disconnect(&id).await)
 }
@@ -274,22 +254,9 @@ pub async fn cloud_ask(
     conversation_id: Option<String>,
     model: Option<String>,
 ) -> Result<Answer> {
-    let question = question.trim().to_owned();
-    if question.is_empty() || question.chars().count() > MAX_QUESTION_LEN {
-        return Err(CloudError::Invalid("ask a question (up to 4,000 characters)".into()).into());
-    }
-    if conversation_id
-        .as_ref()
-        .is_some_and(|c| c.is_empty() || c.len() > MAX_ID_LEN)
-    {
-        return Err(CloudError::Invalid("not a valid conversation".into()).into());
-    }
-    let model = match model.as_deref() {
-        None => None,
-        Some("fast") => Some(ModelTier::Fast),
-        Some("smart") => Some(ModelTier::Smart),
-        Some(_) => return Err(CloudError::Invalid("not a known model".into()).into()),
-    };
+    let question = check_question(&question)?;
+    check_conversation(&conversation_id)?;
+    let model = check_model(model.as_deref())?;
     let api = cloud.api()?;
     checked(
         &app,
@@ -306,83 +273,6 @@ pub async fn cloud_ask(
 pub async fn cloud_apps(app: AppHandle, cloud: State<'_, Cloud>) -> Result<Vec<AppInfo>> {
     let api = cloud.api()?;
     checked(&app, api.apps().await)
-}
-
-fn check_action_kind(kind: &str) -> Result<ActionKind> {
-    Ok(ActionKind::parse(kind)?)
-}
-
-fn check_action_status(status: &str) -> Result<ActionStatus> {
-    Ok(ActionStatus::parse(status)?)
-}
-
-fn check_action_id(id: &str) -> Result<()> {
-    if id.is_empty() || id.len() > MAX_ID_LEN {
-        return Err(CloudError::Invalid("not a valid action".into()).into());
-    }
-    Ok(())
-}
-
-/// The approval echoes the hex SHA-256 the server showed with the preview.
-fn check_digest(digest: &str) -> Result<()> {
-    let ok = digest.len() == 64
-        && digest
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
-    if ok {
-        Ok(())
-    } else {
-        Err(CloudError::Invalid("not a valid action digest".into()).into())
-    }
-}
-
-fn check_idempotency_key(key: &str) -> Result<()> {
-    let ok = !key.is_empty()
-        && key.len() <= MAX_IDEMPOTENCY_KEY_LEN
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_-:.".contains(c));
-    if ok {
-        Ok(())
-    } else {
-        Err(CloudError::Invalid("not a valid idempotency key".into()).into())
-    }
-}
-
-fn check_action_input(input: &serde_json::Value) -> Result<()> {
-    if !input.is_object() {
-        return Err(CloudError::Invalid("an action's input must be an object".into()).into());
-    }
-    let size = serde_json::to_vec(input).map_or(usize::MAX, |v| v.len());
-    if size > MAX_ACTION_INPUT_BYTES {
-        return Err(CloudError::Invalid("the action is too large".into()).into());
-    }
-    Ok(())
-}
-
-/// An edit: a small object of fields some action kind lets the user change (the server
-/// enforces which ones apply to this action's kind).
-fn check_action_edit(input: &serde_json::Value) -> Result<()> {
-    check_action_input(input)?;
-    let fields = input.as_object().map(|o| o.keys()).into_iter().flatten();
-    for field in fields {
-        if !ActionKind::any_editable(field) {
-            return Err(CloudError::Invalid(format!("{field} can't be edited")).into());
-        }
-    }
-    Ok(())
-}
-
-/// A snooze end: an RFC 3339 time.
-fn check_snooze_until(until: &str) -> Result<()> {
-    let ok = until.len() <= MAX_TIME_LEN
-        && time::OffsetDateTime::parse(until, &time::format_description::well_known::Rfc3339)
-            .is_ok();
-    if ok {
-        Ok(())
-    } else {
-        Err(CloudError::Invalid("not a valid time".into()).into())
-    }
 }
 
 /// The user's actions, optionally of one `status`. Snoozed ones are left out unless
@@ -682,127 +572,6 @@ mod tests {
             v,
             serde_json::json!({ "kind": "rpc", "message": "used up", "code": null, "cloud": "quota_exceeded" })
         );
-    }
-
-    #[test]
-    fn toolkits_are_slugs() {
-        assert!(check_toolkit("gmail").is_ok());
-        assert!(check_toolkit("googlecalendar").is_ok());
-        for bad in ["", "Gmail", "../x", "a b", &"a".repeat(65)] {
-            assert!(check_toolkit(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn action_kinds_and_statuses_are_known() {
-        assert_eq!(
-            check_action_kind("send_mail").unwrap(),
-            ActionKind::SendMail
-        );
-        assert_eq!(
-            check_action_kind("create_page").unwrap(),
-            ActionKind::CreatePage
-        );
-        for bad in ["", "SEND_MAIL", "delete_mail", "send_mail "] {
-            assert!(check_action_kind(bad).is_err(), "{bad}");
-        }
-        assert_eq!(
-            check_action_status("pending").unwrap(),
-            ActionStatus::Pending
-        );
-        for bad in ["", "unknown", "Pending", "pending&x=1"] {
-            assert!(check_action_status(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn action_ids_are_bounded() {
-        assert!(check_action_id("6f1c0b8e-2b7d-4a52-9a43-0e0f6a2c1d11").is_ok());
-        assert!(check_action_id("").is_err());
-        assert!(check_action_id(&"a".repeat(129)).is_err());
-    }
-
-    #[test]
-    fn digests_are_lowercase_sha256_hex() {
-        assert!(check_digest(&"0a".repeat(32)).is_ok());
-        for bad in [
-            String::new(),
-            "0A".repeat(32),
-            "0a".repeat(31),
-            "0a".repeat(33),
-            "g".repeat(64),
-        ] {
-            assert!(check_digest(&bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn idempotency_keys_are_short_and_plain() {
-        for ok in ["k", "ui:2026-11-02T10:00:00.123_ab-1", &"a".repeat(128)] {
-            assert!(check_idempotency_key(ok).is_ok(), "{ok}");
-        }
-        for bad in ["", "a b", "a/b", "é", &"a".repeat(129)] {
-            assert!(check_idempotency_key(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn action_inputs_are_small_objects() {
-        use serde_json::json;
-        assert!(
-            check_action_input(&json!({ "to": ["a@b.c"], "subject": "s", "body": "b" })).is_ok()
-        );
-        for bad in [json!(null), json!([]), json!("x"), json!(1)] {
-            assert!(check_action_input(&bad).is_err(), "{bad}");
-        }
-        let big = json!({ "body": "x".repeat(MAX_ACTION_INPUT_BYTES) });
-        assert!(check_action_input(&big).is_err());
-    }
-
-    #[test]
-    fn action_edits_are_small_objects_of_editable_fields() {
-        use serde_json::json;
-        for ok in [
-            json!({}),
-            json!({ "subject": "s", "cc": ["a@b.c"] }),
-            json!({ "text": "hi" }),
-            json!({ "title": "t", "markdown": "# m" }),
-            json!({ "start": "2026-11-02T10:00:00Z", "attendees": [], "timezone": "Europe/London" }),
-        ] {
-            assert!(check_action_edit(&ok).is_ok(), "{ok}");
-        }
-        for bad in [
-            json!(null),
-            json!([]),
-            json!({ "event_id": "e1" }),
-            json!({ "channel": "C1" }),
-            json!({ "parent_id": "p" }),
-            json!({ "thread_id": "t", "body": "b" }),
-            json!({ "body": "x".repeat(MAX_ACTION_INPUT_BYTES) }),
-        ] {
-            assert!(check_action_edit(&bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn snooze_times_are_rfc3339() {
-        for ok in [
-            "2026-11-02T10:10:00Z",
-            "2026-11-02T10:10:00.123+01:00",
-            "2026-11-02t10:10:00z",
-        ] {
-            assert!(check_snooze_until(ok).is_ok(), "{ok}");
-        }
-        for bad in [
-            "",
-            "tomorrow",
-            "2026-11-02",
-            "2026-11-02 10:10",
-            "2026-13-02T10:10:00Z",
-            &format!("2026-11-02T10:10:00.{}Z", "1".repeat(60)),
-        ] {
-            assert!(check_snooze_until(bad).is_err(), "{bad}");
-        }
     }
 
     #[test]

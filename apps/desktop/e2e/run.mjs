@@ -19,6 +19,7 @@ import { backupScenario } from "./backup.mjs";
 import { messagingScenario } from "./messaging.mjs";
 import { searchScenario } from "./search.mjs";
 import { sourcesSetupScenario } from "./sources-setup.mjs";
+import { cloudScenario } from "./cloud.mjs";
 import {
   check, checkWire, DESKTOP, DIST, expect, expectNoErrorState, INDEX_TIMEOUT_MS, log, newContext, OUT, results, secs, settle, shot, sinceStart, sleep, STEP_TIMEOUT_MS, stopDaemon, t, until,
 } from "./harness.mjs";
@@ -41,6 +42,8 @@ const SCENARIOS = {
   messaging: { run: messagingScenario },
   search: { indexed: true, run: searchScenario },
   "sources-setup": { run: sourcesSetupScenario },
+  // Needs a running self-hosted stack with fake providers: only when named (selfhost/e2e.sh does).
+  cloud: { optIn: true, run: cloudScenario },
 };
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
@@ -325,7 +328,7 @@ async function main() {
   fs.mkdirSync(OUT, { recursive: true });
 
   const known = Object.keys(SCENARIOS);
-  const wanted = (process.env.E2E_SCENARIOS || known.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+  const wanted = (process.env.E2E_SCENARIOS || known.filter((k) => !SCENARIOS[k].optIn).join(",")).split(",").map((s) => s.trim()).filter(Boolean);
   const unknown = wanted.filter((s) => !known.includes(s));
   if (unknown.length) throw new Error(`unknown E2E_SCENARIOS ${JSON.stringify(unknown)}; known: ${known.join(", ")}`);
 

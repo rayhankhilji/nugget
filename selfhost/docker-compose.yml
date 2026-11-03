@@ -91,7 +91,7 @@ services:
     restart: unless-stopped
     depends_on:
       migrate: { condition: service_completed_successfully }
-    env_file: .env
+    env_file: ${HEED_ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgres://nugget_service:${SERVICE_DB_PASSWORD}@db:5432/postgres?sslmode=disable
       # The server checks tokens and deletes accounts through the gateway, like a client would.
@@ -119,7 +119,7 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
     ports:
-      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:${MAILPIT_PORT:-8025}:8025"
 
 volumes:
   db-data:
